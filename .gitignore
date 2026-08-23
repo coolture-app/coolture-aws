@@ -1,0 +1,8 @@
+.env
+aws/lambdas/**/target/
+aws/lambdas/**/node_modules/
+aws/lambdas/**/*.zip
+aws/lambdas/**/*.jar
+.DS_Store
+.kiro/
+.aws-sam

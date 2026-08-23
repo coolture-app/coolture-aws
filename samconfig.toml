@@ -1,0 +1,110 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+template_file = "aws/backend.yaml"
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+template_file = "aws/backend.yaml"
+s3_prefix = "coolture-backend"
+region = "eu-central-1"
+
+[backend-dev.global.parameters]
+stack_name = "coolture-backend-dev"
+
+[backend-dev.build.parameters]
+template_file = "aws/backend.yaml"
+
+[backend-dev.deploy.parameters]
+stack_name = "coolture-backend-dev"
+template_file = "aws/backend.yaml"
+parameter_overrides = ["Environment=dev"]
+
+[backend-staging.global.parameters]
+stack_name = "coolture-backend-staging"
+
+[backend-staging.build.parameters]
+template_file = "aws/backend.yaml"
+
+[backend-staging.deploy.parameters]
+stack_name = "coolture-backend-staging"
+template_file = "aws/backend.yaml"
+parameter_overrides = ["Environment=staging"]
+
+[backend-prod.global.parameters]
+stack_name = "coolture-backend-prod"
+
+[backend-prod.build.parameters]
+template_file = "aws/backend.yaml"
+
+[backend-prod.deploy.parameters]
+stack_name = "coolture-backend-prod"
+template_file = "aws/backend.yaml"
+parameter_overrides = ["Environment=prod"]
+
+[frontend-dev.global.parameters]
+stack_name = "coolture-frontend-dev"
+
+[frontend-dev.build.parameters]
+template_file = "aws/frontend.yaml"
+
+[frontend-dev.deploy.parameters]
+stack_name = "coolture-frontend-dev"
+template_file = "aws/frontend.yaml"
+s3_prefix = "coolture-frontend"
+parameter_overrides = ["Environment=dev", "BackendStackName=coolture-backend-dev"]
+
+[frontend-staging.global.parameters]
+stack_name = "coolture-frontend-staging"
+
+[frontend-staging.build.parameters]
+template_file = "aws/frontend.yaml"
+
+[frontend-staging.deploy.parameters]
+stack_name = "coolture-frontend-staging"
+template_file = "aws/frontend.yaml"
+s3_prefix = "coolture-frontend"
+parameter_overrides = ["Environment=staging", "BackendStackName=coolture-backend-staging"]
+
+[frontend-prod.global.parameters]
+stack_name = "coolture-frontend-prod"
+
+[frontend-prod.build.parameters]
+template_file = "aws/frontend.yaml"
+
+[frontend-prod.deploy.parameters]
+stack_name = "coolture-frontend-prod"
+template_file = "aws/frontend.yaml"
+s3_prefix = "coolture-frontend"
+parameter_overrides = ["Environment=prod", "BackendStackName=coolture-backend-prod"]
+
+[auth-dev.global.parameters]
+stack_name = "coolture-auth-dev"
+
+[auth-dev.deploy.parameters]
+stack_name = "coolture-auth-dev"
+template_file = "aws/auth.yaml"
+s3_prefix = "coolture-auth"
+parameter_overrides = ["Environment=dev"]
+
+[auth-staging.global.parameters]
+stack_name = "coolture-auth-staging"
+
+[auth-staging.deploy.parameters]
+stack_name = "coolture-auth-staging"
+template_file = "aws/auth.yaml"
+s3_prefix = "coolture-auth"
+parameter_overrides = ["Environment=staging"]
+
+[auth-prod.global.parameters]
+stack_name = "coolture-auth-prod"
+
+[auth-prod.deploy.parameters]
+stack_name = "coolture-auth-prod"
+template_file = "aws/auth.yaml"
+s3_prefix = "coolture-auth"
+parameter_overrides = ["Environment=prod"]

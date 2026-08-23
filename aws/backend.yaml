@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Coolture Backend
+
+Parameters:
+  Environment:
+    Type: String
+    Default: local
+    AllowedValues: [local, dev, staging, prod]
+  VpcId:
+    Type: String
+    Default: ''
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+  DbName:
+    Type: String
+    Default: coolture
+  DbUsername:
+    Type: String
+    Default: coolture_admin
+  DbPassword:
+    Type: String
+    Default: admin
+    NoEcho: true
+  DbHost:
+    Type: String
+    Default: host.docker.internal
+  DbPort:
+    Type: String
+    Default: '5430'
+
+Conditions:
+  IsAWS: !Not [!Equals [!Ref Environment, 'local']]
+
+Globals:
+  Function:
+    Runtime: java21
+    MemorySize: 512
+    Timeout: 30
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        DB_HOST: !Ref DbHost # TODO: change to aurora cluster endpoint when not local
+        DB_PORT: !Ref DbPort # TODO: change to aurora port when not local
+        DB_NAME: !Ref DbName
+        DB_USERNAME: !Ref DbUsername
+        DB_PASSWORD: !Ref DbPassword
+    Tags:
+      Project: coolture
+      Environment: !Ref Environment
+  Api:
+    Cors:
+      AllowOrigin: "'*'"
+      AllowMethods: "'*'"
+      AllowHeaders: "'*'"
+
+Resources:
+  DbSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: IsAWS
+    Properties:
+      Name: !Sub 'coolture-${Environment}-db-credentials'
+      SecretString: !Sub |
+        {
+          "username": "${DbUsername}",
+          "password": "${DbPassword}",
+          "engine": "postgres",
+          "host": "${AuroraCluster.Endpoint.Address}",
+          "port": ${AuroraCluster.Endpoint.Port},
+          "dbname": "${DbName}"
+        }
+
+  AuroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: IsAWS
+    Properties:
+      GroupName: !Sub 'coolture-${Environment}-aurora-sg'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  AuroraSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Condition: IsAWS
+    Properties:
+      DBSubnetGroupName: !Sub 'coolture-${Environment}-subnet-group'
+      SubnetIds: !Ref PrivateSubnetIds
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Condition: IsAWS
+    Properties:
+      Engine: aurora-postgresql
+      EngineVersion: '15.4'
+      DatabaseName: !Ref DbName
+      MasterUsername: !Ref DbUsername
+      MasterUserPassword: !Ref DbPassword
+      DBClusterIdentifier: !Sub 'coolture-${Environment}-cluster'
+      DBSubnetGroupName: !If [IsAWS, !Ref AuroraSubnetGroup, !Ref AWS::NoValue]
+      VpcSecurityGroupIds: !If [IsAWS, [!Ref AuroraSecurityGroup], !Ref AWS::NoValue]
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 1.0
+      BackupRetentionPeriod: 7
+      StorageEncrypted: true
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Condition: IsAWS
+    Properties:
+      DBInstanceIdentifier: !Sub 'coolture-${Environment}-instance-1'
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      PubliclyAccessible: false
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: IsAWS
+    Properties:
+      GroupName: !Sub 'coolture-${Environment}-lambda-sg'
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+
+# Lambda Functions
+  UsersListFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-users-list'
+      CodeUri: lambdas/users-list/
+      Handler: com.coolture.UsersListHandler::handleRequest
+      MemorySize: 1024
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        - !Ref AWS::NoValue
+      Events:
+        GetUsers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users
+            Method: GET
+
+  UserCreateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-user-create'
+      CodeUri: lambdas/user-create/
+      Handler: com.coolture.UserCreateHandler::handleRequest
+      MemorySize: 1024
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        - !Ref AWS::NoValue
+      Events:
+        CreateUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users
+            Method: POST
+
+Outputs:
+  ApiEndpoint:
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+  DbEndpoint:
+    Value: !If [IsAWS, !GetAtt AuroraCluster.Endpoint.Address, 'localhost']
+    Export:
+      Name: !Sub '${AWS::StackName}-DbEndpoint'
