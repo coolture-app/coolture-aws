@@ -1,4 +1,4 @@
-package com.coolture.dto;
+package com.coolture.common.dto.enums;
 
 public enum PostType {
     OFFLINE,
