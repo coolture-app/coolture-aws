@@ -1,5 +1,7 @@
 # Coolture AWS Infrastructure
 
+NOTE: The docker image of the database was changed to match the image used in coolture-core (with postgis installed). The migration V1 file was changed in order to verify, if postgis is installed.
+
 ## Project Structure
 
 ```
@@ -8,7 +10,7 @@ aws/
 ├── frontend.yaml           # SSR Lambda, S3 static hosting, CloudFront CDN
 ├── auth.yaml               # Cognito User Pool and JWT configuration
 ├── lambdas/
-│   ├── common/             # Shared Maven module (DB pool, DTOs, security, pagination, validation)
+│   ├── common/             # Shared Maven module (DB pool, DTOs, security, pagination, validation etc.)
 │   ├── post-write/         # Handles all post & event-location write operations (POST, PATCH, DELETE)
 │   ├── post-read/          # Handles all post & event-location read operations (GET)
 │   └── ssr/                # Angular SSR Lambda
