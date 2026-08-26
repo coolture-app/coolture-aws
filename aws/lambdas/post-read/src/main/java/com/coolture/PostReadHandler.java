@@ -27,7 +27,15 @@ import java.util.UUID;
 
 public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
 
-    private static final PostReadService service = new PostReadService();
+    private final PostReadService service;
+
+    public PostReadHandler() {
+        this(new PostReadService());
+    }
+
+    PostReadHandler(PostReadService service) {
+        this.service = service;
+    }
 
     @Override
     public APIGatewayV2HTTPResponse handleRequest(APIGatewayV2HTTPEvent event, Context context) {
