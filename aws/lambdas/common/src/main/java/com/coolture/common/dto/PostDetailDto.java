@@ -36,13 +36,4 @@ public record PostDetailDto(
     List<PostMediaDto> media,
     ReactionType myReaction,
     ParticipationType myParticipation
-) {
-    public PostDetailDto withEnrichment(ReactionType myReaction, ParticipationType myParticipation) {
-        return new PostDetailDto(
-            id, author, location, title, description, eventUrl, startsAt, endsAt, tags,
-            positiveReactionCount, negativeReactionCount, participantCount, commentsCount,
-            type, status, visibility, createdAt, lastModifiedAt, deletedAt, coverMedia, media,
-            myReaction, myParticipation
-        );
-    }
-}
+) {}

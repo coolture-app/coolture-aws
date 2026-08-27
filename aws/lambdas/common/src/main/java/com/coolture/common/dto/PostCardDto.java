@@ -35,13 +35,4 @@ public record PostCardDto(
     MediaResourceDto coverMedia,
     ReactionType myReaction,
     ParticipationType myParticipation
-) {
-    public PostCardDto withEnrichment(ReactionType myReaction, ParticipationType myParticipation) {
-        return new PostCardDto(
-            id, author, location, title, description, eventUrl, startsAt, endsAt, tags,
-            positiveReactionCount, negativeReactionCount, participantCount, commentsCount,
-            type, status, visibility, createdAt, lastModifiedAt, deletedAt, coverMedia,
-            myReaction, myParticipation
-        );
-    }
-}
+) {}

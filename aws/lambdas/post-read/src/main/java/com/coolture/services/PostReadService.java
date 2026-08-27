@@ -6,8 +6,6 @@ import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.dto.PostMarkDto;
-import com.coolture.common.dto.enums.ParticipationType;
-import com.coolture.common.dto.enums.ReactionType;
 import com.coolture.common.pagination.CursorCodec;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.CursorPayload;
@@ -16,7 +14,6 @@ import com.coolture.repository.PostReadRepository;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -26,7 +23,15 @@ public class PostReadService {
     private static final Set<String> VALID_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART", "interested", "takes_part");
     private static final Set<String> VALID_REACTION_TYPES = Set.of("LIKE", "DISLIKE", "like", "dislike");
 
-    private final PostReadRepository repository = new PostReadRepository();
+    private final PostReadRepository repository;
+
+    public PostReadService() {
+        this(new PostReadRepository());
+    }
+
+    PostReadService(PostReadRepository repository) {
+        this.repository = repository;
+    }
 
     public CursorPage<PostCardDto> getRecommendations(UUID callerId, String cursor, int limit) throws SQLException {
         if (callerId == null) {
@@ -39,9 +44,8 @@ public class PostReadService {
 
         int effectiveLimit = clampLimit(limit);
         List<PostCardDto> rows = repository.findRecommendations(callerId, cursorCreatedAt, cursorId, effectiveLimit + 1);
-        List<PostCardDto> enriched = enrichCards(rows, callerId);
 
-        return CursorPage.of(enriched, effectiveLimit, PostCardDto::id, PostCardDto::createdAt);
+        return CursorPage.of(rows, effectiveLimit, PostCardDto::id, PostCardDto::createdAt);
     }
 
     public CursorPage<PostCardDto> getFeed(UUID callerId, PostFeedFilters filters, String cursor, int limit) throws SQLException {
@@ -54,22 +58,13 @@ public class PostReadService {
 
         int effectiveLimit = clampLimit(limit);
         List<PostCardDto> rows = repository.findFeed(filters, callerId, cursorCreatedAt, cursorId, effectiveLimit + 1);
-        List<PostCardDto> enriched = enrichCards(rows, callerId);
 
-        return CursorPage.of(enriched, effectiveLimit, PostCardDto::id, PostCardDto::createdAt);
+        return CursorPage.of(rows, effectiveLimit, PostCardDto::id, PostCardDto::createdAt);
     }
 
     public PostDetailDto getById(UUID postId, UUID callerId) throws SQLException {
-        PostDetailDto post = repository.findById(postId)
+        return repository.findById(postId, callerId)
             .orElseThrow(() -> new IllegalArgumentException("Post not found: " + postId));
-
-        if (callerId != null) {
-            Map<UUID, ReactionType> reactions = repository.findReactionsForPosts(callerId, List.of(postId));
-            Map<UUID, ParticipationType> participations = repository.findParticipationsForPosts(callerId, List.of(postId));
-            post = post.withEnrichment(reactions.get(postId), participations.get(postId));
-        }
-
-        return post;
     }
 
     public List<PostMarkDto> getMapMarks(UUID callerId, PostFeedFilters filters, MapBoundsDto bounds) throws SQLException {
@@ -87,18 +82,6 @@ public class PostReadService {
         List<EventLocationDto> rows = repository.findEventLocations(cursorCreatedAt, cursorId, effectiveLimit + 1);
 
         return CursorPage.of(rows, effectiveLimit, EventLocationDto::id, EventLocationDto::createdAt);
-    }
-
-    private List<PostCardDto> enrichCards(List<PostCardDto> rows, UUID callerId) throws SQLException {
-        if (callerId == null || rows.isEmpty()) return rows;
-
-        List<UUID> postIds = rows.stream().map(PostCardDto::id).toList();
-        Map<UUID, ReactionType> reactions = repository.findReactionsForPosts(callerId, postIds);
-        Map<UUID, ParticipationType> participations = repository.findParticipationsForPosts(callerId, postIds);
-
-        return rows.stream()
-            .map(card -> card.withEnrichment(reactions.get(card.id()), participations.get(card.id())))
-            .toList();
     }
 
     private void validateParticipationFilter(List<String> participationTypes, UUID callerId) {

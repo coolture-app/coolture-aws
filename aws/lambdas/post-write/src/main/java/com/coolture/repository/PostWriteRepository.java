@@ -1,14 +1,13 @@
 package com.coolture.repository;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.MediaQueries;
+import com.coolture.common.db.ParamBinder;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostMediaDto;
-import com.coolture.common.dto.UserSummaryDto;
-import com.coolture.common.dto.enums.MediaPurpose;
-import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.PostVisibility;
@@ -21,13 +20,12 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.sql.Types;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+
+import static com.coolture.common.db.ResultSetMappers.*;
 
 public class PostWriteRepository {
 
@@ -69,36 +67,6 @@ public class PostWriteRepository {
             stmt.setObject(1, postId);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    EventLocationDto locDto = null;
-                    UUID locId = (UUID) rs.getObject("loc_id");
-                    if (locId != null) {
-                        locDto = new EventLocationDto(
-                            locId,
-                            rs.getString("country_code"),
-                            rs.getString("venue_name"),
-                            rs.getString("building_num"),
-                            rs.getString("street"),
-                            rs.getString("postal_code"),
-                            rs.getString("city"),
-                            new GeoPointDto(
-                                rs.getDouble("latitude"),
-                                rs.getDouble("longitude")
-                            ),
-                            null
-                        );
-                    }
-
-                    Array tagsArray = rs.getArray("tags");
-                    List<String> tagsList = tagsArray != null
-                        ? List.of((String[]) tagsArray.getArray())
-                        : Collections.emptyList();
-
-                    Timestamp startsAtTs = rs.getTimestamp("starts_at");
-                    Timestamp endsAtTs = rs.getTimestamp("ends_at");
-                    Timestamp createdAtTs = rs.getTimestamp("created_at");
-                    Timestamp modifiedAtTs = rs.getTimestamp("last_modified_at");
-                    Timestamp deletedAtTs = rs.getTimestamp("deleted_at");
-
                     return Optional.of(new ExistingPost(
                         (UUID) rs.getObject("id"),
                         (UUID) rs.getObject("author_id"),
@@ -106,16 +74,16 @@ public class PostWriteRepository {
                         rs.getString("title"),
                         rs.getString("description"),
                         rs.getString("event_url"),
-                        startsAtTs != null ? startsAtTs.toInstant() : null,
-                        endsAtTs != null ? endsAtTs.toInstant() : null,
-                        tagsList,
-                        PostType.valueOf(rs.getString("type")),
-                        PostStatus.valueOf(rs.getString("status")),
-                        PostVisibility.valueOf(rs.getString("visibility")),
-                        createdAtTs != null ? createdAtTs.toInstant() : null,
-                        modifiedAtTs != null ? modifiedAtTs.toInstant() : null,
-                        deletedAtTs != null ? deletedAtTs.toInstant() : null,
-                        locDto
+                        mapInstant(rs, "starts_at"),
+                        mapInstant(rs, "ends_at"),
+                        mapTags(rs),
+                        mapEnum(rs, "type", PostType.class),
+                        mapEnum(rs, "status", PostStatus.class),
+                        mapEnum(rs, "visibility", PostVisibility.class),
+                        mapInstant(rs, "created_at"),
+                        mapInstant(rs, "last_modified_at"),
+                        mapInstant(rs, "deleted_at"),
+                        mapEventLocation(rs)
                     ));
                 }
             }
@@ -133,7 +101,7 @@ public class PostWriteRepository {
             stmt.setArray(1, array);
 
             try (ResultSet rs = stmt.executeQuery()) {
-                List<UUID> foundIds = new ArrayList<>();
+                List<UUID> foundIds = new java.util.ArrayList<>();
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject("id");
                     UUID ownerId = (UUID) rs.getObject("owner_id");
@@ -167,30 +135,7 @@ public class PostWriteRepository {
             try {
                 // 1. Insert EventLocation if OFFLINE
                 if (req.type() == PostType.OFFLINE && req.location() != null) {
-                    locationId = UUID.randomUUID();
-                    String locSql = """
-                        INSERT INTO event_locations (
-                            id, country_code, venue_name, building_num, street, postal_code, city,
-                            coordinates, created_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?,
-                            ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
-                            ?
-                        )
-                    """;
-                    try (PreparedStatement stmt = conn.prepareStatement(locSql)) {
-                        stmt.setObject(1, locationId);
-                        stmt.setString(2, req.location().countryCode());
-                        stmt.setString(3, req.location().venueName());
-                        stmt.setString(4, req.location().buildingNum());
-                        stmt.setString(5, req.location().street());
-                        stmt.setString(6, req.location().postalCode());
-                        stmt.setString(7, req.location().city());
-                        stmt.setDouble(8, req.location().coordinates().longitude());
-                        stmt.setDouble(9, req.location().coordinates().latitude());
-                        stmt.setTimestamp(10, Timestamp.from(now));
-                        stmt.executeUpdate();
-                    }
+                    locationId = insertLocation(conn, req.location(), now);
                 }
 
                 // 2. Insert Post
@@ -208,49 +153,31 @@ public class PostWriteRepository {
                     )
                 """;
                 try (PreparedStatement stmt = conn.prepareStatement(postSql)) {
-                    stmt.setObject(1, postId);
-                    stmt.setObject(2, authorId);
-                    stmt.setObject(3, locationId);
-                    stmt.setString(4, req.title());
-                    stmt.setString(5, req.description());
-                    stmt.setString(6, req.eventUrl());
+                    ParamBinder b = new ParamBinder(stmt, conn);
+                    b.bindUUID(postId)
+                     .bindUUID(authorId)
+                     .bindObject(locationId)
+                     .bindString(req.title())
+                     .bindString(req.description())
+                     .bindString(req.eventUrl());
 
                     if (req.tags() != null && !req.tags().isEmpty()) {
-                        Array tagsArray = conn.createArrayOf("varchar", req.tags().toArray());
-                        stmt.setArray(7, tagsArray);
+                        b.bindVarcharArray(req.tags().toArray(new String[0]));
                     } else {
-                        stmt.setNull(7, Types.ARRAY);
+                        b.bindVarcharArray(null);
                     }
 
-                    stmt.setString(8, req.type().name());
-                    stmt.setString(9, PostStatus.ACTIVE.name());
-                    stmt.setString(10, (req.visibility() != null ? req.visibility() : PostVisibility.PUBLIC).name());
-                    stmt.setTimestamp(11, Timestamp.from(req.startsAt()));
-                    stmt.setTimestamp(12, req.endsAt() != null ? Timestamp.from(req.endsAt()) : null);
-                    stmt.setTimestamp(13, Timestamp.from(now));
+                    b.bindString(req.type().name())
+                     .bindString(PostStatus.ACTIVE.name())
+                     .bindString((req.visibility() != null ? req.visibility() : PostVisibility.PUBLIC).name())
+                     .bindTimestamp(req.startsAt())
+                     .bindTimestamp(req.endsAt())
+                     .bindTimestamp(now);
                     stmt.executeUpdate();
                 }
 
                 // 3. Attach Media
-                if (req.mediaIds() != null && !req.mediaIds().isEmpty()) {
-                    String pmSql = """
-                        INSERT INTO post_media (id, post_id, media_id, position, is_cover)
-                        VALUES (?, ?, ?, ?, ?)
-                    """;
-                    try (PreparedStatement stmt = conn.prepareStatement(pmSql)) {
-                        for (int i = 0; i < req.mediaIds().size(); i++) {
-                            UUID mid = req.mediaIds().get(i);
-                            boolean isCover = mid.equals(req.coverMediaId()) || (req.coverMediaId() == null && i == 0);
-                            stmt.setObject(1, UUID.randomUUID());
-                            stmt.setObject(2, postId);
-                            stmt.setObject(3, mid);
-                            stmt.setInt(4, i);
-                            stmt.setBoolean(5, isCover);
-                            stmt.addBatch();
-                        }
-                        stmt.executeBatch();
-                    }
-                }
+                attachMedia(conn, postId, req.mediaIds(), req.coverMediaId());
 
                 conn.commit();
             } catch (Exception e) {
@@ -265,7 +192,6 @@ public class PostWriteRepository {
     public PostDetailDto updatePost(UUID postId, UUID callerId, ExistingPost existing, UpdatePostRequest req) throws SQLException {
         Instant now = Instant.now();
         PostType newType = req.type() != null ? req.type() : existing.type();
-        boolean locationTouched = req.location() != null;
         UUID effectiveLocationId = existing.eventLocationId();
 
         try (Connection conn = DatabaseConfig.getConnection()) {
@@ -274,52 +200,11 @@ public class PostWriteRepository {
                 // 1. Handle Location updates
                 if (newType == PostType.ONLINE) {
                     effectiveLocationId = null;
-                } else if (locationTouched) {
+                } else if (req.location() != null) {
                     if (existing.eventLocationId() == null) {
-                        effectiveLocationId = UUID.randomUUID();
-                        String locSql = """
-                            INSERT INTO event_locations (
-                                id, country_code, venue_name, building_num, street, postal_code, city,
-                                coordinates, created_at
-                            ) VALUES (
-                                ?, ?, ?, ?, ?, ?, ?,
-                                ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
-                                ?
-                            )
-                        """;
-                        try (PreparedStatement stmt = conn.prepareStatement(locSql)) {
-                            stmt.setObject(1, effectiveLocationId);
-                            stmt.setString(2, req.location().countryCode());
-                            stmt.setString(3, req.location().venueName());
-                            stmt.setString(4, req.location().buildingNum());
-                            stmt.setString(5, req.location().street());
-                            stmt.setString(6, req.location().postalCode());
-                            stmt.setString(7, req.location().city());
-                            stmt.setDouble(8, req.location().coordinates().longitude());
-                            stmt.setDouble(9, req.location().coordinates().latitude());
-                            stmt.setTimestamp(10, Timestamp.from(now));
-                            stmt.executeUpdate();
-                        }
+                        effectiveLocationId = insertLocation(conn, req.location(), now);
                     } else {
-                        String locUpdateSql = """
-                            UPDATE event_locations SET
-                                country_code = ?, venue_name = ?, building_num = ?, street = ?,
-                                postal_code = ?, city = ?,
-                                coordinates = ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography
-                            WHERE id = ?
-                        """;
-                        try (PreparedStatement stmt = conn.prepareStatement(locUpdateSql)) {
-                            stmt.setString(1, req.location().countryCode());
-                            stmt.setString(2, req.location().venueName());
-                            stmt.setString(3, req.location().buildingNum());
-                            stmt.setString(4, req.location().street());
-                            stmt.setString(5, req.location().postalCode());
-                            stmt.setString(6, req.location().city());
-                            stmt.setDouble(7, req.location().coordinates().longitude());
-                            stmt.setDouble(8, req.location().coordinates().latitude());
-                            stmt.setObject(9, existing.eventLocationId());
-                            stmt.executeUpdate();
-                        }
+                        updateLocationInline(conn, existing.eventLocationId(), req.location());
                     }
                 }
 
@@ -329,26 +214,7 @@ public class PostWriteRepository {
                         delStmt.setObject(1, postId);
                         delStmt.executeUpdate();
                     }
-
-                    if (!req.mediaIds().isEmpty()) {
-                        String pmSql = """
-                            INSERT INTO post_media (id, post_id, media_id, position, is_cover)
-                            VALUES (?, ?, ?, ?, ?)
-                        """;
-                        try (PreparedStatement stmt = conn.prepareStatement(pmSql)) {
-                            for (int i = 0; i < req.mediaIds().size(); i++) {
-                                UUID mid = req.mediaIds().get(i);
-                                boolean isCover = mid.equals(req.coverMediaId()) || (req.coverMediaId() == null && i == 0);
-                                stmt.setObject(1, UUID.randomUUID());
-                                stmt.setObject(2, postId);
-                                stmt.setObject(3, mid);
-                                stmt.setInt(4, i);
-                                stmt.setBoolean(5, isCover);
-                                stmt.addBatch();
-                            }
-                            stmt.executeBatch();
-                        }
-                    }
+                    attachMedia(conn, postId, req.mediaIds(), req.coverMediaId());
                 } else if (req.coverMediaId() != null) {
                     String updateCoverSql = "UPDATE post_media SET is_cover = (media_id = ?) WHERE post_id = ?";
                     try (PreparedStatement stmt = conn.prepareStatement(updateCoverSql)) {
@@ -378,28 +244,25 @@ public class PostWriteRepository {
                     WHERE id = ?
                 """;
                 try (PreparedStatement stmt = conn.prepareStatement(updatePostSql)) {
-                    stmt.setString(1, req.title() != null ? req.title() : existing.title());
-                    stmt.setString(2, req.description() != null ? req.description() : existing.description());
-                    stmt.setString(3, req.eventUrl() != null ? req.eventUrl() : existing.eventUrl());
+                    ParamBinder b = new ParamBinder(stmt, conn);
+                    b.bindString(req.title() != null ? req.title() : existing.title())
+                     .bindString(req.description() != null ? req.description() : existing.description())
+                     .bindString(req.eventUrl() != null ? req.eventUrl() : existing.eventUrl());
 
                     List<String> effectiveTags = req.tags() != null ? req.tags() : existing.tags();
                     if (effectiveTags != null && !effectiveTags.isEmpty()) {
-                        Array tagsArray = conn.createArrayOf("varchar", effectiveTags.toArray());
-                        stmt.setArray(4, tagsArray);
+                        b.bindVarcharArray(effectiveTags.toArray(new String[0]));
                     } else {
-                        stmt.setNull(4, Types.ARRAY);
+                        b.bindVarcharArray(null);
                     }
 
-                    stmt.setString(5, newType.name());
-                    stmt.setString(6, (req.visibility() != null ? req.visibility() : existing.visibility()).name());
-                    stmt.setObject(7, effectiveLocationId);
-
-                    Instant effectiveStartsAt = req.startsAt() != null ? req.startsAt() : existing.startsAt();
-                    Instant effectiveEndsAt = req.endsAt() != null ? req.endsAt() : existing.endsAt();
-                    stmt.setTimestamp(8, Timestamp.from(effectiveStartsAt));
-                    stmt.setTimestamp(9, effectiveEndsAt != null ? Timestamp.from(effectiveEndsAt) : null);
-                    stmt.setTimestamp(10, Timestamp.from(now));
-                    stmt.setObject(11, postId);
+                    b.bindString(newType.name())
+                     .bindString((req.visibility() != null ? req.visibility() : existing.visibility()).name())
+                     .bindObject(effectiveLocationId)
+                     .bindTimestamp(req.startsAt() != null ? req.startsAt() : existing.startsAt())
+                     .bindTimestamp(req.endsAt() != null ? req.endsAt() : existing.endsAt())
+                     .bindTimestamp(now)
+                     .bindUUID(postId);
                     stmt.executeUpdate();
                 }
 
@@ -444,12 +307,17 @@ public class PostWriteRepository {
                    p.positive_reaction_count, p.negative_reaction_count, p.participant_count, p.comments_count,
                    p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
                    u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
+                   avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
+                   avatar_m.size_bytes AS avatar_size_bytes, avatar_m.status AS avatar_status,
+                   avatar_m.created_at AS avatar_created_at, avatar_m.deleted_at AS avatar_deleted_at,
                    el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
                    el.street, el.postal_code, el.city,
                    ST_Y(el.coordinates::geometry) AS latitude,
                    ST_X(el.coordinates::geometry) AS longitude
             FROM posts p
             JOIN users u ON u.id = p.author_id
+            LEFT JOIN profile_images pi ON pi.user_id = u.id AND pi.is_active = true
+            LEFT JOIN media avatar_m ON avatar_m.id = pi.thumbnail_media_id
             LEFT JOIN event_locations el ON el.id = p.event_location_id
             WHERE p.id = ?
         """;
@@ -462,74 +330,33 @@ public class PostWriteRepository {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
 
-                UserSummaryDto author = new UserSummaryDto(
-                    (UUID) rs.getObject("author_id"),
-                    rs.getString("username"),
-                    rs.getString("first_name"),
-                    rs.getString("last_name"),
-                    null,
-                    rs.getTimestamp("user_created_at") != null ? rs.getTimestamp("user_created_at").toInstant() : null,
-                    0,
-                    0
-                );
-
-                EventLocationDto location = null;
-                UUID locId = (UUID) rs.getObject("loc_id");
-                if (locId != null) {
-                    location = new EventLocationDto(
-                        locId,
-                        rs.getString("country_code"),
-                        rs.getString("venue_name"),
-                        rs.getString("building_num"),
-                        rs.getString("street"),
-                        rs.getString("postal_code"),
-                        rs.getString("city"),
-                        new GeoPointDto(
-                            rs.getDouble("latitude"),
-                            rs.getDouble("longitude")
-                        ),
-                        null
-                    );
-                }
-
-                Array tagsArray = rs.getArray("tags");
-                List<String> tags = tagsArray != null
-                    ? List.of((String[]) tagsArray.getArray())
-                    : Collections.emptyList();
-
-                List<PostMediaDto> mediaList = getPostMediaList(conn, postId);
+                List<PostMediaDto> mediaList = MediaQueries.getPostMediaList(conn, postId);
                 MediaResourceDto coverMedia = mediaList.stream()
                     .filter(PostMediaDto::isCover)
                     .map(PostMediaDto::media)
                     .findFirst()
                     .orElse(null);
 
-                Timestamp startsAtTs = rs.getTimestamp("starts_at");
-                Timestamp endsAtTs = rs.getTimestamp("ends_at");
-                Timestamp createdAtTs = rs.getTimestamp("created_at");
-                Timestamp modifiedAtTs = rs.getTimestamp("last_modified_at");
-                Timestamp deletedAtTs = rs.getTimestamp("deleted_at");
-
                 return new PostDetailDto(
                     (UUID) rs.getObject("id"),
-                    author,
-                    location,
+                    mapUserSummary(rs),
+                    mapEventLocation(rs),
                     rs.getString("title"),
                     rs.getString("description"),
                     rs.getString("event_url"),
-                    startsAtTs != null ? startsAtTs.toInstant() : null,
-                    endsAtTs != null ? endsAtTs.toInstant() : null,
-                    tags,
+                    mapInstant(rs, "starts_at"),
+                    mapInstant(rs, "ends_at"),
+                    mapTags(rs),
                     rs.getInt("positive_reaction_count"),
                     rs.getInt("negative_reaction_count"),
                     rs.getInt("participant_count"),
                     rs.getInt("comments_count"),
-                    PostType.valueOf(rs.getString("type")),
-                    PostStatus.valueOf(rs.getString("status")),
-                    PostVisibility.valueOf(rs.getString("visibility")),
-                    createdAtTs != null ? createdAtTs.toInstant() : null,
-                    modifiedAtTs != null ? modifiedAtTs.toInstant() : null,
-                    deletedAtTs != null ? deletedAtTs.toInstant() : null,
+                    mapEnum(rs, "type", PostType.class),
+                    mapEnum(rs, "status", PostStatus.class),
+                    mapEnum(rs, "visibility", PostVisibility.class),
+                    mapInstant(rs, "created_at"),
+                    mapInstant(rs, "last_modified_at"),
+                    mapInstant(rs, "deleted_at"),
                     coverMedia,
                     mediaList,
                     null,
@@ -537,40 +364,6 @@ public class PostWriteRepository {
                 );
             }
         }
-    }
-
-    private List<PostMediaDto> getPostMediaList(Connection conn, UUID postId) throws SQLException {
-        String sql = """
-            SELECT pm.position, pm.is_cover,
-                   m.id AS media_id, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at, m.deleted_at
-            FROM post_media pm
-            JOIN media m ON m.id = pm.media_id
-            WHERE pm.post_id = ?
-            ORDER BY pm.position ASC
-        """;
-
-        List<PostMediaDto> list = new ArrayList<>();
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    Timestamp catTs = rs.getTimestamp("created_at");
-                    Timestamp datTs = rs.getTimestamp("deleted_at");
-                    MediaResourceDto mDto = new MediaResourceDto(
-                        (UUID) rs.getObject("media_id"),
-                        rs.getString("purpose") != null ? MediaPurpose.valueOf(rs.getString("purpose")) : null,
-                        rs.getString("mime_type"),
-                        rs.getObject("size_bytes") != null ? rs.getLong("size_bytes") : null,
-                        rs.getString("status") != null ? MediaStatus.valueOf(rs.getString("status")) : null,
-                        null,
-                        catTs != null ? catTs.toInstant() : null,
-                        datTs != null ? datTs.toInstant() : null
-                    );
-                    list.add(new PostMediaDto(mDto, rs.getInt("position"), rs.getBoolean("is_cover")));
-                }
-            }
-        }
-        return list;
     }
 
     public EventLocationDto createLocation(EventLocationDto req) throws SQLException {
@@ -594,30 +387,11 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            stmt.setObject(1, id);
-            stmt.setString(2, req.countryCode());
-            stmt.setString(3, req.venueName());
-            stmt.setString(4, req.buildingNum());
-            stmt.setString(5, req.street());
-            stmt.setString(6, req.postalCode());
-            stmt.setString(7, req.city());
-            stmt.setDouble(8, req.coordinates().longitude());
-            stmt.setDouble(9, req.coordinates().latitude());
-            stmt.setTimestamp(10, Timestamp.from(now));
+            bindLocationParams(new ParamBinder(stmt, conn), id, req, now);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    return new EventLocationDto(
-                        (UUID) rs.getObject("id"),
-                        rs.getString("country_code"),
-                        rs.getString("venue_name"),
-                        rs.getString("building_num"),
-                        rs.getString("street"),
-                        rs.getString("postal_code"),
-                        rs.getString("city"),
-                        new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
-                        rs.getTimestamp("created_at").toInstant()
-                    );
+                    return mapLocationFromReturning(rs);
                 }
             }
         }
@@ -644,39 +418,28 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            stmt.setString(1, req.countryCode());
-            stmt.setString(2, req.venueName());
-            stmt.setString(3, req.buildingNum());
-            stmt.setString(4, req.street());
-            stmt.setString(5, req.postalCode());
-            stmt.setString(6, req.city());
+            ParamBinder b = new ParamBinder(stmt, conn);
+            b.bindString(req.countryCode())
+             .bindString(req.venueName())
+             .bindString(req.buildingNum())
+             .bindString(req.street())
+             .bindString(req.postalCode())
+             .bindString(req.city());
 
             if (req.coordinates() != null) {
-                stmt.setDouble(7, req.coordinates().longitude());
-                stmt.setDouble(8, req.coordinates().latitude());
-                stmt.setDouble(9, req.coordinates().longitude());
-                stmt.setDouble(10, req.coordinates().latitude());
+                b.bindDouble(req.coordinates().longitude())
+                 .bindDouble(req.coordinates().latitude())
+                 .bindDouble(req.coordinates().longitude())
+                 .bindDouble(req.coordinates().latitude());
             } else {
-                stmt.setNull(7, Types.DOUBLE);
-                stmt.setNull(8, Types.DOUBLE);
-                stmt.setNull(9, Types.DOUBLE);
-                stmt.setNull(10, Types.DOUBLE);
+                b.bindDouble(null).bindDouble(null)
+                 .bindDouble(null).bindDouble(null);
             }
-            stmt.setObject(11, locationId);
+            b.bindUUID(locationId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    return new EventLocationDto(
-                        (UUID) rs.getObject("id"),
-                        rs.getString("country_code"),
-                        rs.getString("venue_name"),
-                        rs.getString("building_num"),
-                        rs.getString("street"),
-                        rs.getString("postal_code"),
-                        rs.getString("city"),
-                        new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
-                        rs.getTimestamp("created_at").toInstant()
-                    );
+                    return mapLocationFromReturning(rs);
                 }
             }
         }
@@ -703,5 +466,99 @@ public class PostWriteRepository {
                 }
             }
         }
+    }
+
+    // --- Private helpers ---
+
+    private UUID insertLocation(Connection conn, EventLocationDto loc, Instant now) throws SQLException {
+        UUID locationId = UUID.randomUUID();
+        String sql = """
+            INSERT INTO event_locations (
+                id, country_code, venue_name, building_num, street, postal_code, city,
+                coordinates, created_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?,
+                ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+                ?
+            )
+        """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            bindLocationParams(new ParamBinder(stmt, conn), locationId, loc, now);
+            stmt.executeUpdate();
+        }
+        return locationId;
+    }
+
+    private void updateLocationInline(Connection conn, UUID locationId, EventLocationDto loc) throws SQLException {
+        String sql = """
+            UPDATE event_locations SET
+                country_code = ?, venue_name = ?, building_num = ?, street = ?,
+                postal_code = ?, city = ?,
+                coordinates = ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography
+            WHERE id = ?
+        """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            ParamBinder b = new ParamBinder(stmt, conn);
+            b.bindString(loc.countryCode())
+             .bindString(loc.venueName())
+             .bindString(loc.buildingNum())
+             .bindString(loc.street())
+             .bindString(loc.postalCode())
+             .bindString(loc.city())
+             .bindDouble(loc.coordinates().longitude())
+             .bindDouble(loc.coordinates().latitude())
+             .bindUUID(locationId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private void attachMedia(Connection conn, UUID postId, List<UUID> mediaIds, UUID coverMediaId) throws SQLException {
+        if (mediaIds == null || mediaIds.isEmpty()) return;
+
+        String sql = """
+            INSERT INTO post_media (id, post_id, media_id, position, is_cover)
+            VALUES (?, ?, ?, ?, ?)
+        """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            for (int i = 0; i < mediaIds.size(); i++) {
+                UUID mid = mediaIds.get(i);
+                boolean isCover = mid.equals(coverMediaId) || (coverMediaId == null && i == 0);
+                ParamBinder b = new ParamBinder(stmt, conn);
+                b.bindUUID(UUID.randomUUID())
+                 .bindUUID(postId)
+                 .bindUUID(mid)
+                 .bindInt(i)
+                 .bindBoolean(isCover);
+                stmt.addBatch();
+            }
+            stmt.executeBatch();
+        }
+    }
+
+    private void bindLocationParams(ParamBinder b, UUID id, EventLocationDto loc, Instant now) throws SQLException {
+        b.bindUUID(id)
+         .bindString(loc.countryCode())
+         .bindString(loc.venueName())
+         .bindString(loc.buildingNum())
+         .bindString(loc.street())
+         .bindString(loc.postalCode())
+         .bindString(loc.city())
+         .bindDouble(loc.coordinates().longitude())
+         .bindDouble(loc.coordinates().latitude())
+         .bindTimestamp(now);
+    }
+
+    private EventLocationDto mapLocationFromReturning(ResultSet rs) throws SQLException {
+        return new EventLocationDto(
+            (UUID) rs.getObject("id"),
+            rs.getString("country_code"),
+            rs.getString("venue_name"),
+            rs.getString("building_num"),
+            rs.getString("street"),
+            rs.getString("postal_code"),
+            rs.getString("city"),
+            new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
+            rs.getTimestamp("created_at").toInstant()
+        );
     }
 }

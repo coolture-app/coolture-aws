@@ -13,10 +13,6 @@ public class JsonUtils {
         .registerModule(new JavaTimeModule())
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
-    public static ObjectMapper getMapper() {
-        return OBJECT_MAPPER;
-    }
-
     public static String toJson(Object obj) {
         try {
             return OBJECT_MAPPER.writeValueAsString(obj);
@@ -25,10 +21,30 @@ public class JsonUtils {
         }
     }
 
+    public static byte[] toJsonBytes(Object obj) {
+        try {
+            return OBJECT_MAPPER.writeValueAsBytes(obj);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize object to JSON bytes", e);
+        }
+    }
+
+    public static byte[] writeValueAsBytes(Object obj) {
+        return toJsonBytes(obj);
+    }
+
     public static <T> T fromJson(String json, Class<T> clazz) {
         try {
             return OBJECT_MAPPER.readValue(json, clazz);
         } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Invalid JSON format for " + clazz.getSimpleName(), e);
+        }
+    }
+
+    public static <T> T fromJson(byte[] json, Class<T> clazz) {
+        try {
+            return OBJECT_MAPPER.readValue(json, clazz);
+        } catch (Exception e) {
             throw new IllegalArgumentException("Invalid JSON format for " + clazz.getSimpleName(), e);
         }
     }

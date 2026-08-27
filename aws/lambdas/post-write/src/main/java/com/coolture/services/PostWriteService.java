@@ -16,7 +16,15 @@ import java.util.UUID;
 
 public class PostWriteService {
 
-    private final PostWriteRepository repository = new PostWriteRepository();
+    private final PostWriteRepository repository;
+
+    public PostWriteService() {
+        this(new PostWriteRepository());
+    }
+
+    PostWriteService(PostWriteRepository repository) {
+        this.repository = repository;
+    }
 
     public PostDetailDto createPost(UUID authorId, CreatePostRequest req) throws SQLException {
         validateTypeLocationInvariant(req.type(), req.location());

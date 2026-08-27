@@ -62,14 +62,14 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
 
         } catch (SecurityException e) {
             return ApiResponse.unauthorized(e.getMessage());
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
             if (e.getMessage() != null && e.getMessage().toLowerCase().contains("not found")) {
                 return ApiResponse.notFound(e.getMessage());
             }
             return ApiResponse.badRequest(e.getMessage());
         } catch (Exception e) {
             context.getLogger().log("Error in PostReadHandler: " + e.getMessage());
-            return ApiResponse.error("Internal server error: " + e.getMessage());
+            return ApiResponse.error("Internal server error");
         }
     }
 
