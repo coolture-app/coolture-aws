@@ -175,6 +175,124 @@ Resources:
             Path: /users
             Method: POST
 
+  PostWriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-post-write'
+      CodeUri: lambdas/post-write/
+      Handler: com.coolture.PostWriteHandler::handleRequest
+      MemorySize: 1024
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        - !Ref AWS::NoValue
+      Events:
+        CreatePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts
+            Method: POST
+        UpdatePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{id}
+            Method: PATCH
+        DeletePost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{id}
+            Method: DELETE
+        CreateEventLocation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /event-locations
+            Method: POST
+        UpdateEventLocation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /event-locations/{id}
+            Method: PATCH
+        DeleteEventLocation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /event-locations/{id}
+            Method: DELETE
+        CreateEventLocationAdmin:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /event-locations/admin
+            Method: POST
+        UpdateEventLocationAdmin:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /event-locations/admin/{id}
+            Method: PATCH
+        DeleteEventLocationAdmin:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /event-locations/admin/{id}
+            Method: DELETE
+
+  PostReadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-post-read'
+      CodeUri: lambdas/post-read/
+      Handler: com.coolture.PostReadHandler::handleRequest
+      MemorySize: 1024
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        - !Ref AWS::NoValue
+      Events:
+        GetRecommendations:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/recommendations
+            Method: GET
+        GetMapMarks:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/map
+            Method: GET
+        GetPostById:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{id}
+            Method: GET
+        GetFeed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts
+            Method: GET
+        GetEventLocations:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /event-locations
+            Method: GET
+        GetEventLocationsAdmin:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /event-locations/admin
+            Method: GET
+
 Outputs:
   ApiEndpoint:
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
