@@ -1,5 +1,6 @@
 -- V1: Initial schema
 
+CREATE EXTENSION IF NOT EXISTS "postgis";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================
@@ -9,6 +10,11 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE country_codes (
     code VARCHAR(3) PRIMARY KEY
 );
+
+INSERT INTO country_codes (code) VALUES
+    ('POL'), ('DEU'), ('CZE'), ('SVK'), ('UKR'), ('LTU'), ('BLR'),
+    ('USA'), ('GBR'), ('FRA'), ('ITA'), ('ESP'), ('NLD')
+ON CONFLICT (code) DO NOTHING;
 
 CREATE TABLE users (
     id UUID PRIMARY KEY,

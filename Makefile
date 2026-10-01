@@ -4,12 +4,21 @@ help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 up: ## Start PostgreSQL
-	docker compose up -d
+	docker compose up -d --build
 	@sleep 3
 	@docker compose exec postgres pg_isready -U coolture_admin > /dev/null && echo "PostgreSQL ready"
 
 down: ## Stop PostgreSQL
 	docker compose down
+
+migrate: ## Run database migrations
+	@for f in migrations/*.sql; do \
+		echo "Applying $$f..."; \
+		docker compose exec -T postgres psql -U coolture_admin -d coolture < "$$f"; \
+	done
+
+reset-db: ## Reset PostgreSQL database and volumes
+	docker compose down -v
 
 logs: ## Tail PostgreSQL logs
 	docker compose logs -f postgres
@@ -17,10 +26,14 @@ logs: ## Tail PostgreSQL logs
 clean: ## Clean build artifacts
 	@rm -rf .aws-sam
 	@for dir in aws/lambdas/*/; do \
-		[ -f "$$dir/pom.xml" ] && (cd "$$dir" && mvn clean -q 2>/dev/null) || true; \
+		[ -f "$$dir/pom.xml" ] && (./mvnw clean -f "$$dir/pom.xml" -q 2>/dev/null) || true; \
 	done
 
-build: ## Build backend lambdas
+build-common: ## Build and install shared common module
+	@echo "Building common module..."
+	@./mvnw clean install -f aws/lambdas/common/pom.xml -q
+
+build: build-common ## Build backend lambdas
 	@sam build --template-file aws/backend.yaml --parallel --cached
 
 local: build ## Start local API on localhost:3000

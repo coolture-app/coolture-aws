@@ -6,3 +6,7 @@ aws/lambdas/**/*.jar
 .DS_Store
 .kiro/
 .aws-sam
+
+.idea/
+.mvn/
+mvnw
