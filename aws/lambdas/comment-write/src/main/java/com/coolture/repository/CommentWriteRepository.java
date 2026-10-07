@@ -3,6 +3,7 @@ package com.coolture.repository;
 import com.coolture.common.db.CommentQueries;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.ResultSetMappers;
 import com.coolture.common.dto.CommentSummaryDto;
 
@@ -58,17 +59,8 @@ public class CommentWriteRepository {
     }
 
     public void ensurePostActive(UUID postId) throws SQLException {
-        String sql = "SELECT id, status, deleted_at FROM posts WHERE id = ?";
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (!rs.next()
-                        || "DELETED".equals(rs.getString("status"))
-                        || rs.getTimestamp("deleted_at") != null) {
-                    throw new IllegalArgumentException("Post with id '" + postId + "' was not found");
-                }
-            }
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            PostQueries.ensurePostActive(conn, postId);
         }
     }
 
@@ -81,7 +73,7 @@ public class CommentWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                ensurePostActive(conn, postId);
+                PostQueries.ensurePostActive(conn, postId);
 
                 String insertSql = """
                     INSERT INTO comments (
@@ -107,9 +99,10 @@ public class CommentWriteRepository {
                 }
                 incrementPostCommentsCount(conn, postId);
 
-                conn.commit();
-                return CommentQueries.findDetailById(conn, commentId)
+                CommentSummaryDto created = CommentQueries.findDetailById(conn, commentId)
                     .orElseThrow(() -> new IllegalStateException("Failed to load created comment"));
+                conn.commit();
+                return created;
             } catch (Exception e) {
                 try {
                     conn.rollback();
@@ -142,10 +135,11 @@ public class CommentWriteRepository {
                             "Comment with id '" + commentId + "' was not found");
                     }
                 }
-                conn.commit();
-                return CommentQueries.findDetailById(conn, commentId)
+                CommentSummaryDto updated = CommentQueries.findDetailById(conn, commentId)
                     .orElseThrow(() -> new IllegalArgumentException(
                         "Comment with id '" + commentId + "' was not found"));
+                conn.commit();
+                return updated;
             } catch (Exception e) {
                 try {
                     conn.rollback();
@@ -196,20 +190,6 @@ public class CommentWriteRepository {
                 try {
                     conn.setAutoCommit(true);
                 } catch (SQLException ignored) {
-                }
-            }
-        }
-    }
-
-    private void ensurePostActive(Connection conn, UUID postId) throws SQLException {
-        String sql = "SELECT status, deleted_at FROM posts WHERE id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (!rs.next()
-                        || "DELETED".equals(rs.getString("status"))
-                        || rs.getTimestamp("deleted_at") != null) {
-                    throw new IllegalArgumentException("Post with id '" + postId + "' was not found");
                 }
             }
         }

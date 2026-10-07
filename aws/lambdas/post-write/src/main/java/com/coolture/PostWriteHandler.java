@@ -104,20 +104,11 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
     private UUID extractPostId(APIGatewayV2HTTPEvent event) {
         Map<String, String> pathParams = event.getPathParameters();
         if (pathParams != null) {
-            if (pathParams.containsKey("id")) {
+            if (pathParams.get("id") != null) {
                 return UUID.fromString(pathParams.get("id"));
             }
-            if (pathParams.containsKey("postId")) {
+            if (pathParams.get("postId") != null) {
                 return UUID.fromString(pathParams.get("postId"));
-            }
-        }
-
-        String rawPath = event.getRawPath();
-        if (rawPath != null) {
-            String[] segments = rawPath.split("/");
-            if (segments.length > 0) {
-                String last = segments[segments.length - 1];
-                return UUID.fromString(last);
             }
         }
 

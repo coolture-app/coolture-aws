@@ -90,17 +90,8 @@ public class CommentWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent
 
     private UUID extractPostId(APIGatewayV2HTTPEvent event) {
         Map<String, String> pathParams = event.getPathParameters();
-        if (pathParams != null && pathParams.containsKey("postId")) {
+        if (pathParams != null && pathParams.get("postId") != null) {
             return UUID.fromString(pathParams.get("postId"));
-        }
-        String rawPath = event.getRawPath();
-        if (rawPath != null) {
-            String[] segments = rawPath.split("/");
-            for (int i = 0; i < segments.length; i++) {
-                if ("posts".equals(segments[i]) && i + 1 < segments.length) {
-                    return UUID.fromString(segments[i + 1]);
-                }
-            }
         }
         throw new IllegalArgumentException("Missing post ID path parameter");
     }
@@ -108,15 +99,8 @@ public class CommentWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent
     private UUID extractCommentId(APIGatewayV2HTTPEvent event) {
         Map<String, String> pathParams = event.getPathParameters();
         if (pathParams != null) {
-            if (pathParams.containsKey("commentId")) return UUID.fromString(pathParams.get("commentId"));
-            if (pathParams.containsKey("id")) return UUID.fromString(pathParams.get("id"));
-        }
-        String rawPath = event.getRawPath();
-        if (rawPath != null) {
-            String[] segments = rawPath.split("/");
-            if (segments.length > 0) {
-                return UUID.fromString(segments[segments.length - 1]);
-            }
+            if (pathParams.get("commentId") != null) return UUID.fromString(pathParams.get("commentId"));
+            if (pathParams.get("id") != null) return UUID.fromString(pathParams.get("id"));
         }
         throw new IllegalArgumentException("Missing comment ID path parameter");
     }

@@ -54,7 +54,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
                 return getRecommendations(event, callerId);
             } else if (path.endsWith("/posts/map") || path.endsWith("/map")) {
                 return getMapMarks(event, callerId);
-            } else if (isPostDetailRequest(event, path)) {
+            } else if (isPostDetailRequest(event)) {
                 return getPostById(event, callerId);
             } else {
                 return getFeed(event, callerId);
@@ -116,36 +116,16 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         return ApiResponse.ok(marks);
     }
 
-    private boolean isPostDetailRequest(APIGatewayV2HTTPEvent event, String path) {
+    private boolean isPostDetailRequest(APIGatewayV2HTTPEvent event) {
         Map<String, String> pathParams = event.getPathParameters();
-        if (pathParams != null && (pathParams.containsKey("id") || pathParams.containsKey("postId"))) {
-            return true;
-        }
-
-        String[] segments = path.split("/");
-        if (segments.length > 0) {
-            String last = segments[segments.length - 1];
-            try {
-                UUID.fromString(last);
-                return true;
-            } catch (IllegalArgumentException ignored) {}
-        }
-        return false;
+        return pathParams != null && (pathParams.get("id") != null || pathParams.get("postId") != null);
     }
 
     private UUID extractPostId(APIGatewayV2HTTPEvent event) {
         Map<String, String> pathParams = event.getPathParameters();
         if (pathParams != null) {
-            if (pathParams.containsKey("id")) return UUID.fromString(pathParams.get("id"));
-            if (pathParams.containsKey("postId")) return UUID.fromString(pathParams.get("postId"));
-        }
-
-        String rawPath = event.getRawPath();
-        if (rawPath != null) {
-            String[] segments = rawPath.split("/");
-            if (segments.length > 0) {
-                return UUID.fromString(segments[segments.length - 1]);
-            }
+            if (pathParams.get("id") != null) return UUID.fromString(pathParams.get("id"));
+            if (pathParams.get("postId") != null) return UUID.fromString(pathParams.get("postId"));
         }
         throw new IllegalArgumentException("Missing post ID path parameter");
     }
