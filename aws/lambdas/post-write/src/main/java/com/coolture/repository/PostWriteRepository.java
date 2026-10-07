@@ -179,14 +179,14 @@ public class PostWriteRepository {
                 // 3. Attach Media
                 attachMedia(conn, postId, req.mediaIds(), req.coverMediaId());
 
+                PostDetailDto created = getPostDetail(conn, postId);
                 conn.commit();
+                return created;
             } catch (Exception e) {
                 conn.rollback();
                 throw e;
             }
         }
-
-        return getPostDetail(postId);
     }
 
     public PostDetailDto updatePost(UUID postId, UUID callerId, ExistingPost existing, UpdatePostRequest req) throws SQLException {
@@ -266,14 +266,14 @@ public class PostWriteRepository {
                     stmt.executeUpdate();
                 }
 
+                PostDetailDto updated = getPostDetail(conn, postId);
                 conn.commit();
+                return updated;
             } catch (Exception e) {
                 conn.rollback();
                 throw e;
             }
         }
-
-        return getPostDetail(postId);
     }
 
     public void softDeletePost(UUID postId) throws SQLException {
@@ -302,6 +302,12 @@ public class PostWriteRepository {
     }
 
     public PostDetailDto getPostDetail(UUID postId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return getPostDetail(conn, postId);
+        }
+    }
+
+    private PostDetailDto getPostDetail(Connection conn, UUID postId) throws SQLException {
         String sql = """
             SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
                    p.positive_reaction_count, p.negative_reaction_count, p.participant_count, p.comments_count,
@@ -322,8 +328,7 @@ public class PostWriteRepository {
             WHERE p.id = ?
         """;
 
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, postId);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (!rs.next()) {

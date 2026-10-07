@@ -61,7 +61,7 @@ class PostWriteHandlerTest {
                 "description": "A very cool event",
                 "type": "ONLINE",
                 "visibility": "PUBLIC",
-                "startsAt": "2026-09-01T12:00:00Z"
+                "startsAt": "2027-09-01T12:00:00Z"
             }
         """;
 

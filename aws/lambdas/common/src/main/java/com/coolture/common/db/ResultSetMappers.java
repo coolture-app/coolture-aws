@@ -1,11 +1,13 @@
 package com.coolture.common.db;
 
+import com.coolture.common.dto.CommentSummaryDto;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.UserSummaryDto;
+import com.coolture.common.dto.enums.CommentStatus;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.dto.enums.ParticipationType;
@@ -160,6 +162,58 @@ public final class ResultSetMappers {
 
     public static ParticipationType mapMyParticipation(ResultSet rs) throws SQLException {
         return mapEnum(rs, "my_participation", ParticipationType.class);
+    }
+
+    /**
+     * Maps ancestor_ids uuid[] to a UUID array (null when SQL NULL).
+     */
+    public static UUID[] mapUUIDArray(ResultSet rs, String column) throws SQLException {
+        Array array = rs.getArray(column);
+        if (array == null) return null;
+        Object raw = array.getArray();
+        if (raw instanceof UUID[] uuids) return uuids;
+        if (raw instanceof String[] strings) {
+            java.util.List<UUID> out = new java.util.ArrayList<>(strings.length);
+            for (String s : strings) {
+                if (s != null) out.add(UUID.fromString(s));
+            }
+            return out.toArray(new UUID[0]);
+        }
+        if (raw instanceof Object[] objects) {
+            java.util.List<UUID> out = new java.util.ArrayList<>(objects.length);
+            for (Object o : objects) {
+                if (o instanceof UUID uuid) out.add(uuid);
+                else if (o != null) out.add(UUID.fromString(String.valueOf(o)));
+            }
+            return out.toArray(new UUID[0]);
+        }
+        return null;
+    }
+
+    /**
+     * Maps a ResultSet row to CommentSummaryDto, including the author via mapUserSummary.
+     * Expects comment columns: comment_id, post_id, root_comment_id, parent_comment_id,
+     * content, ancestor_ids, replies_count, comment_created_at, last_edited_at,
+     * comment_deleted_at, comment_status
+     * plus the author/avatar columns mapUserSummary expects.
+     * Depth is derived from ancestor_ids length (0 when null), mirroring CommentMapper.
+     */
+    public static CommentSummaryDto mapCommentSummary(ResultSet rs) throws SQLException {
+        UUID[] ancestors = mapUUIDArray(rs, "ancestor_ids");
+        return new CommentSummaryDto(
+            (UUID) rs.getObject("comment_id"),
+            (UUID) rs.getObject("post_id"),
+            (UUID) rs.getObject("root_comment_id"),
+            (UUID) rs.getObject("parent_comment_id"),
+            mapUserSummary(rs),
+            rs.getString("content"),
+            ancestors == null ? 0 : ancestors.length,
+            rs.getInt("replies_count"),
+            mapInstant(rs, "comment_created_at"),
+            mapInstant(rs, "last_edited_at"),
+            mapInstant(rs, "comment_deleted_at"),
+            mapEnum(rs, "comment_status", CommentStatus.class)
+        );
     }
 
     /**

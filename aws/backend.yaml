@@ -293,6 +293,58 @@ Resources:
             Path: /event-locations/admin
             Method: GET
 
+  CommentReadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-comment-read'
+      CodeUri: lambdas/comment-read/
+      Handler: com.coolture.CommentReadHandler::handleRequest
+      MemorySize: 1024
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        - !Ref AWS::NoValue
+      Events:
+        ListComments:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{postId}/comments
+            Method: GET
+
+  CommentWriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-comment-write'
+      CodeUri: lambdas/comment-write/
+      Handler: com.coolture.CommentWriteHandler::handleRequest
+      MemorySize: 1024
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        - !Ref AWS::NoValue
+      Events:
+        CreateComment:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{postId}/comments
+            Method: POST
+        UpdateComment:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /comments/{commentId}
+            Method: PATCH
+        DeleteComment:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /comments/{commentId}
+            Method: DELETE
+
 Outputs:
   ApiEndpoint:
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
