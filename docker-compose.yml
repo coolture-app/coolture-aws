@@ -12,12 +12,54 @@ services:
       POSTGRES_PASSWORD: admin
     volumes:
       - postgres-data:/var/lib/postgresql
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - ./db/local-dev-seed.sql:/docker-entrypoint-initdb.d/z_local_dev_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U coolture_admin -d coolture"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  s3garage:
+    image: dxflrs/garage:v2.2.0
+    container_name: coolture-s3garage
+    restart: unless-stopped
+    ports:
+      - "${GARAGE_API_HOST_PORT:-3900}:3900"
+      - "${GARAGE_ADMIN_HOST_PORT:-3910}:3910"
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml
+      - garage_data:/var/lib/garage/data
+      - garage_meta:/var/lib/garage/meta
+    environment:
+      - GARAGE_RPC_SECRET=${GARAGE_RPC_SECRET:-daf48455f5042d06df2547601eba458980eb2397126d04f9d21545298bfb5dc3}
+      - GARAGE_ADMIN_TOKEN=${GARAGE_ADMIN_TOKEN:-b568f9316f65f416254617b30b03acf4683d8993f7b6d787344a7b4daa214848}
+      - GARAGE_METRICS_TOKEN=${GARAGE_METRICS_TOKEN:-315a7ac6a5860ef3e7bcdccec64bf26c978b40b09fec13c955682a2e87a77566}
+
+  s3-init:
+    image: docker.io/alpine:3.23
+    container_name: coolture-s3-init
+    depends_on:
+      s3garage:
+        condition: service_started
+    network_mode: service:s3garage
+    pid: service:s3garage
+    volumes:
+      - ./garage/init.sh:/init.sh:ro
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-daf48455f5042d06df2547601eba458980eb2397126d04f9d21545298bfb5dc3}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-b568f9316f65f416254617b30b03acf4683d8993f7b6d787344a7b4daa214848}
+      GARAGE_ACCESS_KEY_ID: ${GARAGE_ACCESS_KEY_ID:-GK9f23fc115cfabe3da0a5bcb5}
+      GARAGE_ACCESS_KEY_SECRET: ${GARAGE_ACCESS_KEY_SECRET:-8fa745da69f465aff2fafb09ab290c6358e6e58c0ec3d3fc174d27f300688111}
+      GARAGE_BUCKET_NAME: ${GARAGE_BUCKET_NAME:-coolture-bucket}
+      GARAGE_KEY_NAME: ${GARAGE_KEY_NAME:-coolture-key}
+      AWS_ACCESS_KEY_ID: ${GARAGE_ACCESS_KEY_ID:-GK9f23fc115cfabe3da0a5bcb5}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_ACCESS_KEY_SECRET:-8fa745da69f465aff2fafb09ab290c6358e6e58c0ec3d3fc174d27f300688111}
+      AWS_DEFAULT_REGION: ${GARAGE_REGION:-garage}
+    restart: on-failure:3
+    entrypoint: ["/bin/sh", "/init.sh"]
+
 volumes:
   postgres-data:
-
+  garage_data:
+  garage_meta:

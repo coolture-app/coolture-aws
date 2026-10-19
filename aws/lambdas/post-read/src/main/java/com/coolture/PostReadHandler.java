@@ -48,7 +48,11 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
             String path = event.getRawPath() != null ? event.getRawPath() : "";
             UUID callerId = SecurityContext.getUserIdOptional(event).orElse(null);
 
-            if (path.contains("/event-locations")) {
+            if (path.contains("/actuator/health") || path.endsWith("/health")) {
+                return ApiResponse.ok(Map.of("status", "UP"));
+            } else if (path.contains("/dicts/country-codes")) {
+                return ApiResponse.ok(service.listCountryCodes());
+            } else if (path.contains("/event-locations")) {
                 return getEventLocations(event);
             } else if (path.endsWith("/posts/recommendations") || path.endsWith("/recommendations")) {
                 return getRecommendations(event, callerId);

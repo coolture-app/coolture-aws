@@ -3,6 +3,7 @@ package com.coolture.repository;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
@@ -443,6 +444,19 @@ public class PostReadRepository {
                         mapInstant(rs, "created_at")
                     ));
                 }
+            }
+        }
+        return list;
+    }
+
+    public List<CountryCodeDto> findAllCountryCodes() throws SQLException {
+        String sql = "SELECT code FROM country_codes ORDER BY code ASC";
+        List<CountryCodeDto> list = new ArrayList<>();
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                list.add(new CountryCodeDto(rs.getString("code")));
             }
         }
         return list;

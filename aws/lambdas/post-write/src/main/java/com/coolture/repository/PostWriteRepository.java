@@ -3,6 +3,7 @@ package com.coolture.repository;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
@@ -13,6 +14,9 @@ import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
+
+import com.coolture.common.dto.enums.ParticipationType;
+import com.coolture.common.dto.enums.ReactionType;
 
 import java.sql.Array;
 import java.sql.Connection;
@@ -560,5 +564,290 @@ public class PostWriteRepository {
             new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
             rs.getTimestamp("created_at").toInstant()
         );
+    }
+
+    public void upsertReaction(UUID postId, UUID userId, ReactionType newType) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                if (!isActivePost(conn, postId)) {
+                    throw new IllegalArgumentException("Post not found: " + postId);
+                }
+                Optional<ReactionType> oldTypeOpt = findReaction(conn, postId, userId);
+                if (oldTypeOpt.isPresent()) {
+                    ReactionType oldType = oldTypeOpt.get();
+                    if (oldType != newType) {
+                        decrementReactionCount(conn, postId, oldType);
+                        incrementReactionCount(conn, postId, newType);
+                        updateReaction(conn, postId, userId, newType);
+                    }
+                } else {
+                    insertReaction(conn, postId, userId, newType);
+                    incrementReactionCount(conn, postId, newType);
+                }
+                conn.commit();
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+    }
+
+    public void deleteReaction(UUID postId, UUID userId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                if (!isActivePost(conn, postId)) {
+                    throw new IllegalArgumentException("Post not found: " + postId);
+                }
+                Optional<ReactionType> oldTypeOpt = findReaction(conn, postId, userId);
+                if (oldTypeOpt.isPresent()) {
+                    deleteReactionRow(conn, postId, userId);
+                    decrementReactionCount(conn, postId, oldTypeOpt.get());
+                }
+                conn.commit();
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+    }
+
+    public void upsertParticipation(UUID postId, UUID userId, ParticipationType newType) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                if (!isActivePost(conn, postId)) {
+                    throw new IllegalArgumentException("Post not found: " + postId);
+                }
+                Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
+                if (oldTypeOpt.isPresent()) {
+                    if (oldTypeOpt.get() != newType) {
+                        updateParticipation(conn, postId, userId, newType);
+                    }
+                } else {
+                    insertParticipation(conn, postId, userId, newType);
+                    incrementParticipantCount(conn, postId);
+                }
+                conn.commit();
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+    }
+
+    public void deleteParticipation(UUID postId, UUID userId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                if (!isActivePost(conn, postId)) {
+                    throw new IllegalArgumentException("Post not found: " + postId);
+                }
+                Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
+                if (oldTypeOpt.isPresent()) {
+                    deleteParticipationRow(conn, postId, userId);
+                    decrementParticipantCount(conn, postId);
+                }
+                conn.commit();
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+    }
+
+    private boolean isActivePost(Connection conn, UUID postId) throws SQLException {
+        String sql = "SELECT 1 FROM posts WHERE id = ? AND deleted_at IS NULL AND status != 'DELETED'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private Optional<ReactionType> findReaction(Connection conn, UUID postId, UUID userId) throws SQLException {
+        String sql = "SELECT type FROM post_reactions WHERE post_id = ? AND user_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.setObject(2, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(ReactionType.valueOf(rs.getString("type")));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private void insertReaction(Connection conn, UUID postId, UUID userId, ReactionType type) throws SQLException {
+        String sql = "INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (?, ?, ?, now())";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.setObject(2, userId);
+            stmt.setString(3, type.name());
+            stmt.executeUpdate();
+        }
+    }
+
+    private void updateReaction(Connection conn, UUID postId, UUID userId, ReactionType type) throws SQLException {
+        String sql = "UPDATE post_reactions SET type = ? WHERE post_id = ? AND user_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, type.name());
+            stmt.setObject(2, postId);
+            stmt.setObject(3, userId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private void deleteReactionRow(Connection conn, UUID postId, UUID userId) throws SQLException {
+        String sql = "DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.setObject(2, userId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private void incrementReactionCount(Connection conn, UUID postId, ReactionType type) throws SQLException {
+        String col = (type == ReactionType.LIKE) ? "positive_reaction_count" : "negative_reaction_count";
+        String sql = "UPDATE posts SET " + col + " = " + col + " + 1 WHERE id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private void decrementReactionCount(Connection conn, UUID postId, ReactionType type) throws SQLException {
+        String col = (type == ReactionType.LIKE) ? "positive_reaction_count" : "negative_reaction_count";
+        String sql = "UPDATE posts SET " + col + " = GREATEST(0, " + col + " - 1) WHERE id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private Optional<ParticipationType> findParticipation(Connection conn, UUID postId, UUID userId) throws SQLException {
+        String sql = "SELECT type FROM post_participations WHERE post_id = ? AND user_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.setObject(2, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(ParticipationType.valueOf(rs.getString("type")));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private void insertParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type) throws SQLException {
+        String sql = "INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, ?, now())";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.setObject(2, userId);
+            stmt.setString(3, type.name());
+            stmt.executeUpdate();
+        }
+    }
+
+    private void updateParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type) throws SQLException {
+        String sql = "UPDATE post_participations SET type = ? WHERE post_id = ? AND user_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, type.name());
+            stmt.setObject(2, postId);
+            stmt.setObject(3, userId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private void deleteParticipationRow(Connection conn, UUID postId, UUID userId) throws SQLException {
+        String sql = "DELETE FROM post_participations WHERE post_id = ? AND user_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.setObject(2, userId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private void incrementParticipantCount(Connection conn, UUID postId) throws SQLException {
+        String sql = "UPDATE posts SET participant_count = participant_count + 1 WHERE id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private void decrementParticipantCount(Connection conn, UUID postId) throws SQLException {
+        String sql = "UPDATE posts SET participant_count = GREATEST(0, participant_count - 1) WHERE id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, postId);
+            stmt.executeUpdate();
+        }
+    }
+
+    public CountryCodeDto createCountryCode(String code) throws SQLException {
+        String sql = "INSERT INTO country_codes (code) VALUES (?) RETURNING code";
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, code);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return new CountryCodeDto(rs.getString("code"));
+                }
+            }
+        }
+        throw new SQLException("Failed to create country code");
+    }
+
+    public CountryCodeDto updateCountryCode(String oldCode, String newCode) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                String checkSql = "SELECT 1 FROM country_codes WHERE code = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(checkSql)) {
+                    stmt.setString(1, oldCode);
+                    try (ResultSet rs = stmt.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new IllegalArgumentException("Country code not found: " + oldCode);
+                        }
+                    }
+                }
+                String insertSql = "INSERT INTO country_codes (code) VALUES (?) ON CONFLICT (code) DO NOTHING";
+                try (PreparedStatement stmt = conn.prepareStatement(insertSql)) {
+                    stmt.setString(1, newCode);
+                    stmt.executeUpdate();
+                }
+                String updateRefsSql = "UPDATE event_locations SET country_code = ? WHERE country_code = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(updateRefsSql)) {
+                    stmt.setString(1, newCode);
+                    stmt.setString(2, oldCode);
+                    stmt.executeUpdate();
+                }
+                String deleteSql = "DELETE FROM country_codes WHERE code = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
+                    stmt.setString(1, oldCode);
+                    stmt.executeUpdate();
+                }
+                conn.commit();
+                return new CountryCodeDto(newCode);
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+    }
+
+    public void deleteCountryCode(String code) throws SQLException {
+        String sql = "DELETE FROM country_codes WHERE code = ?";
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, code);
+            int deleted = stmt.executeUpdate();
+            if (deleted == 0) {
+                throw new IllegalArgumentException("Country code not found: " + code);
+            }
+        }
     }
 }

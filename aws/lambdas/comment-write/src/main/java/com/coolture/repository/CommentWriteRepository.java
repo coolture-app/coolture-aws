@@ -1,11 +1,5 @@
 package com.coolture.repository;
 
-import com.coolture.common.db.CommentQueries;
-import com.coolture.common.db.DatabaseConfig;
-import com.coolture.common.db.ParamBinder;
-import com.coolture.common.db.ResultSetMappers;
-import com.coolture.common.dto.CommentSummaryDto;
-
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -13,6 +7,12 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+
+import com.coolture.common.db.CommentQueries;
+import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.ResultSetMappers;
+import com.coolture.common.dto.CommentSummaryDto;
 
 public class CommentWriteRepository {
 

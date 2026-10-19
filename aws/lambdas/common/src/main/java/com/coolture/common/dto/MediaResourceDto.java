@@ -17,4 +17,8 @@ public record MediaResourceDto(
     String url,
     Instant createdAt,
     Instant deletedAt
-) {}
+) {
+    public MediaResourceDto withUrl(String newUrl) {
+        return new MediaResourceDto(id, purpose, mimeType, sizeBytes, status, newUrl, createdAt, deletedAt);
+    }
+}

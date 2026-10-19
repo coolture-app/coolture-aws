@@ -22,7 +22,7 @@ template_file = "aws/backend.yaml"
 [backend-dev.deploy.parameters]
 stack_name = "coolture-backend-dev"
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=dev"]
+parameter_overrides = ["Environment=dev", "AuthStackName=coolture-auth-dev"]
 
 [backend-staging.global.parameters]
 stack_name = "coolture-backend-staging"
@@ -33,7 +33,7 @@ template_file = "aws/backend.yaml"
 [backend-staging.deploy.parameters]
 stack_name = "coolture-backend-staging"
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=staging"]
+parameter_overrides = ["Environment=staging", "AuthStackName=coolture-auth-staging"]
 
 [backend-prod.global.parameters]
 stack_name = "coolture-backend-prod"
@@ -44,7 +44,7 @@ template_file = "aws/backend.yaml"
 [backend-prod.deploy.parameters]
 stack_name = "coolture-backend-prod"
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=prod"]
+parameter_overrides = ["Environment=prod", "AuthStackName=coolture-auth-prod"]
 
 [frontend-dev.global.parameters]
 stack_name = "coolture-frontend-dev"
