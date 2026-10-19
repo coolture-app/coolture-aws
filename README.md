@@ -36,6 +36,27 @@ The `common` module (`aws/lambdas/common/`) is a shared Maven library that elimi
 
 You can build and install it locally using `make build-common` (note that `make build` automatically builds `common` first before building all backend Lambdas).
 
+## Authentication & Authorization
+
+The architecture uses a dual-mode authorization model: strictly enforced Cognito JWT in AWS, and frictionless header-based mocking locally.
+
+### 1. Cloud (AWS) – Amazon Cognito
+- **API Gateway Enforcement**: `aws/backend.yaml` configures `CognitoAuthorizer` as the `DefaultAuthorizer` on `HttpApi` (backed by the Cognito User Pool defined in `aws/auth.yaml`).
+- **Protected Routes**: Require `Authorization: Bearer <jwt_token>`. API Gateway validates signatures, issuers, and expiry before invoking the Lambda.
+- **Public Routes**: Explicitly set to `Auth: { Authorizer: NONE }` (e.g., `GET /posts`, `GET /users`, `GET /media/{id}`, `GET /actuator/health`).
+- **Identity Extraction**: Lambdas use [`SecurityContext.from(event)`](aws/lambdas/common/src/main/java/com/coolture/common/security/SecurityContext.java) to parse user ID (`sub`) and claims from `event.requestContext.authorizer.jwt.claims`.
+
+### 2. Local Development – Frictionless Mocking
+When `ENVIRONMENT=local` (set automatically in `make local`):
+- **Zero-Config Auth**: If no auth headers are provided, requests automatically resolve to the default mock user `local_dev` (`00000000-0000-0000-0000-000000000001`). You can curl protected endpoints without tokens.
+- **Switch Users**: Pass `-H "X-User-Id: <uuid>"` to simulate requests from any specific user ID.
+- **Anonymous Access**: Pass `-H "X-Anonymous: true"` to test guest mode.
+- *(Security: In AWS environments, `X-User-Id` and `X-Anonymous` headers are strictly ignored and fallback is disabled).*
+
+### 3. Database Isolation (Local vs. AWS)
+- **Production Migrations** (`migrations/*.sql`): Strictly schema DDL (tables, indexes, extensions). No mock users are present, ensuring clean AWS deployments.
+- **Local Dev Seed** (`db/local-dev-seed.sql`): Creates the `local_dev` user only in local Docker Postgres via `docker-compose.yml` and `make migrate`.
+
 ## Prerequisites
 
 - AWS SAM CLI
@@ -62,10 +83,10 @@ Build Lambda functions:
 make build
 ```
 
-Run database migrations:
+Run database migrations and local dev seed:
 
 ```bash
-docker compose exec -T postgres psql -U coolture_admin -d coolture < migrations/V1__initial_schema.sql
+make migrate
 ```
 
 ### Running Local API
@@ -91,11 +112,9 @@ The API will use these default connection parameters:
 Invoke functions directly:
 
 ```bash
-sam local invoke UsersListFunction --template-file .aws-sam/build/template.yaml
+sam local invoke UserFunction --template-file .aws-sam/build/template.yaml
 
-sam local invoke UserCreateFunction \
-  --template-file .aws-sam/build/template.yaml \
-  --event events/create-user.json
+sam local invoke PostReadFunction --template-file .aws-sam/build/template.yaml
 ```
 
 Generate test events:
