@@ -10,3 +10,8 @@ aws/lambdas/**/*.jar
 .idea/
 .mvn/
 mvnw
+__pycache__/
+.pytest_cache/
+.omc
+.venv
+.agents

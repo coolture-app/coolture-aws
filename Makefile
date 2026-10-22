@@ -36,18 +36,36 @@ build-common: ## Build and install shared common module
 build: build-common ## Build backend lambdas
 	@sam build --template-file aws/backend.yaml --parallel --cached
 
+test-python: ## Run Python Lambda unit tests (needs requirements-dev.txt installed)
+	@for dir in embedding-workers/post-embedding embedding-workers/user-embedding; do \
+		(cd $$dir && python3 -m pytest -q tests) || exit 1; \
+	done
+
+embed-posts: ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
+	@scripts/embed-posts.sh
+
+embed-users: ## Recompute user embeddings locally (same as the 30-min schedule in AWS)
+	@test -f .aws-sam/embeddings/template.yaml || { echo "Missing .aws-sam/embeddings/template.yaml - run 'make build-embeddings' first."; exit 1; }
+	@echo '{}' | sam local invoke UserEmbeddingFunction --template-file .aws-sam/embeddings/template.yaml --event -
+
 local: build ## Start local API on localhost:3000
 	@echo "API: http://localhost:3000"
 	@echo "DB: host.docker.internal:5430"
 	@sam local start-api --template-file .aws-sam/build/template.yaml --warm-containers EAGER
 
 validate: ## Validate SAM templates
+	@sam validate --template-file aws/base.yaml
 	@sam validate --template-file aws/backend.yaml
 	@sam validate --template-file aws/frontend.yaml
 	@sam validate --template-file aws/auth.yaml
+	@sam validate --template-file embedding-workers/template.yaml
 
-deploy-backend: build validate ## Deploy backend to AWS (dev)
-	@sam deploy --config-env backend-dev
+deploy-base: validate ## Deploy network stack to AWS (dev) - first, others import from it
+	@sam deploy --config-env base-dev --template-file aws/base.yaml
+
+deploy-backend: build-common validate ## Deploy backend to AWS (dev, arm64) - needs base deployed
+	@sam build --config-env backend-dev --parallel --build-dir .aws-sam/backend-dev
+	@sam deploy --config-env backend-dev --template-file .aws-sam/backend-dev/template.yaml
 
 deploy-frontend: validate ## Deploy frontend to AWS (dev)
 	@sam build --template-file aws/frontend.yaml
@@ -56,9 +74,19 @@ deploy-frontend: validate ## Deploy frontend to AWS (dev)
 deploy-auth: validate ## Deploy auth to AWS (dev)
 	@sam deploy --config-env auth-dev --template-file aws/auth.yaml
 
-deploy-all: deploy-backend deploy-auth deploy-frontend ## Deploy all stacks (dev)
+build-embeddings: ## Build embedding workers for local runs (x86_64; post-embedding image needs Docker)
+	@sam build --template-file embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
-delete-backend: ## Delete backend stack
+deploy-embeddings: validate ## Deploy embedding workers to AWS (dev, arm64) - needs base + backend deployed
+	@sam build --config-env embeddings-dev --build-dir .aws-sam/embeddings-dev
+	@sam deploy --config-env embeddings-dev --template-file .aws-sam/embeddings-dev/template.yaml
+
+deploy-all: deploy-base deploy-auth deploy-backend deploy-embeddings deploy-frontend ## Deploy all stacks (dev)
+
+delete-embeddings: ## Delete embedding workers stack
+	@sam delete --stack-name coolture-embeddings-dev --no-prompts
+
+delete-backend: ## Delete backend stack (delete embeddings first: it imports backend outputs)
 	@sam delete --stack-name coolture-backend-dev --no-prompts
 
 delete-frontend: ## Delete frontend stack
@@ -66,6 +94,9 @@ delete-frontend: ## Delete frontend stack
 
 delete-auth: ## Delete auth stack
 	@sam delete --stack-name coolture-auth-dev --no-prompts
+
+delete-base: ## Delete network stack (delete backend first: it imports base outputs)
+	@sam delete --stack-name coolture-base-dev --no-prompts
 
 logs-api: ## Tail backend logs
 	@sam logs --stack-name coolture-backend-dev --tail
