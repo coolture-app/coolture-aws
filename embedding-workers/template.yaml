@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Coolture Embedding Workers
+
+Parameters:
+  Environment:
+    Type: String
+    Default: local
+    AllowedValues: [local, dev, staging, prod]
+  BaseStackName:
+    Type: String
+    Default: coolture-base-dev
+  BackendStackName:
+    Type: String
+    Default: coolture-backend-dev
+  DbName:
+    Type: String
+    Default: coolture
+  DbUsername:
+    Type: String
+    Default: coolture_admin
+  DbPassword:
+    Type: String
+    Default: admin
+    NoEcho: true
+  DbHost:
+    Type: String
+    Default: host.docker.internal
+  DbPort:
+    Type: String
+    Default: '5430'
+
+Conditions:
+  IsAWS: !Not [!Equals [!Ref Environment, 'local']]
+
+Globals:
+  Function:
+    Architectures: [x86_64]
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        DB_HOST: !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbEndpoint'}, !Ref DbHost]
+        DB_PORT: !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbPort'}, !Ref DbPort]
+        DB_NAME: !Ref DbName
+        DB_USERNAME: !Ref DbUsername
+        DB_PASSWORD: !Ref DbPassword
+    Tags:
+      Project: coolture
+      Environment: !Ref Environment
+
+Resources:
+  PostEmbeddingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-post-embedding'
+      PackageType: Image
+      MemorySize: 2048
+      Timeout: 120
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
+          SecurityGroupIds:
+            - !ImportValue {'Fn::Sub': '${BaseStackName}-LambdaSecurityGroupId'}
+        - !Ref AWS::NoValue
+      Events:
+        PostEmbeddingMessages:
+          Type: SQS
+          Properties:
+            Queue: !If
+              - IsAWS
+              - !ImportValue {'Fn::Sub': '${BackendStackName}-PostEmbeddingQueueArn'}
+              - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:coolture-${Environment}-post-embedding'
+            BatchSize: 10
+            FunctionResponseTypes: [ReportBatchItemFailures]
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: post-embedding
+      DockerTag: python3.13-v1
+
+  UserEmbeddingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-user-embedding'
+      CodeUri: user-embedding/src/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      MemorySize: 512
+      Timeout: 300
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
+          SecurityGroupIds:
+            - !ImportValue {'Fn::Sub': '${BaseStackName}-LambdaSecurityGroupId'}
+        - !Ref AWS::NoValue
+      Events:
+        Every30Minutes:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Enabled: !If [IsAWS, true, false]
