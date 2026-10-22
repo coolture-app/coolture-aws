@@ -35,7 +35,7 @@ Conditions:
 
 Globals:
   Function:
-    Architectures: [x86_64]
+    Architectures: !If [IsAWS, [arm64], [x86_64]]
     Environment:
       Variables:
         ENVIRONMENT: !Ref Environment

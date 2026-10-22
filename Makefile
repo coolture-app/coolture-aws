@@ -63,8 +63,9 @@ validate: ## Validate SAM templates
 deploy-base: validate ## Deploy network stack to AWS (dev) - first, others import from it
 	@sam deploy --config-env base-dev --template-file aws/base.yaml
 
-deploy-backend: build validate ## Deploy backend to AWS (dev) - needs base deployed
-	@sam deploy --config-env backend-dev
+deploy-backend: build-common validate ## Deploy backend to AWS (dev, arm64) - needs base deployed
+	@sam build --config-env backend-dev --parallel --build-dir .aws-sam/backend-dev
+	@sam deploy --config-env backend-dev --template-file .aws-sam/backend-dev/template.yaml
 
 deploy-frontend: validate ## Deploy frontend to AWS (dev)
 	@sam build --template-file aws/frontend.yaml
@@ -73,11 +74,12 @@ deploy-frontend: validate ## Deploy frontend to AWS (dev)
 deploy-auth: validate ## Deploy auth to AWS (dev)
 	@sam deploy --config-env auth-dev --template-file aws/auth.yaml
 
-build-embeddings: ## Build embedding workers stack (post-embedding image needs Docker)
+build-embeddings: ## Build embedding workers for local runs (x86_64; post-embedding image needs Docker)
 	@sam build --template-file embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
-deploy-embeddings: build-embeddings validate ## Deploy embedding workers to AWS (dev) - needs base + backend deployed
-	@sam deploy --config-env embeddings-dev --template-file .aws-sam/embeddings/template.yaml
+deploy-embeddings: validate ## Deploy embedding workers to AWS (dev, arm64) - needs base + backend deployed
+	@sam build --config-env embeddings-dev --build-dir .aws-sam/embeddings-dev
+	@sam deploy --config-env embeddings-dev --template-file .aws-sam/embeddings-dev/template.yaml
 
 deploy-all: deploy-base deploy-auth deploy-backend deploy-embeddings deploy-frontend ## Deploy all stacks (dev)
 
