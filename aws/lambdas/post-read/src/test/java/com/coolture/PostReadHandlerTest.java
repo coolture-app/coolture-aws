@@ -312,7 +312,7 @@ class PostReadHandlerTest {
     @Test
     void handleRequest_whenPostById_returns200WithDetail() throws Exception {
         UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/" + postId, Map.of("id", postId.toString()));
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/" + postId, null, Map.of("id", postId.toString()));
 
         var detail = mock(com.coolture.common.dto.PostDetailDto.class);
         when(postReadService.getById(eq(postId), any())).thenReturn(detail);

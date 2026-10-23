@@ -11,6 +11,7 @@ import java.util.UUID;
 import com.coolture.common.db.CommentQueries;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.ResultSetMappers;
 import com.coolture.common.dto.CommentSummaryDto;
 
