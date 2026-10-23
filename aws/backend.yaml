@@ -29,6 +29,17 @@ Parameters:
   DbPort:
     Type: String
     Default: '5430'
+  AuthStackName:
+    Type: String
+    Default: 'coolture-auth-dev'
+  GarageAccessKeyId:
+    Type: String
+    Default: ''
+    NoEcho: true
+  GarageAccessKeySecret:
+    Type: String
+    Default: ''
+    NoEcho: true
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
@@ -46,6 +57,12 @@ Globals:
         DB_NAME: !Ref DbName
         DB_USERNAME: !Ref DbUsername
         DB_PASSWORD: !Ref DbPassword
+        MEDIA_BUCKET_NAME: !If [IsAWS, !Sub 'coolture-${Environment}-media', 'coolture-bucket']
+        S3_ENDPOINT_URL: !If [IsAWS, '', 'http://host.docker.internal:3900']
+        S3_PUBLIC_ENDPOINT_URL: !If [IsAWS, '', 'http://localhost:3900']
+        GARAGE_ACCESS_KEY_ID: !If [IsAWS, '', !Ref GarageAccessKeyId]
+        GARAGE_ACCESS_KEY_SECRET: !If [IsAWS, '', !Ref GarageAccessKeySecret]
+        S3_REGION: !If [IsAWS, '', 'garage']
     Tags:
       Project: coolture
       Environment: !Ref Environment
@@ -122,6 +139,16 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Environment
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              Audience:
+                - Fn::ImportValue: !Sub '${AuthStackName}-ClientId'
+              Issuer:
+                Fn::ImportValue: !Sub '${AuthStackName}-Issuer'
 
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -133,47 +160,121 @@ Resources:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
 
-
-# Lambda Functions
-  UsersListFunction:
+  # Lambda Functions
+  UserFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'coolture-${Environment}-users-list'
-      CodeUri: lambdas/users-list/
-      Handler: com.coolture.UsersListHandler::handleRequest
-      MemorySize: 1024
+      FunctionName: !Sub 'coolture-${Environment}-user'
+      CodeUri: lambdas/user/
+      Handler: com.coolture.user.UserHandler::handleRequest
+      MemorySize: 512
       VpcConfig: !If
         - IsAWS
         - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds: [!Ref LambdaSecurityGroup]
         - !Ref AWS::NoValue
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub 'coolture-${Environment}-media'
       Events:
-        GetUsers:
+        SearchUsers:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /users
             Method: GET
-
-  UserCreateFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub 'coolture-${Environment}-user-create'
-      CodeUri: lambdas/user-create/
-      Handler: com.coolture.UserCreateHandler::handleRequest
-      MemorySize: 1024
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Ref PrivateSubnetIds
-          SecurityGroupIds: [!Ref LambdaSecurityGroup]
-        - !Ref AWS::NoValue
-      Events:
         CreateUser:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /users
             Method: POST
+        GetUserById:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}
+            Method: GET
+            Auth:
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer so logged-in users get isFollowing/isBlocked
+        GetUserByUsername:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/by-username/{username}
+            Method: GET
+            Auth:
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer
+        UpdateUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}
+            Method: PATCH
+        SetProfileImage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/profile-image
+            Method: PUT
+        DeleteProfileImage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/profile-image
+            Method: DELETE
+        GetMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /auth/me
+            Method: GET
+        GetFollowers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/followers
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetFollowing:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/following
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        FollowUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/follow
+            Method: POST
+        UnfollowUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/follow
+            Method: DELETE
+        GetBlocking:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/blocking
+            Method: GET
+        BlockUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/block
+            Method: POST
+        UnblockUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/{userId}/block
+            Method: DELETE
 
   PostWriteFunction:
     Type: AWS::Serverless::Function
@@ -242,6 +343,48 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /event-locations/admin/{id}
             Method: DELETE
+        UpsertReaction:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{postId}/reaction
+            Method: PUT
+        DeleteReaction:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{postId}/reaction
+            Method: DELETE
+        UpsertParticipation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{postId}/participation
+            Method: PUT
+        DeleteParticipation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /posts/{postId}/participation
+            Method: DELETE
+        CreateCountryCode:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /dicts/admin/country-codes
+            Method: POST
+        UpdateCountryCode:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /dicts/admin/country-codes/{code}
+            Method: PUT
+        DeleteCountryCode:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /dicts/admin/country-codes/{code}
+            Method: DELETE
 
   PostReadFunction:
     Type: AWS::Serverless::Function
@@ -256,6 +399,22 @@ Resources:
           SecurityGroupIds: [!Ref LambdaSecurityGroup]
         - !Ref AWS::NoValue
       Events:
+        HealthCheck:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /actuator/health
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetCountryCodes:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /dicts/country-codes
+            Method: GET
+            Auth:
+              Authorizer: NONE
         GetRecommendations:
           Type: HttpApi
           Properties:
@@ -268,24 +427,32 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /posts/map
             Method: GET
+            Auth:
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for myReaction/myParticipation
         GetPostById:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /posts/{id}
             Method: GET
+            Auth:
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for myReaction/myParticipation
         GetFeed:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /posts
             Method: GET
+            Auth:
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for participation/reaction filters
         GetEventLocations:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /event-locations
             Method: GET
+            Auth:
+              Authorizer: NONE
         GetEventLocationsAdmin:
           Type: HttpApi
           Properties:
@@ -312,6 +479,8 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /posts/{postId}/comments
             Method: GET
+            Auth:
+              Authorizer: NONE
 
   CommentWriteFunction:
     Type: AWS::Serverless::Function
@@ -343,6 +512,60 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /comments/{commentId}
+            Method: DELETE
+
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'coolture-${Environment}-media'
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, HEAD, DELETE]
+            AllowedOrigins: ['*']
+            MaxAge: 3600
+
+  MediaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-media'
+      CodeUri: lambdas/media/
+      Handler: com.coolture.media.MediaHandler::handleRequest
+      MemorySize: 512
+      VpcConfig: !If
+        - IsAWS
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        - !Ref AWS::NoValue
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Sub 'coolture-${Environment}-media'
+      Events:
+        InitUpload:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /media/uploads/init
+            Method: POST
+        CompleteUpload:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /media/uploads/{mediaId}/complete
+            Method: POST
+        GetMedia:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /media/{mediaId}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        DeleteMedia:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /media/{mediaId}
             Method: DELETE
 
 Outputs:

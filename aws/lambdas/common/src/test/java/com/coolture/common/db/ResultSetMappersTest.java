@@ -105,11 +105,11 @@ class ResultSetMappersTest {
         when(rs.getTimestamp("user_created_at")).thenReturn(Timestamp.from(now));
 
         when(rs.getObject("avatar_id")).thenReturn(avatarId);
-        when(rs.getString("avatar_purpose")).thenReturn("AVATAR");
+        when(rs.getString("avatar_purpose")).thenReturn("PROFILE_IMAGE_THUMBNAIL");
         when(rs.getString("avatar_mime_type")).thenReturn("image/png");
         when(rs.getObject("avatar_size_bytes")).thenReturn(1024L);
         when(rs.getLong("avatar_size_bytes")).thenReturn(1024L);
-        when(rs.getString("avatar_status")).thenReturn("ACTIVE");
+        when(rs.getString("avatar_status")).thenReturn("UPLOADED");
         when(rs.getTimestamp("avatar_created_at")).thenReturn(Timestamp.from(now));
 
         UserSummaryDto user = ResultSetMappers.mapUserSummary(rs);
@@ -123,10 +123,10 @@ class ResultSetMappersTest {
 
         assertNotNull(user.avatar());
         assertEquals(avatarId, user.avatar().id());
-        assertEquals(MediaPurpose.AVATAR, user.avatar().purpose());
+        assertEquals(MediaPurpose.PROFILE_IMAGE_THUMBNAIL, user.avatar().purpose());
         assertEquals("image/png", user.avatar().mimeType());
         assertEquals(1024L, user.avatar().sizeBytes());
-        assertEquals(MediaStatus.ACTIVE, user.avatar().status());
+        assertEquals(MediaStatus.UPLOADED, user.avatar().status());
     }
 
     @Test
@@ -186,17 +186,17 @@ class ResultSetMappersTest {
         ResultSet rs = mock(ResultSet.class);
         UUID coverId = UUID.randomUUID();
         when(rs.getObject("cover_id")).thenReturn(coverId);
-        when(rs.getString("cover_purpose")).thenReturn("POST_MEDIA");
+        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
         when(rs.getString("cover_mime_type")).thenReturn("image/jpeg");
         when(rs.getObject("cover_size_bytes")).thenReturn(2048L);
         when(rs.getLong("cover_size_bytes")).thenReturn(2048L);
-        when(rs.getString("cover_status")).thenReturn("ACTIVE");
+        when(rs.getString("cover_status")).thenReturn("UPLOADED");
 
         MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
 
         assertNotNull(cover);
         assertEquals(coverId, cover.id());
-        assertEquals(MediaPurpose.POST_MEDIA, cover.purpose());
+        assertEquals(MediaPurpose.EVENT_COVER, cover.purpose());
         assertEquals("image/jpeg", cover.mimeType());
     }
 
@@ -206,7 +206,7 @@ class ResultSetMappersTest {
         UUID mediaId = UUID.randomUUID();
 
         when(rs.getObject("media_id")).thenReturn(mediaId);
-        when(rs.getString("purpose")).thenReturn("POST_MEDIA");
+        when(rs.getString("purpose")).thenReturn("EVENT_MEDIA");
         when(rs.getInt("position")).thenReturn(2);
         when(rs.getBoolean("is_cover")).thenReturn(true);
 

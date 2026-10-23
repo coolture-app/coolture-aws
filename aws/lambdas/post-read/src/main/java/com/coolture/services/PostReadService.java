@@ -1,5 +1,6 @@
 package com.coolture.services;
 
+import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.MapBoundsDto;
 import com.coolture.common.dto.PostCardDto;
@@ -82,6 +83,10 @@ public class PostReadService {
         List<EventLocationDto> rows = repository.findEventLocations(cursorCreatedAt, cursorId, effectiveLimit + 1);
 
         return CursorPage.of(rows, effectiveLimit, EventLocationDto::id, EventLocationDto::createdAt);
+    }
+
+    public List<CountryCodeDto> listCountryCodes() throws SQLException {
+        return repository.findAllCountryCodes();
     }
 
     private void validateParticipationFilter(List<String> participationTypes, UUID callerId) {

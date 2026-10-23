@@ -127,4 +127,61 @@ class PostReadServiceTest {
 
         verify(repository).findFeed(eq(filters), eq(callerId), isNull(), isNull(), eq(101));
     }
+
+    @Test
+    void listCountryCodes_callsRepository() throws SQLException {
+        when(repository.findAllCountryCodes()).thenReturn(List.of(new com.coolture.common.dto.CountryCodeDto("POL")));
+
+        var result = service.listCountryCodes();
+
+        assertEquals(1, result.size());
+        assertEquals("POL", result.get(0).code());
+        verify(repository).findAllCountryCodes();
+    }
+
+    @Test
+    void getById_whenFound_returnsDetail() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID callerId = UUID.randomUUID();
+        var detail = mock(com.coolture.common.dto.PostDetailDto.class);
+        when(repository.findById(postId, callerId)).thenReturn(Optional.of(detail));
+
+        var result = service.getById(postId, callerId);
+
+        assertNotNull(result);
+        assertEquals(detail, result);
+        verify(repository).findById(postId, callerId);
+    }
+
+    @Test
+    void getMapMarks_whenValid_callsRepository() throws SQLException {
+        UUID callerId = UUID.randomUUID();
+        PostFeedFilters filters = new PostFeedFilters(
+            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, null
+        );
+        var bounds = new com.coolture.common.dto.MapBoundsDto(
+            new com.coolture.common.dto.GeoPointDto(54.5, 18.0),
+            new com.coolture.common.dto.GeoPointDto(54.0, 19.0)
+        );
+        when(repository.findPostMarks(filters, bounds, callerId)).thenReturn(List.of());
+
+        var result = service.getMapMarks(callerId, filters, bounds);
+
+        assertNotNull(result);
+        verify(repository).findPostMarks(filters, bounds, callerId);
+    }
+
+    @Test
+    void listEventLocations_callsRepository() throws SQLException {
+        when(repository.findEventLocations(isNull(), isNull(), eq(21)))
+            .thenReturn(List.of());
+
+        var result = service.listEventLocations(null, 20);
+
+        assertNotNull(result);
+        assertTrue(result.items().isEmpty());
+        verify(repository).findEventLocations(isNull(), isNull(), eq(21));
+    }
 }
+

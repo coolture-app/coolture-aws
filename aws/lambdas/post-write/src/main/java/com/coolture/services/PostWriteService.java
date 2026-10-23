@@ -1,10 +1,14 @@
 package com.coolture.services;
 
+import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
+import com.coolture.dto.CountryCodeRequest;
 import com.coolture.dto.CreatePostRequest;
+import com.coolture.dto.ParticipationRequest;
+import com.coolture.dto.ReactionRequest;
 import com.coolture.dto.UpdatePostRequest;
 import com.coolture.repository.PostWriteRepository;
 
@@ -98,6 +102,76 @@ public class PostWriteService {
             throw new IllegalArgumentException("Location ID is required");
         }
         repository.deleteLocation(locationId);
+    }
+
+    public void upsertReaction(UUID postId, UUID userId, ReactionRequest req) throws SQLException {
+        if (postId == null) {
+            throw new IllegalArgumentException("Post ID is required");
+        }
+        if (userId == null) {
+            throw new SecurityException("User not authenticated: missing 'sub' claim");
+        }
+        if (req == null || req.type() == null) {
+            throw new IllegalArgumentException("Reaction type is required");
+        }
+        repository.upsertReaction(postId, userId, req.type());
+    }
+
+    public void deleteReaction(UUID postId, UUID userId) throws SQLException {
+        if (postId == null) {
+            throw new IllegalArgumentException("Post ID is required");
+        }
+        if (userId == null) {
+            throw new SecurityException("User not authenticated: missing 'sub' claim");
+        }
+        repository.deleteReaction(postId, userId);
+    }
+
+    public void upsertParticipation(UUID postId, UUID userId, ParticipationRequest req) throws SQLException {
+        if (postId == null) {
+            throw new IllegalArgumentException("Post ID is required");
+        }
+        if (userId == null) {
+            throw new SecurityException("User not authenticated: missing 'sub' claim");
+        }
+        if (req == null || req.type() == null) {
+            throw new IllegalArgumentException("Participation type is required");
+        }
+        repository.upsertParticipation(postId, userId, req.type());
+    }
+
+    public void deleteParticipation(UUID postId, UUID userId) throws SQLException {
+        if (postId == null) {
+            throw new IllegalArgumentException("Post ID is required");
+        }
+        if (userId == null) {
+            throw new SecurityException("User not authenticated: missing 'sub' claim");
+        }
+        repository.deleteParticipation(postId, userId);
+    }
+
+    public CountryCodeDto createCountryCode(CountryCodeRequest req) throws SQLException {
+        if (req == null || req.code() == null || req.code().isBlank()) {
+            throw new IllegalArgumentException("Country code is required");
+        }
+        return repository.createCountryCode(req.code().toUpperCase());
+    }
+
+    public CountryCodeDto updateCountryCode(String oldCode, CountryCodeRequest req) throws SQLException {
+        if (oldCode == null || oldCode.isBlank()) {
+            throw new IllegalArgumentException("Old country code is required");
+        }
+        if (req == null || req.code() == null || req.code().isBlank()) {
+            throw new IllegalArgumentException("New country code is required");
+        }
+        return repository.updateCountryCode(oldCode.toUpperCase(), req.code().toUpperCase());
+    }
+
+    public void deleteCountryCode(String code) throws SQLException {
+        if (code == null || code.isBlank()) {
+            throw new IllegalArgumentException("Country code is required");
+        }
+        repository.deleteCountryCode(code.toUpperCase());
     }
 
     private void validateTypeLocationInvariant(PostType type, EventLocationDto location) {

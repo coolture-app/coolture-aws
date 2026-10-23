@@ -2,6 +2,8 @@
 
 CREATE EXTENSION IF NOT EXISTS "postgis";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "vector";
+
 
 -- ============================================
 -- Tables
@@ -64,7 +66,7 @@ CREATE TABLE posts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     author_id UUID NOT NULL REFERENCES users(id),
     event_location_id UUID REFERENCES event_locations(id),
-    title VARCHAR(32) NOT NULL,
+    title VARCHAR(128) NOT NULL,
     description VARCHAR(1024),
     event_url VARCHAR,
     tags VARCHAR(32)[],
@@ -165,3 +167,25 @@ CREATE INDEX idx_post_media_post ON post_media(post_id);
 
 -- PostGIS index for geospatial queries
 CREATE INDEX idx_event_locations_coordinates ON event_locations USING GIST (coordinates);
+
+-- Embeddings for recommendation engine
+CREATE TABLE IF NOT EXISTS post_embeddings (
+    post_id UUID PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+    embedding vector(768) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_embeddings_hnsw ON post_embeddings
+    USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS user_embeddings (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    embedding vector(768) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_embeddings_hnsw ON user_embeddings
+    USING hnsw (embedding vector_cosine_ops);
+

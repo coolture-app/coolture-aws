@@ -1,5 +1,12 @@
 .DEFAULT_GOAL := help
 
+# Auto-detect Docker socket on macOS if DOCKER_HOST is not set
+ifneq ($(wildcard $(HOME)/.docker/run/docker.sock),)
+export DOCKER_HOST ?= unix://$(HOME)/.docker/run/docker.sock
+endif
+
+export AWS_DEFAULT_REGION ?= eu-central-1
+
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
@@ -16,6 +23,7 @@ migrate: ## Run database migrations
 		echo "Applying $$f..."; \
 		docker compose exec -T postgres psql -U coolture_admin -d coolture < "$$f"; \
 	done
+	@[ -f db/local-dev-seed.sql ] && echo "Applying db/local-dev-seed.sql..." && docker compose exec -T postgres psql -U coolture_admin -d coolture < db/local-dev-seed.sql || true
 
 reset-db: ## Reset PostgreSQL database and volumes
 	docker compose down -v
@@ -39,7 +47,8 @@ build: build-common ## Build backend lambdas
 local: build ## Start local API on localhost:3000
 	@echo "API: http://localhost:3000"
 	@echo "DB: host.docker.internal:5430"
-	@sam local start-api --template-file .aws-sam/build/template.yaml --warm-containers EAGER
+	@docker rm -f $$(docker ps -q --filter ancestor=public.ecr.aws/lambda/java:21-rapid-x86_64) 2>/dev/null || true
+	@sam local start-api --template-file .aws-sam/build/template.yaml --warm-containers EAGER --skip-pull-image
 
 validate: ## Validate SAM templates
 	@sam validate --template-file aws/backend.yaml
