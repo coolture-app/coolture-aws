@@ -3,6 +3,7 @@ package com.coolture.repository;
 import com.coolture.common.db.CommentQueries;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.ResultSetMappers;
 import com.coolture.common.dto.CommentSummaryDto;
 
@@ -71,17 +72,8 @@ public class CommentReadRepository {
     }
 
     public void ensurePostActive(UUID postId) throws SQLException {
-        String sql = "SELECT id, status, deleted_at FROM posts WHERE id = ?";
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (!rs.next()
-                        || "DELETED".equals(rs.getString("status"))
-                        || rs.getTimestamp("deleted_at") != null) {
-                    throw new IllegalArgumentException("Post with id '" + postId + "' was not found");
-                }
-            }
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            PostQueries.ensurePostActive(conn, postId);
         }
     }
 

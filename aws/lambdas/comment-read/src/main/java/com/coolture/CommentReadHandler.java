@@ -60,17 +60,8 @@ public class CommentReadHandler implements RequestHandler<APIGatewayV2HTTPEvent,
     private UUID extractPostId(APIGatewayV2HTTPEvent event) {
         Map<String, String> pathParams = event.getPathParameters();
         if (pathParams != null) {
-            if (pathParams.containsKey("postId")) return UUID.fromString(pathParams.get("postId"));
-            if (pathParams.containsKey("id")) return UUID.fromString(pathParams.get("id"));
-        }
-
-        String rawPath = event.getRawPath();
-        if (rawPath != null) {
-            for (String segment : rawPath.split("/")) {
-                try {
-                    return UUID.fromString(segment);
-                } catch (IllegalArgumentException ignored) {}
-            }
+            if (pathParams.get("postId") != null) return UUID.fromString(pathParams.get("postId"));
+            if (pathParams.get("id") != null) return UUID.fromString(pathParams.get("id"));
         }
         throw new IllegalArgumentException("Missing post ID path parameter");
     }
