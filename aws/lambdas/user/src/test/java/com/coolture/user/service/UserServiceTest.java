@@ -38,7 +38,7 @@ class UserServiceTest {
     private static final UUID THUMBNAIL_ID = UUID.randomUUID();
 
     @Test
-    void setProfileImage_validatesMedia_deactivatesOld_andInsertsNew() throws SQLException {
+    void setProfileImage_validatesMedia_andInsertsTransactional() throws SQLException {
         SetProfileImageRequest request = new SetProfileImageRequest(FULL_ID, THUMBNAIL_ID);
 
         ProfileImageResponse response = service.setProfileImage(USER_ID, USER_ID, request);
@@ -50,8 +50,7 @@ class UserServiceTest {
 
         verify(repository).validateMediaOwnedAndNotDeleted(FULL_ID, USER_ID);
         verify(repository).validateMediaOwnedAndNotDeleted(THUMBNAIL_ID, USER_ID);
-        verify(repository).deactivateProfileImages(eq(USER_ID), any());
-        verify(repository).insertProfileImage(eq(USER_ID), eq(FULL_ID), eq(THUMBNAIL_ID), any());
+        verify(repository).setProfileImageTransactional(eq(USER_ID), eq(FULL_ID), eq(THUMBNAIL_ID), any());
     }
 
     @Test
@@ -193,14 +192,14 @@ class UserServiceTest {
     @Test
     void getMe_createsUser_whenNotExists() throws SQLException {
         var created = new UserEntity(CALLER_ID, "autouser", "Jan", "K", null, Instant.now());
-        when(repository.findById(CALLER_ID)).thenReturn(Optional.empty(), Optional.of(created));
-        when(repository.createUser(eq(CALLER_ID), eq("autouser"), eq("Jan"), eq("K"), eq(null))).thenReturn(created);
+        when(repository.createUserIfAbsent(eq(CALLER_ID), eq("autouser"), eq("Jan"), eq("K"))).thenReturn(created);
+        when(repository.findById(CALLER_ID)).thenReturn(Optional.of(created));
 
         UserProfileDto profile = service.getMe(CALLER_ID, "autouser", "Jan", "K");
 
         assertNotNull(profile);
         assertEquals("autouser", profile.username());
-        verify(repository).createUser(eq(CALLER_ID), eq("autouser"), eq("Jan"), eq("K"), eq(null));
+        verify(repository).createUserIfAbsent(eq(CALLER_ID), eq("autouser"), eq("Jan"), eq("K"));
     }
 
     @Test
@@ -232,6 +231,15 @@ class UserServiceTest {
     @Test
     void follow_throwsConflict_whenSelf() {
         assertThrows(IllegalStateException.class, () -> service.follow(USER_ID, USER_ID));
+    }
+
+    @Test
+    void follow_throwsForbidden_whenBlocked() throws SQLException {
+        when(repository.existsById(USER_ID)).thenReturn(true);
+        when(repository.isBlockedEitherDirection(CALLER_ID, USER_ID)).thenReturn(true);
+
+        assertThrows(SecurityException.class, () -> service.follow(CALLER_ID, USER_ID));
+        verify(repository, never()).insertRelation(any(), any(), any(), any());
     }
 
     @Test

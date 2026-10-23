@@ -32,6 +32,14 @@ Parameters:
   AuthStackName:
     Type: String
     Default: 'coolture-auth-dev'
+  GarageAccessKeyId:
+    Type: String
+    Default: ''
+    NoEcho: true
+  GarageAccessKeySecret:
+    Type: String
+    Default: ''
+    NoEcho: true
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
@@ -52,8 +60,8 @@ Globals:
         MEDIA_BUCKET_NAME: !If [IsAWS, !Sub 'coolture-${Environment}-media', 'coolture-bucket']
         S3_ENDPOINT_URL: !If [IsAWS, '', 'http://host.docker.internal:3900']
         S3_PUBLIC_ENDPOINT_URL: !If [IsAWS, '', 'http://localhost:3900']
-        GARAGE_ACCESS_KEY_ID: !If [IsAWS, '', 'GK9f23fc115cfabe3da0a5bcb5']
-        GARAGE_ACCESS_KEY_SECRET: !If [IsAWS, '', '8fa745da69f465aff2fafb09ab290c6358e6e58c0ec3d3fc174d27f300688111']
+        GARAGE_ACCESS_KEY_ID: !If [IsAWS, '', !Ref GarageAccessKeyId]
+        GARAGE_ACCESS_KEY_SECRET: !If [IsAWS, '', !Ref GarageAccessKeySecret]
         S3_REGION: !If [IsAWS, '', 'garage']
     Tags:
       Project: coolture
@@ -165,6 +173,9 @@ Resources:
         - SubnetIds: !Ref PrivateSubnetIds
           SecurityGroupIds: [!Ref LambdaSecurityGroup]
         - !Ref AWS::NoValue
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub 'coolture-${Environment}-media'
       Events:
         SearchUsers:
           Type: HttpApi
@@ -172,8 +183,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /users
             Method: GET
-            Auth:
-              Authorizer: NONE
         CreateUser:
           Type: HttpApi
           Properties:
@@ -187,7 +196,7 @@ Resources:
             Path: /users/{userId}
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer so logged-in users get isFollowing/isBlocked
         GetUserByUsername:
           Type: HttpApi
           Properties:
@@ -195,7 +204,7 @@ Resources:
             Path: /users/by-username/{username}
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer
         UpdateUser:
           Type: HttpApi
           Properties:
@@ -419,7 +428,7 @@ Resources:
             Path: /posts/map
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for myReaction/myParticipation
         GetPostById:
           Type: HttpApi
           Properties:
@@ -427,7 +436,7 @@ Resources:
             Path: /posts/{id}
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for myReaction/myParticipation
         GetFeed:
           Type: HttpApi
           Properties:
@@ -435,7 +444,7 @@ Resources:
             Path: /posts
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for participation/reaction filters
         GetEventLocations:
           Type: HttpApi
           Properties:
@@ -450,8 +459,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /event-locations/admin
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   CommentReadFunction:
     Type: AWS::Serverless::Function

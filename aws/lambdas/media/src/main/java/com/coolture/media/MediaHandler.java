@@ -51,7 +51,8 @@ public class MediaHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
             return ApiResponse.badRequest("Unsupported method or route: " + method + " " + path);
 
         } catch (SecurityException e) {
-            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("not authenticated")) {
+            String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+            if (msg.contains("authenticat")) {
                 return ApiResponse.unauthorized(e.getMessage());
             }
             return ApiResponse.forbidden(e.getMessage());
@@ -66,7 +67,7 @@ public class MediaHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
             if (context != null && context.getLogger() != null) {
                 context.getLogger().log("Error in MediaHandler: " + e.getMessage());
             }
-            return ApiResponse.error(e.getMessage());
+            return ApiResponse.error("Internal server error");
         }
     }
 

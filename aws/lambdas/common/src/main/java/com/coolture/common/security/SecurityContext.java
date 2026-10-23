@@ -1,9 +1,15 @@
 package com.coolture.common.security;
 
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
+import com.coolture.common.json.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -39,6 +45,21 @@ public class SecurityContext {
         }
     }
 
+    public static List<String> getGroups(APIGatewayV2HTTPEvent event) {
+        return getClaim(event, "cognito:groups")
+            .map(raw -> Arrays.stream(raw.replaceAll("[\\[\\]\"]", "").split("[,\\s]+"))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList())
+            .orElse(Collections.emptyList());
+    }
+
+    public static void requireAdmin(APIGatewayV2HTTPEvent event) {
+        if (!getGroups(event).contains("COOLTURE_ADMIN")) {
+            throw new SecurityException("Admin access required");
+        }
+    }
+
     public static Optional<UUID> getUserIdOptional(APIGatewayV2HTTPEvent event) {
         return getClaim(event, "sub").flatMap(sub -> {
             try {
@@ -71,7 +92,14 @@ public class SecurityContext {
             }
         }
 
-        // 2. Local development fallback (only active when isDevFallbackEnabled() is true)
+        // 2. Fallback: Parse claims directly from Authorization: Bearer <jwt> header
+        // Supports optionally-authenticated routes where API Gateway authorizer is NONE
+        Optional<String> headerClaim = getClaimFromAuthorizationHeader(event, claimName);
+        if (headerClaim.isPresent()) {
+            return headerClaim;
+        }
+
+        // 3. Local development fallback (only active when isDevFallbackEnabled() is true)
         if (isDevFallbackEnabled()) {
             boolean isExplicitAnonymous = event.getHeaders() != null && (
                 "true".equalsIgnoreCase(getHeaderCaseInsensitive(event.getHeaders(), "x-anonymous")) ||
@@ -123,6 +151,74 @@ public class SecurityContext {
         return null;
     }
 
+    private static Optional<String> getClaimFromAuthorizationHeader(APIGatewayV2HTTPEvent event, String claimName) {
+        if (event == null || event.getHeaders() == null) {
+            return Optional.empty();
+        }
+        String authHeader = getHeaderCaseInsensitive(event.getHeaders(), "authorization");
+        if (authHeader == null || !authHeader.toLowerCase().startsWith("bearer ")) {
+            return Optional.empty();
+        }
+        String token = authHeader.substring(7).trim();
+        String[] parts = token.split("\\.");
+        if (parts.length < 2) {
+            return Optional.empty();
+        }
+        try {
+            byte[] decoded = Base64.getUrlDecoder().decode(parts[1]);
+            JsonNode jsonNode = JsonUtils.readTree(decoded);
+            if (jsonNode.has("exp")) {
+                long exp = jsonNode.get("exp").asLong();
+                if (Instant.now().getEpochSecond() > exp) {
+                    return Optional.empty();
+                }
+            }
+            if (jsonNode.has(claimName)) {
+                JsonNode val = jsonNode.get(claimName);
+                if (val.isArray()) {
+                    return Optional.of(val.toString());
+                } else {
+                    return Optional.ofNullable(val.asText());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return Optional.empty();
+    }
+
+    private static Map<String, String> getAllClaimsFromAuthorizationHeader(APIGatewayV2HTTPEvent event) {
+        if (event == null || event.getHeaders() == null) {
+            return Collections.emptyMap();
+        }
+        String authHeader = getHeaderCaseInsensitive(event.getHeaders(), "authorization");
+        if (authHeader == null || !authHeader.toLowerCase().startsWith("bearer ")) {
+            return Collections.emptyMap();
+        }
+        String token = authHeader.substring(7).trim();
+        String[] parts = token.split("\\.");
+        if (parts.length < 2) {
+            return Collections.emptyMap();
+        }
+        try {
+            byte[] decoded = Base64.getUrlDecoder().decode(parts[1]);
+            JsonNode jsonNode = JsonUtils.readTree(decoded);
+            if (jsonNode.has("exp")) {
+                long exp = jsonNode.get("exp").asLong();
+                if (Instant.now().getEpochSecond() > exp) {
+                    return Collections.emptyMap();
+                }
+            }
+            Map<String, String> map = new HashMap<>();
+            jsonNode.fields().forEachRemaining(entry -> {
+                JsonNode v = entry.getValue();
+                map.put(entry.getKey(), v.isArray() ? v.toString() : v.asText());
+            });
+            return map;
+        } catch (Exception ignored) {
+        }
+        return Collections.emptyMap();
+    }
+
     public static Map<String, String> getAllClaims(APIGatewayV2HTTPEvent event) {
         if (event == null) {
             return Collections.emptyMap();
@@ -135,6 +231,10 @@ public class SecurityContext {
                     return claims;
                 }
             }
+        }
+        Map<String, String> headerClaims = getAllClaimsFromAuthorizationHeader(event);
+        if (!headerClaims.isEmpty()) {
+            return headerClaims;
         }
         if (isDevFallbackEnabled()) {
             Map<String, String> devClaims = new HashMap<>();

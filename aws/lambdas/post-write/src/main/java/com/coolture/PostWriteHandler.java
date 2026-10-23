@@ -38,6 +38,10 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
             String path = event.getRawPath() != null ? event.getRawPath() : "";
             UUID userId = SecurityContext.getUserId(event);
 
+            if (path.contains("/admin")) {
+                SecurityContext.requireAdmin(event);
+            }
+
             if (path.contains("/event-locations")) {
                 return switch (method) {
                     case "POST" -> createLocation(event);
@@ -80,7 +84,8 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
             };
 
         } catch (SecurityException e) {
-            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("not authenticated")) {
+            String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+            if (msg.contains("authenticat")) {
                 return ApiResponse.unauthorized(e.getMessage());
             }
             return ApiResponse.forbidden(e.getMessage());
@@ -91,7 +96,7 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
             return ApiResponse.badRequest(e.getMessage());
         } catch (Exception e) {
             context.getLogger().log("Error in PostWriteHandler: " + e.getMessage());
-            return ApiResponse.error(e.getMessage());
+            return ApiResponse.error("Internal server error");
         }
     }
 

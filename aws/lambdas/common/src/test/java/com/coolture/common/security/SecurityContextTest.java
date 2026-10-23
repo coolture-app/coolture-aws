@@ -177,4 +177,99 @@ class SecurityContextTest {
         assertEquals(2, claims.size());
         assertEquals("123", claims.get("sub"));
     }
+
+    @Test
+    void requireAdmin_whenAdminGroupPresent_doesNotThrow() {
+        SecurityContext.setDevFallbackOverride(false);
+        var jwt = APIGatewayV2HTTPEvent.RequestContext.Authorizer.JWT.builder()
+            .withClaims(Map.of("sub", UUID.randomUUID().toString(), "cognito:groups", "[COOLTURE_ADMIN]"))
+            .build();
+        var authorizer = APIGatewayV2HTTPEvent.RequestContext.Authorizer.builder()
+            .withJwt(jwt)
+            .build();
+        var requestContext = APIGatewayV2HTTPEvent.RequestContext.builder()
+            .withAuthorizer(authorizer)
+            .build();
+        var event = APIGatewayV2HTTPEvent.builder()
+            .withRequestContext(requestContext)
+            .build();
+
+        assertDoesNotThrow(() -> SecurityContext.requireAdmin(event));
+    }
+
+    @Test
+    void requireAdmin_whenNotAdmin_throwsSecurityException() {
+        SecurityContext.setDevFallbackOverride(false);
+        var jwt = APIGatewayV2HTTPEvent.RequestContext.Authorizer.JWT.builder()
+            .withClaims(Map.of("sub", UUID.randomUUID().toString(), "cognito:groups", "[USER]"))
+            .build();
+        var authorizer = APIGatewayV2HTTPEvent.RequestContext.Authorizer.builder()
+            .withJwt(jwt)
+            .build();
+        var requestContext = APIGatewayV2HTTPEvent.RequestContext.builder()
+            .withAuthorizer(authorizer)
+            .build();
+        var event = APIGatewayV2HTTPEvent.builder()
+            .withRequestContext(requestContext)
+            .build();
+
+        SecurityException ex = assertThrows(SecurityException.class, () -> SecurityContext.requireAdmin(event));
+        assertEquals("Admin access required", ex.getMessage());
+    }
+
+    @Test
+    void requireAdmin_whenDevFallbackEnabled_doesNotThrow() {
+        SecurityContext.setDevFallbackOverride(true);
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder().build();
+        assertDoesNotThrow(() -> SecurityContext.requireAdmin(event));
+    }
+
+    @Test
+    void getUserId_fromAuthorizationHeader_whenNoAuthorizerContext() {
+        SecurityContext.setDevFallbackOverride(false);
+        UUID expected = UUID.randomUUID();
+        long futureExp = java.time.Instant.now().getEpochSecond() + 3600;
+        String payloadJson = "{\"sub\":\"" + expected + "\",\"exp\":" + futureExp + "}";
+        String encodedPayload = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(payloadJson.getBytes());
+        String token = "header." + encodedPayload + ".sig";
+
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("Authorization", "Bearer " + token))
+            .build();
+
+        UUID actual = SecurityContext.getUserId(event);
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void getUserIdOptional_fromAuthorizationHeader_whenExpired_returnsEmpty() {
+        SecurityContext.setDevFallbackOverride(false);
+        UUID expected = UUID.randomUUID();
+        long pastExp = java.time.Instant.now().getEpochSecond() - 3600;
+        String payloadJson = "{\"sub\":\"" + expected + "\",\"exp\":" + pastExp + "}";
+        String encodedPayload = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(payloadJson.getBytes());
+        String token = "header." + encodedPayload + ".sig";
+
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("Authorization", "Bearer " + token))
+            .build();
+
+        Optional<UUID> opt = SecurityContext.getUserIdOptional(event);
+        assertTrue(opt.isEmpty());
+    }
+
+    @Test
+    void requireAdmin_fromAuthorizationHeader_whenAdminGroupPresent_doesNotThrow() {
+        SecurityContext.setDevFallbackOverride(false);
+        long futureExp = java.time.Instant.now().getEpochSecond() + 3600;
+        String payloadJson = "{\"sub\":\"" + UUID.randomUUID() + "\",\"cognito:groups\":[\"COOLTURE_ADMIN\"],\"exp\":" + futureExp + "}";
+        String encodedPayload = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(payloadJson.getBytes());
+        String token = "header." + encodedPayload + ".sig";
+
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("Authorization", "Bearer " + token))
+            .build();
+
+        assertDoesNotThrow(() -> SecurityContext.requireAdmin(event));
+    }
 }

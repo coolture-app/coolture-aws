@@ -144,8 +144,7 @@ public class UserService {
         userRepository.validateMediaOwnedAndNotDeleted(request.thumbnailMediaId(), targetId);
 
         Instant now = Instant.now();
-        userRepository.deactivateProfileImages(targetId, now);
-        userRepository.insertProfileImage(targetId, request.fullMediaId(), request.thumbnailMediaId(), now);
+        userRepository.setProfileImageTransactional(targetId, request.fullMediaId(), request.thumbnailMediaId(), now);
 
         return new ProfileImageResponse(request.fullMediaId(), request.thumbnailMediaId(), now);
     }
@@ -165,13 +164,10 @@ public class UserService {
         if (callerId == null) {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
         }
-        Optional<UserEntity> userOpt = userRepository.findById(callerId);
-        if (userOpt.isEmpty()) {
-            String uname = (username != null && !username.isBlank()) ? username : callerId.toString();
-            String fName = firstName != null ? firstName : "";
-            String lName = lastName != null ? lastName : "";
-            userRepository.createUser(callerId, uname, fName, lName, null);
-        }
+        String uname = (username != null && !username.isBlank()) ? username : callerId.toString();
+        String fName = firstName != null ? firstName : "";
+        String lName = lastName != null ? lastName : "";
+        userRepository.createUserIfAbsent(callerId, uname, fName, lName);
         return getByIdForCaller(callerId, callerId);
     }
 
@@ -232,6 +228,9 @@ public class UserService {
         }
         if (!userRepository.existsById(targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
+        }
+        if (userRepository.isBlockedEitherDirection(callerId, targetUserId)) {
+            throw new SecurityException("Cannot follow: there is a block between you and this user");
         }
         if (userRepository.isFollowing(callerId, targetUserId)) {
             throw new IllegalStateException("Already following this user");

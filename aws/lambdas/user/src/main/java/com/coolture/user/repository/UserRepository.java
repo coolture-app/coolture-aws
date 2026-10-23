@@ -63,6 +63,55 @@ public class UserRepository {
         throw new SQLException("Failed to insert user");
     }
 
+    /**
+     * Creates a user if one with the given ID does not already exist.
+     * Uses ON CONFLICT DO NOTHING to handle concurrent inserts safely.
+     * Returns the existing or newly created user.
+     */
+    public UserEntity createUserIfAbsent(UUID id, String username, String firstName, String lastName) throws SQLException {
+        Optional<UserEntity> existing = findById(id);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        String sql = """
+            INSERT INTO users (id, username, first_name, last_name, bio, created_at)
+            VALUES (?, ?, ?, ?, null, now())
+            ON CONFLICT (id) DO NOTHING
+        """;
+
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            // Try inserting with the given username
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setObject(1, id);
+                stmt.setString(2, username);
+                stmt.setString(3, firstName);
+                stmt.setString(4, lastName);
+                stmt.executeUpdate();
+            } catch (SQLException e) {
+                // Username uniqueness violation — retry with a fallback username
+                if ("23505".equals(e.getSQLState())) {
+                    Optional<UserEntity> user = findById(id);
+                    if (user.isPresent()) {
+                        return user.get();
+                    }
+                    String fallbackUsername = "user_" + id.toString().replace("-", "").substring(0, 12);
+                    try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                        stmt.setObject(1, id);
+                        stmt.setString(2, fallbackUsername);
+                        stmt.setString(3, firstName);
+                        stmt.setString(4, lastName);
+                        stmt.executeUpdate();
+                    }
+                } else {
+                    throw e;
+                }
+            }
+        }
+        // Always return the current row (whether just inserted or already existed)
+        return findById(id).orElseThrow(() -> new SQLException("Failed to create or find user " + id));
+    }
+
     public Optional<UserEntity> findById(UUID id) throws SQLException {
         String sql = "SELECT id, username, first_name, last_name, bio, created_at FROM users WHERE id = ?";
 
@@ -442,6 +491,72 @@ public class UserRepository {
             stmt.setTimestamp(4, Timestamp.from(setAt != null ? setAt : Instant.now()));
 
             stmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Atomically deactivates old profile images and inserts a new one in a single transaction.
+     * Prevents race conditions where a failure between the two operations leaves the user with no avatar,
+     * and prevents concurrent requests from leaving two active rows.
+     */
+    public void setProfileImageTransactional(UUID userId, UUID fullMediaId, UUID thumbnailMediaId, Instant now) throws SQLException {
+        String lockSql = "SELECT 1 FROM users WHERE id = ? FOR UPDATE";
+        String deactivateSql = "UPDATE profile_images SET is_active = false, unset_at = ? WHERE user_id = ? AND is_active = true";
+        String insertSql = """
+            INSERT INTO profile_images (id, user_id, full_media_id, thumbnail_media_id, is_active, set_at)
+            VALUES (gen_random_uuid(), ?, ?, ?, true, ?)
+        """;
+
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement lock = conn.prepareStatement(lockSql)) {
+                    lock.setObject(1, userId);
+                    try (ResultSet rs = lock.executeQuery()) {
+                        // row locked
+                    }
+                }
+                try (PreparedStatement deactivate = conn.prepareStatement(deactivateSql)) {
+                    deactivate.setTimestamp(1, Timestamp.from(now));
+                    deactivate.setObject(2, userId);
+                    deactivate.executeUpdate();
+                }
+                try (PreparedStatement insert = conn.prepareStatement(insertSql)) {
+                    insert.setObject(1, userId);
+                    insert.setObject(2, fullMediaId);
+                    insert.setObject(3, thumbnailMediaId);
+                    insert.setTimestamp(4, Timestamp.from(now));
+                    insert.executeUpdate();
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        }
+    }
+
+    /**
+     * Checks if either user has blocked the other (in either direction).
+     */
+    public boolean isBlockedEitherDirection(UUID userId1, UUID userId2) throws SQLException {
+        if (userId1 == null || userId2 == null) return false;
+        String sql = """
+            SELECT 1 FROM user_relations
+            WHERE type = 'BLOCK'
+              AND ((source_user_id = ? AND target_user_id = ?) OR (source_user_id = ? AND target_user_id = ?))
+        """;
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, userId1);
+            stmt.setObject(2, userId2);
+            stmt.setObject(3, userId2);
+            stmt.setObject(4, userId1);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
         }
     }
 

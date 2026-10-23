@@ -48,6 +48,10 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
             String path = event.getRawPath() != null ? event.getRawPath() : "";
             UUID callerId = SecurityContext.getUserIdOptional(event).orElse(null);
 
+            if (path.contains("/admin")) {
+                SecurityContext.requireAdmin(event);
+            }
+
             if (path.contains("/actuator/health") || path.endsWith("/health")) {
                 return ApiResponse.ok(Map.of("status", "UP"));
             } else if (path.contains("/dicts/country-codes")) {
@@ -65,7 +69,11 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
             }
 
         } catch (SecurityException e) {
-            return ApiResponse.unauthorized(e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+            if (msg.contains("authenticat")) {
+                return ApiResponse.unauthorized(e.getMessage());
+            }
+            return ApiResponse.forbidden(e.getMessage());
         } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
             if (e.getMessage() != null && e.getMessage().toLowerCase().contains("not found")) {
                 return ApiResponse.notFound(e.getMessage());

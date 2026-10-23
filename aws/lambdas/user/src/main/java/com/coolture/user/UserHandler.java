@@ -114,7 +114,8 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             };
 
         } catch (SecurityException e) {
-            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("not authenticated")) {
+            String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+            if (msg.contains("authenticat")) {
                 return ApiResponse.unauthorized(e.getMessage());
             }
             return ApiResponse.forbidden(e.getMessage());
@@ -129,7 +130,7 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             if (context != null && context.getLogger() != null) {
                 context.getLogger().log("Error in UserHandler: " + e.getMessage());
             }
-            return ApiResponse.error(e.getMessage());
+            return ApiResponse.error("Internal server error");
         }
     }
 

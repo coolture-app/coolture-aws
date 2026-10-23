@@ -55,10 +55,22 @@ public class JsonUtils {
         return object;
     }
 
+    public static ObjectMapper mapper() {
+        return OBJECT_MAPPER;
+    }
+
     public static JsonNode readTree(String json) {
         try {
             return OBJECT_MAPPER.readTree(json);
         } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Invalid JSON payload", e);
+        }
+    }
+
+    public static JsonNode readTree(byte[] json) {
+        try {
+            return OBJECT_MAPPER.readTree(json);
+        } catch (Exception e) {
             throw new IllegalArgumentException("Invalid JSON payload", e);
         }
     }
