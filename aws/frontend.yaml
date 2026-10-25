@@ -1,8 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: >-
-  Coolture Frontend - Angular SSR (../coolture-frontend) on Lambda via Lambda Web Adapter behind CloudFront.
-  Hashed browser assets are served from S3, /api/* is proxied to the backend HTTP API (same origin, no CORS).
+Description: Coolture Frontend
 
 Parameters:
   Environment:
@@ -18,19 +16,11 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 7
-  AllowedViewerIps:
-    Type: String
-    Default: ''
-    Description: >-
-      Comma-separated IPv4 addresses/CIDRs (e.g. 203.0.113.7,198.51.100.0/24) allowed to open the site.
-      Empty = public. When set, IPv6 is disabled on the distribution so viewers connect over IPv4.
   WebAclArn:
     Type: String
     Default: ''
-    Description: CloudFront-scoped WAF web ACL from the us-east-1 waf stack (aws/waf.yaml); empty = no WAF
 
 Conditions:
-  RestrictViewers: !Not [!Equals [!Ref AllowedViewerIps, '']]
   HasWebAcl: !Not [!Equals [!Ref WebAclArn, '']]
 
 Resources:
@@ -96,10 +86,6 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
 
   StaticAssetsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -140,45 +126,11 @@ Resources:
       Name: !Sub 'coolture-${Environment}-viewer-request'
       AutoPublish: true
       FunctionConfig:
-        Comment: Optional viewer IP allowlist; strip /api for the HTTP API origin; pass the viewer host to Angular SSR
+        Comment: Strip /api, pass the viewer host to SSR
         Runtime: cloudfront-js-2.0
-      FunctionCode: !Sub |
-        var ALLOWED = '${AllowedViewerIps}'.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
-
-        function ipv4ToNumber(ip) {
-          var parts = ip.split('.');
-          if (parts.length !== 4) return null;
-          var value = 0;
-          for (var i = 0; i < 4; i++) {
-            var octet = parseInt(parts[i], 10);
-            if (isNaN(octet) || octet < 0 || octet > 255) return null;
-            value = value * 256 + octet;
-          }
-          return value;
-        }
-
-        function isAllowed(ip) {
-          if (ALLOWED.length === 0) return true;
-          var address = ipv4ToNumber(ip);
-          for (var i = 0; i < ALLOWED.length; i++) {
-            var entry = ALLOWED[i];
-            if (entry === ip) return true;
-            var slash = entry.indexOf('/');
-            if (slash < 0 || address === null) continue;
-            var base = ipv4ToNumber(entry.substring(0, slash));
-            var bits = parseInt(entry.substring(slash + 1), 10);
-            if (base === null || isNaN(bits) || bits < 0 || bits > 32) continue;
-            var block = Math.pow(2, 32 - bits);
-            if (Math.floor(address / block) === Math.floor(base / block)) return true;
-          }
-          return false;
-        }
-
+      FunctionCode: |
         function handler(event) {
           var request = event.request;
-          if (!isAllowed(event.viewer.ip)) {
-            return { statusCode: 403, statusDescription: 'Forbidden' };
-          }
           if (request.uri === '/api' || request.uri.startsWith('/api/')) {
             request.uri = request.uri.substring(4) || '/';
           } else if (request.headers.host) {
@@ -213,7 +165,7 @@ Resources:
         Enabled: true
         Comment: !Sub 'coolture-${Environment}'
         HttpVersion: http2and3
-        IPV6Enabled: !If [RestrictViewers, false, true]
+        IPV6Enabled: true
         WebACLId: !If [HasWebAcl, !Ref WebAclArn, !Ref AWS::NoValue]
         PriceClass: PriceClass_100
         Origins:
@@ -226,7 +178,6 @@ Resources:
             DomainName: !Select [2, !Split ['/', !GetAtt SSRFunctionUrl.FunctionUrl]]
             OriginAccessControlId: !Ref LambdaOriginAccessControl
             CustomOriginConfig:
-              HTTPSPort: 443
               OriginProtocolPolicy: https-only
               OriginSSLProtocols: [TLSv1.2]
           - Id: http-api
@@ -237,7 +188,6 @@ Resources:
               - HeaderName: X-Origin-Verify
                 HeaderValue: !Sub '{{resolve:secretsmanager:coolture-${Environment}-origin-verify:SecretString}}'
             CustomOriginConfig:
-              HTTPSPort: 443
               OriginProtocolPolicy: https-only
               OriginSSLProtocols: [TLSv1.2]
         DefaultCacheBehavior:
@@ -245,7 +195,6 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
           Compress: true
           AllowedMethods: [GET, HEAD, OPTIONS]
-          CachedMethods: [GET, HEAD]
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
           FunctionAssociations:
@@ -257,84 +206,21 @@ Resources:
             ViewerProtocolPolicy: https-only
             Compress: true
             AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
-            CachedMethods: [GET, HEAD]
             CachePolicyId: !Ref ApiCachePolicy
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             FunctionAssociations:
               - EventType: viewer-request
                 FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
-          - PathPattern: '*.js'
-            TargetOriginId: s3-assets
-            ViewerProtocolPolicy: redirect-to-https
-            Compress: true
-            AllowedMethods: [GET, HEAD]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-            FunctionAssociations:
-              - EventType: viewer-request
-                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
-          - PathPattern: '*.css'
-            TargetOriginId: s3-assets
-            ViewerProtocolPolicy: redirect-to-https
-            Compress: true
-            AllowedMethods: [GET, HEAD]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-            FunctionAssociations:
-              - EventType: viewer-request
-                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
-          - PathPattern: /media/*
-            TargetOriginId: s3-assets
-            ViewerProtocolPolicy: redirect-to-https
-            Compress: true
-            AllowedMethods: [GET, HEAD]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-            FunctionAssociations:
-              - EventType: viewer-request
-                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
-          - PathPattern: /i18n/*
-            TargetOriginId: s3-assets
-            ViewerProtocolPolicy: redirect-to-https
-            Compress: true
-            AllowedMethods: [GET, HEAD]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-            FunctionAssociations:
-              - EventType: viewer-request
-                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
-          - PathPattern: /favicon.ico
-            TargetOriginId: s3-assets
-            ViewerProtocolPolicy: redirect-to-https
-            Compress: true
-            AllowedMethods: [GET, HEAD]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-            FunctionAssociations:
-              - EventType: viewer-request
-                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
-        ViewerCertificate:
-          CloudFrontDefaultCertificate: true
-        Restrictions:
-          GeoRestriction:
-            RestrictionType: none
+          - {PathPattern: '*.js', TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
+          - {PathPattern: '*.css', TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
+          - {PathPattern: /media/*, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
+          - {PathPattern: /i18n/*, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
+          - {PathPattern: /favicon.ico, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
 
 Outputs:
-  SSRFunctionUrl:
-    Value: !GetAtt SSRFunctionUrl.FunctionUrl
-    Export:
-      Name: !Sub '${AWS::StackName}-SSRUrl'
   StaticAssetsBucketName:
     Value: !Ref StaticAssetsBucket
-    Export:
-      Name: !Sub '${AWS::StackName}-StaticAssetsBucket'
   CloudFrontDistributionId:
     Value: !Ref CloudFrontDistribution
-    Export:
-      Name: !Sub '${AWS::StackName}-DistributionId'
-  CloudFrontDomain:
-    Value: !GetAtt CloudFrontDistribution.DomainName
-    Export:
-      Name: !Sub '${AWS::StackName}-CDN'
   WebsiteUrl:
     Value: !Sub 'https://${CloudFrontDistribution.DomainName}'

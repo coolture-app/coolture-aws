@@ -9,7 +9,7 @@ Parameters:
     AllowedValues: [local, dev, staging, prod]
   BaseStackName:
     Type: String
-    Default: coolture-base-dev
+    Default: mgmt-stack-networking
   BackendStackName:
     Type: String
     Default: coolture-backend-dev
@@ -23,7 +23,6 @@ Parameters:
     Type: String
     Default: admin
     NoEcho: true
-    Description: Local only - on AWS the workers use IAM database authentication
   DbAppUsername:
     Type: String
     Default: coolture_app
@@ -43,7 +42,6 @@ Parameters:
   UserEmbeddingSchedule:
     Type: String
     Default: 'cron(0/30 8-15 ? * * *)'
-    Description: Every 30 minutes from 08:00 to 15:30 (last run before 16:00) in UserEmbeddingScheduleTimezone
   UserEmbeddingScheduleTimezone:
     Type: String
     Default: Europe/Warsaw
@@ -57,6 +55,11 @@ Conditions:
 Globals:
   Function:
     Architectures: !If [IsAWS, [arm64], [x86_64]]
+    VpcConfig: !If
+      - IsAWS
+      - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
+        SecurityGroupIds: [!ImportValue {'Fn::Sub': '${BackendStackName}-LambdaSecurityGroupId'}]
+      - !Ref AWS::NoValue
     Environment:
       Variables:
         ENVIRONMENT: !Ref Environment
@@ -89,12 +92,6 @@ Resources:
       Timeout: 120
       Policies:
         - !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbConnectPolicyArn'}, !Ref AWS::NoValue]
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-          SecurityGroupIds:
-            - !ImportValue {'Fn::Sub': '${BackendStackName}-LambdaSecurityGroupId'}
-        - !Ref AWS::NoValue
       Events:
         PostEmbeddingMessages:
           Type: SQS
@@ -129,12 +126,6 @@ Resources:
       Timeout: 300
       Policies:
         - !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbConnectPolicyArn'}, !Ref AWS::NoValue]
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-          SecurityGroupIds:
-            - !ImportValue {'Fn::Sub': '${BackendStackName}-LambdaSecurityGroupId'}
-        - !Ref AWS::NoValue
       Events:
         WorkingHours:
           Type: ScheduleV2

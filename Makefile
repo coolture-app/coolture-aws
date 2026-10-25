@@ -34,12 +34,12 @@ logs: ## Tail PostgreSQL logs
 clean: ## Clean build artifacts
 	@rm -rf .aws-sam
 	@for dir in aws/lambdas/*/; do \
-		[ -f "$$dir/pom.xml" ] && (./mvnw clean -f "$$dir/pom.xml" -q 2>/dev/null) || true; \
+		[ -f "$$dir/pom.xml" ] && (mvn clean -f "$$dir/pom.xml" -q 2>/dev/null) || true; \
 	done
 
 build-common: ## Build and install shared common module
 	@echo "Building common module..."
-	@./mvnw clean install -f aws/lambdas/common/pom.xml -q
+	@mvn clean install -f aws/lambdas/common/pom.xml -q
 
 build: build-common ## Build backend lambdas
 	@sam build --template-file aws/backend.yaml --parallel --cached
@@ -63,16 +63,12 @@ local: build ## Start local API on localhost:3000
 	@sam local start-api --template-file .aws-sam/build/template.yaml --warm-containers EAGER --skip-pull-image
 
 validate: ## Validate SAM templates
-	@sam validate --template-file aws/base.yaml
 	@sam validate --template-file aws/backend.yaml
 	@sam validate --template-file aws/frontend.yaml
 	@sam validate --template-file aws/auth.yaml
 	@sam validate --template-file embedding-workers/template.yaml
 
-deploy-base: ## Deploy network stack to AWS (dev) - first, others import from it
-	@scripts/deploy.sh dev base
-
-deploy-backend: ## Deploy backend to AWS (dev, arm64) - needs base + auth deployed
+deploy-backend: ## Deploy backend to AWS (dev, arm64) - needs mgmt-stack-networking (management stack) + auth deployed
 	@scripts/deploy.sh dev backend
 
 deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to AWS (dev) - needs backend deployed
@@ -84,13 +80,13 @@ deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
 build-embeddings: ## Build embedding workers for local runs (x86_64; post-embedding image needs Docker)
 	@sam build --template-file embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
-deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs base + backend deployed
+deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs mgmt-stack-networking + backend deployed
 	@scripts/deploy.sh dev embeddings
 
-deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="base auth backend embeddings waf frontend")
+deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="auth backend embeddings waf frontend")
 	@scripts/deploy.sh $(or $(ENV),dev) $(STACKS)
 
-deploy-waf: ## Deploy CloudFront WAF web ACL to us-east-1 (dev) - ~$7/month + $0.60 per 1M requests
+deploy-waf: ## Deploy CloudFront WAF web ACL + allowed-IP sets to us-east-1 (dev) - ~$8/month + $0.60 per 1M requests
 	@scripts/deploy.sh dev waf
 
 deploy-all: ## Deploy all stacks (dev)
@@ -107,9 +103,6 @@ delete-frontend: ## Delete frontend stack
 
 delete-auth: ## Delete auth stack
 	@sam delete --stack-name coolture-auth-dev --no-prompts
-
-delete-base: ## Delete network stack (delete backend first: it imports base outputs)
-	@sam delete --stack-name coolture-base-dev --no-prompts
 
 logs-api: ## Tail backend logs
 	@sam logs --stack-name coolture-backend-dev --tail

@@ -10,20 +10,35 @@ Parameters:
   LocalCallbackUrls:
     Type: String
     Default: 'http://localhost:4200/auth/callback,http://localhost:4000/auth/callback'
-    Description: Comma-separated local login callback URLs (ng serve, SSR server); Cognito matches them exactly
   LocalLogoutUrls:
     Type: String
     Default: 'http://localhost:4200/,http://localhost:4000/'
   FrontendUrl:
     Type: String
     Default: ''
-    Description: Deployed frontend URL (CloudFront WebsiteUrl output); scripts/deploy.sh fills it in once the frontend stack exists
   LogRetentionDays:
     Type: Number
     Default: 7
 
 Conditions:
   HasFrontendUrl: !Not [!Equals [!Ref FrontendUrl, '']]
+
+Globals:
+  Function:
+    CodeUri: lambdas/authorizer/src/
+    Handler: app.lambda_handler
+    Runtime: python3.13
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 5
+    Environment:
+      Variables:
+        COGNITO_ISSUER: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+        COGNITO_CLIENT_ID: !Ref UserPoolClient
+        ORIGIN_VERIFY_SECRET: !Sub '{{resolve:secretsmanager:${OriginVerifySecret}:SecretString}}'
+    Tags:
+      Project: coolture
+      Environment: !Ref Environment
 
 Resources:
   UserPool:
@@ -59,22 +74,13 @@ Resources:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
         - ALLOW_USER_PASSWORD_AUTH
-      GenerateSecret: false
       PreventUserExistenceErrors: ENABLED
-      AccessTokenValidity: 1
-      IdTokenValidity: 1
-      RefreshTokenValidity: 30
-      TokenValidityUnits:
-        AccessToken: hours
-        IdToken: hours
-        RefreshToken: days
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid, email, profile]
       AllowedOAuthFlowsUserPoolClient: true
       CallbackURLs: !Split [',', !If [HasFrontendUrl, !Sub '${LocalCallbackUrls},${FrontendUrl}/auth/callback', !Ref LocalCallbackUrls]]
       LogoutURLs: !Split [',', !If [HasFrontendUrl, !Sub '${LocalLogoutUrls},${FrontendUrl}/', !Ref LocalLogoutUrls]]
       SupportedIdentityProviders: [COGNITO]
-      EnableTokenRevocation: true
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
@@ -86,7 +92,6 @@ Resources:
     Type: AWS::SecretsManager::Secret
     Properties:
       Name: !Sub 'coolture-${Environment}-origin-verify'
-      Description: Shared secret CloudFront sends as X-Origin-Verify so the API rejects calls that bypass CloudFront/WAF
       GenerateSecretString:
         PasswordLength: 48
         ExcludePunctuation: true
@@ -101,23 +106,11 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-optional-auth'
-      CodeUri: lambdas/authorizer/src/
-      Handler: app.lambda_handler
-      Runtime: python3.13
-      Architectures: [arm64]
-      MemorySize: 256
-      Timeout: 5
       LoggingConfig:
         LogGroup: !Ref OptionalAuthLogGroup
       Environment:
         Variables:
-          COGNITO_ISSUER: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
-          COGNITO_CLIENT_ID: !Ref UserPoolClient
-          ORIGIN_VERIFY_SECRET: !Sub '{{resolve:secretsmanager:${OriginVerifySecret}:SecretString}}'
           AUTH_MODE: optional
-      Tags:
-        Project: coolture
-        Environment: !Ref Environment
 
   RequiredAuthLogGroup:
     Type: AWS::Logs::LogGroup
@@ -129,41 +122,17 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-required-auth'
-      CodeUri: lambdas/authorizer/src/
-      Handler: app.lambda_handler
-      Runtime: python3.13
-      Architectures: [arm64]
-      MemorySize: 256
-      Timeout: 5
       LoggingConfig:
         LogGroup: !Ref RequiredAuthLogGroup
       Environment:
         Variables:
-          COGNITO_ISSUER: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
-          COGNITO_CLIENT_ID: !Ref UserPoolClient
-          ORIGIN_VERIFY_SECRET: !Sub '{{resolve:secretsmanager:${OriginVerifySecret}:SecretString}}'
           AUTH_MODE: required
-      Tags:
-        Project: coolture
-        Environment: !Ref Environment
 
 Outputs:
-  UserPoolId:
-    Value: !Ref UserPool
-    Export:
-      Name: !Sub '${AWS::StackName}-UserPoolId'
   UserPoolClientId:
     Value: !Ref UserPoolClient
-    Export:
-      Name: !Sub '${AWS::StackName}-ClientId'
-  JWTIssuer:
-    Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
-    Export:
-      Name: !Sub '${AWS::StackName}-Issuer'
   HostedUiUrl:
     Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
-    Export:
-      Name: !Sub '${AWS::StackName}-HostedUiUrl'
   OptionalAuthFunctionArn:
     Value: !GetAtt OptionalAuthFunction.Arn
     Export:

@@ -9,8 +9,7 @@ Parameters:
     AllowedValues: [local, dev, staging, prod]
   BaseStackName:
     Type: String
-    Default: coolture-base-dev
-    Description: Network stack (aws/base.yaml) whose VPC, subnets and security groups are imported
+    Default: mgmt-stack-networking
   DbName:
     Type: String
     Default: coolture
@@ -21,11 +20,9 @@ Parameters:
     Type: String
     Default: admin
     NoEcho: true
-    Description: Local (sam local) only - on AWS the master password is generated in Secrets Manager and Lambdas use IAM auth
   DbAppUsername:
     Type: String
     Default: coolture_app
-    Description: IAM-authenticated database role used by the Lambdas on AWS (created by migration V7)
   DbHost:
     Type: String
     Default: host.docker.internal
@@ -46,15 +43,12 @@ Parameters:
   AuroraEngineVersion:
     Type: String
     Default: '16.8'
-    Description: Aurora PostgreSQL version; scale-to-zero (MinCapacity 0) needs 13.15+, 14.12+, 15.7+ or 16.3+
   CorsAllowedOrigins:
     Type: String
     Default: 'http://localhost:4200'
-    Description: Comma-separated browser origins allowed to call the API directly (the CloudFront frontend uses same-origin /api/*)
   ApiThrottlingRateLimit:
     Type: Number
     Default: 20
-    Description: Steady-state requests per second per route
   ApiThrottlingBurstLimit:
     Type: Number
     Default: 40
@@ -71,6 +65,11 @@ Globals:
     Architectures: !If [IsAWS, [arm64], [x86_64]]
     MemorySize: 512
     Timeout: 30
+    VpcConfig: !If
+      - IsAWS
+      - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
+        SecurityGroupIds: [!Ref LambdaSecurityGroup]
+      - !Ref AWS::NoValue
     Environment:
       Variables:
         ENVIRONMENT: !Ref Environment
@@ -97,7 +96,6 @@ Resources:
     Condition: IsAWS
     Properties:
       Name: !Sub 'coolture-${Environment}-db-credentials'
-      Description: Aurora master credentials, used only by Aurora and the migration Lambda
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${DbUsername}"}'
         GenerateStringKey: password
@@ -116,7 +114,6 @@ Resources:
     Type: AWS::IAM::ManagedPolicy
     Condition: IsAWS
     Properties:
-      Description: IAM database authentication as the application role
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -159,6 +156,8 @@ Resources:
   AuroraCluster:
     Type: AWS::RDS::DBCluster
     Condition: IsAWS
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
     Properties:
       Engine: aurora-postgresql
       EngineVersion: !Ref AuroraEngineVersion
@@ -168,12 +167,11 @@ Resources:
       EnableIAMDatabaseAuthentication: true
       DBClusterIdentifier: !Sub 'coolture-${Environment}-cluster'
       DBSubnetGroupName: !Ref AuroraSubnetGroup
-      VpcSecurityGroupIds:
-        - !Ref DatabaseSecurityGroup
+      VpcSecurityGroupIds: [!Ref DatabaseSecurityGroup]
       ServerlessV2ScalingConfiguration:
         MinCapacity: 0
         MaxCapacity: 1.0
-        SecondsUntilAutoPause: 180
+        SecondsUntilAutoPause: 300
       BackupRetentionPeriod: 7
       StorageEncrypted: true
 
@@ -213,15 +211,11 @@ Resources:
           DB_PASSWORD: !Sub '{{resolve:secretsmanager:${DbSecret}:SecretString:password}}'
           DB_IAM_AUTH: 'false'
           DB_CONNECT_TIMEOUT_SECONDS: '30'
-      VpcConfig:
-        SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
 
   DatabaseMigrations:
     Type: AWS::CloudFormation::CustomResource
     Condition: IsAWS
-    DependsOn: [AuroraInstance, S3GatewayEndpoint]
+    DependsOn: AuroraInstance
     Properties:
       ServiceToken: !Ref MigrationFunction.Alias
       ServiceTimeout: 900
@@ -260,16 +254,6 @@ Resources:
             EnableFunctionDefaultPermissions: true
             Identity:
               ReauthorizeEvery: 0
-
-  S3GatewayEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: IsAWS
-    Properties:
-      VpcEndpointType: Gateway
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
-      VpcId: !ImportValue {'Fn::Sub': '${BaseStackName}-VpcId'}
-      RouteTableIds:
-        - !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateRouteTableId'}
 
   PostEmbeddingDLQ:
     Type: AWS::SQS::Queue
@@ -330,7 +314,17 @@ Resources:
                   - Name: prefix
                     Value: posts/
 
-  # Lambda Functions
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'coolture-${Environment}-media'
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, HEAD, DELETE]
+            AllowedOrigins: ['*']
+            MaxAge: 3600
+
   UserLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -345,110 +339,25 @@ Resources:
         LogGroup: !Ref UserLogGroup
       CodeUri: lambdas/user/
       Handler: com.coolture.user.UserHandler::handleRequest
-      MemorySize: 512
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-          SecurityGroupIds:
-            - !Ref LambdaSecurityGroup
-        - !Ref AWS::NoValue
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:
             BucketName: !Ref MediaBucket
       Events:
-        SearchUsers:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users
-            Method: GET
-        GetUserById:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        GetUserByUsername:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/by-username/{username}
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        UpdateUser:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}
-            Method: PATCH
-        SetProfileImage:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/profile-image
-            Method: PUT
-        DeleteProfileImage:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/profile-image
-            Method: DELETE
-        GetMe:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /auth/me
-            Method: GET
-        GetFollowers:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/followers
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        GetFollowing:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/following
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        FollowUser:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/follow
-            Method: POST
-        UnfollowUser:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/follow
-            Method: DELETE
-        GetBlocking:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/blocking
-            Method: GET
-        BlockUser:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/block
-            Method: POST
-        UnblockUser:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users/{userId}/block
-            Method: DELETE
+        SearchUsers: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /users, Method: GET}}
+        GetUserById: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetUserByUsername: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/by-username/{username}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        UpdateUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}', Method: PATCH}}
+        SetProfileImage: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/profile-image', Method: PUT}}
+        DeleteProfileImage: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/profile-image', Method: DELETE}}
+        GetMe: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /auth/me, Method: GET}}
+        GetFollowers: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/followers', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetFollowing: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/following', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        FollowUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/follow', Method: POST}}
+        UnfollowUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/follow', Method: DELETE}}
+        GetBlocking: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/blocking', Method: GET}}
+        BlockUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/block', Method: POST}}
+        UnblockUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/block', Method: DELETE}}
 
   PostWriteLogGroup:
     Type: AWS::Logs::LogGroup
@@ -470,113 +379,29 @@ Resources:
           EMBEDDING_REQUESTS_BUCKET: !If [IsAWS, !Ref EmbeddingRequestsBucket, '']
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
+        - S3ReadPolicy:
+            BucketName: !Ref MediaBucket
         - Statement:
             - Effect: Allow
               Action: s3:PutObject
               Resource: !Sub '${EmbeddingRequestsBucket.Arn}/posts/*'
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-          SecurityGroupIds:
-            - !Ref LambdaSecurityGroup
-        - !Ref AWS::NoValue
       Events:
-        CreatePost:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts
-            Method: POST
-        UpdatePost:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{id}
-            Method: PATCH
-        DeletePost:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{id}
-            Method: DELETE
-        CreateEventLocation:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /event-locations
-            Method: POST
-        UpdateEventLocation:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /event-locations/{id}
-            Method: PATCH
-        DeleteEventLocation:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /event-locations/{id}
-            Method: DELETE
-        CreateEventLocationAdmin:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /event-locations/admin
-            Method: POST
-        UpdateEventLocationAdmin:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /event-locations/admin/{id}
-            Method: PATCH
-        DeleteEventLocationAdmin:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /event-locations/admin/{id}
-            Method: DELETE
-        UpsertReaction:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{postId}/reaction
-            Method: PUT
-        DeleteReaction:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{postId}/reaction
-            Method: DELETE
-        UpsertParticipation:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{postId}/participation
-            Method: PUT
-        DeleteParticipation:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{postId}/participation
-            Method: DELETE
-        CreateCountryCode:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /dicts/admin/country-codes
-            Method: POST
-        UpdateCountryCode:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /dicts/admin/country-codes/{code}
-            Method: PUT
-        DeleteCountryCode:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /dicts/admin/country-codes/{code}
-            Method: DELETE
+        CreatePost: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts, Method: POST}}
+        UpdatePost: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{id}', Method: PATCH}}
+        DeletePost: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{id}', Method: DELETE}}
+        CreateEventLocation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /event-locations, Method: POST}}
+        UpdateEventLocation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/event-locations/{id}', Method: PATCH}}
+        DeleteEventLocation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/event-locations/{id}', Method: DELETE}}
+        CreateEventLocationAdmin: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /event-locations/admin, Method: POST}}
+        UpdateEventLocationAdmin: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/event-locations/admin/{id}', Method: PATCH}}
+        DeleteEventLocationAdmin: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/event-locations/admin/{id}', Method: DELETE}}
+        UpsertReaction: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/reaction', Method: PUT}}
+        DeleteReaction: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/reaction', Method: DELETE}}
+        UpsertParticipation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/participation', Method: PUT}}
+        DeleteParticipation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/participation', Method: DELETE}}
+        CreateCountryCode: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/admin/country-codes, Method: POST}}
+        UpdateCountryCode: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/dicts/admin/country-codes/{code}', Method: PUT}}
+        DeleteCountryCode: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/dicts/admin/country-codes/{code}', Method: DELETE}}
 
   PostReadLogGroup:
     Type: AWS::Logs::LogGroup
@@ -595,73 +420,17 @@ Resources:
       MemorySize: 1024
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-          SecurityGroupIds:
-            - !Ref LambdaSecurityGroup
-        - !Ref AWS::NoValue
+        - S3ReadPolicy:
+            BucketName: !Ref MediaBucket
       Events:
-        HealthCheck:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /actuator/health
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        GetCountryCodes:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /dicts/country-codes
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        GetRecommendations:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/recommendations
-            Method: GET
-        GetMapMarks:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/map
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        GetPostById:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{id}
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        GetFeed:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        GetEventLocations:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /event-locations
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        GetEventLocationsAdmin:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /event-locations/admin
-            Method: GET
+        HealthCheck: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /actuator/health, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetCountryCodes: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/country-codes, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetRecommendations: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts/recommendations, Method: GET}}
+        GetMapMarks: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts/map, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetPostById: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{id}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetFeed: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetEventLocations: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /event-locations, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetEventLocationsAdmin: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /event-locations/admin, Method: GET}}
 
   CommentReadLogGroup:
     Type: AWS::Logs::LogGroup
@@ -680,21 +449,10 @@ Resources:
       MemorySize: 1024
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-          SecurityGroupIds:
-            - !Ref LambdaSecurityGroup
-        - !Ref AWS::NoValue
+        - S3ReadPolicy:
+            BucketName: !Ref MediaBucket
       Events:
-        ListComments:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{postId}/comments
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
+        ListComments: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/comments', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
 
   CommentWriteLogGroup:
     Type: AWS::Logs::LogGroup
@@ -713,42 +471,12 @@ Resources:
       MemorySize: 1024
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-          SecurityGroupIds:
-            - !Ref LambdaSecurityGroup
-        - !Ref AWS::NoValue
+        - S3ReadPolicy:
+            BucketName: !Ref MediaBucket
       Events:
-        CreateComment:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /posts/{postId}/comments
-            Method: POST
-        UpdateComment:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /comments/{commentId}
-            Method: PATCH
-        DeleteComment:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /comments/{commentId}
-            Method: DELETE
-
-  MediaBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub 'coolture-${Environment}-media'
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders: ['*']
-            AllowedMethods: [GET, PUT, HEAD, DELETE]
-            AllowedOrigins: ['*']
-            MaxAge: 3600
+        CreateComment: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/comments', Method: POST}}
+        UpdateComment: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/comments/{commentId}', Method: PATCH}}
+        DeleteComment: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/comments/{commentId}', Method: DELETE}}
 
   MediaLogGroup:
     Type: AWS::Logs::LogGroup
@@ -764,50 +492,19 @@ Resources:
         LogGroup: !Ref MediaLogGroup
       CodeUri: lambdas/media/
       Handler: com.coolture.media.MediaHandler::handleRequest
-      MemorySize: 512
-      VpcConfig: !If
-        - IsAWS
-        - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
-          SecurityGroupIds:
-            - !Ref LambdaSecurityGroup
-        - !Ref AWS::NoValue
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
         - S3CrudPolicy:
             BucketName: !Ref MediaBucket
       Events:
-        InitUpload:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /media/uploads/init
-            Method: POST
-        CompleteUpload:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /media/uploads/{mediaId}/complete
-            Method: POST
-        GetMedia:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /media/{mediaId}
-            Method: GET
-            Auth:
-              Authorizer: OptionalAuthorizer
-        DeleteMedia:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /media/{mediaId}
-            Method: DELETE
+        InitUpload: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /media/uploads/init, Method: POST}}
+        CompleteUpload: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/media/uploads/{mediaId}/complete', Method: POST}}
+        GetMedia: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/media/{mediaId}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        DeleteMedia: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/media/{mediaId}', Method: DELETE}}
 
 Outputs:
   ApiEndpoint:
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
-    Export:
-      Name: !Sub '${AWS::StackName}-ApiEndpoint'
   ApiDomain:
     Value: !Sub '${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
     Export:

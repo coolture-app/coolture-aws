@@ -6,7 +6,6 @@ NOTE: The docker image of the database was changed to match the image used in co
 
 ```
 aws/
-├── base.yaml               # Network: VPC, 2 private subnets, route table, Lambda/DB security groups
 ├── auth.yaml               # Cognito User Pool and JWT configuration
 ├── backend.yaml            # API Gateway, Java Lambdas, Aurora, S3 media bucket, embedding queue + requests bucket
 ├── frontend.yaml           # SSR Lambda, S3 static hosting, CloudFront CDN
@@ -20,7 +19,7 @@ aws/
 │   ├── user/               # User profiles, avatar, relations (follow/block)
 │   └── ssr/                # Angular SSR Lambda
 embedding-workers/          # Independent stack: Python embedding Lambdas (own template.yaml)
-├── template.yaml           # Imports network from base, queue ARN + DB endpoint from backend
+├── template.yaml           # Imports network from mgmt-stack-networking[-<env>], queue ARN + DB endpoint from backend
 ├── post-embedding/         # Container image: SQS → all-mpnet-base-v2 → post_embeddings
 └── user-embedding/         # Zip: every 30 min, weighted avg of post embeddings → user_embeddings
 migrations/                 # PostgreSQL schema migrations
@@ -28,24 +27,39 @@ scripts/                    # Local helpers (embed-posts.sh)
 samconfig.toml              # SAM deployment configuration
 ```
 
+## Prerequisites in the AWS account
+
+The account-level stacks live in the separate management stack (`~/Projects/aws/management-stack`), not here:
+
+- `mgmt-stack-networking[-<env>]`: VPC, private subnets, route table and S3 gateway endpoint. Coolture imports it through
+  `BaseStackName=mgmt-stack-networking[-<env>]`, so it must exist before `backend` / `embeddings` and be deleted after them.
+- `account`: IAM roles (`admin`, `deployer`, `developer`, `cloudformation-execution`) and groups. Deploy Coolture as an
+  owner with `AWS_PROFILE=deployer CFN_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/cloudformation-execution scripts/deploy.sh dev`.
+
 ## Stacks & Deployment
 
-Deploy order (later stacks import earlier stacks' exports): `make deploy-base` → `make deploy-auth` →
-`make deploy-backend` → `make deploy-embeddings` → `make deploy-frontend` (or `make deploy-all`).
+Deploy order (later stacks import earlier stacks' exports), after `mgmt-stack-networking[-<env>]` exists: `make deploy-auth` →
+`make deploy-backend` → `make deploy-embeddings` → `make deploy-waf` → `make deploy-frontend` (or `make deploy-all`).
 Delete in reverse order.
 
 | Stack | Template | Imports from |
 |---|---|---|
-| `coolture-base-<env>` | `aws/base.yaml` | - |
 | `coolture-auth-<env>` | `aws/auth.yaml` | - |
-| `coolture-backend-<env>` | `aws/backend.yaml` | base (network), auth (Cognito client ID + issuer) |
-| `coolture-embeddings-<env>` | `embedding-workers/template.yaml` | base (network), backend (queue ARN, DB endpoint/port) |
-| `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API endpoint) |
+| `coolture-backend-<env>` | `aws/backend.yaml` | mgmt-stack-networking[-<env>] (VPC, subnets), auth (authorizers, Cognito) |
+| `coolture-embeddings-<env>` | `embedding-workers/template.yaml` | mgmt-stack-networking[-<env>], backend (queue ARN, DB endpoint/port, security group) |
+| `coolture-waf-<env>` (us-east-1) | `aws/waf.yaml` | - |
+| `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API domain), waf (web ACL ARN, passed by deploy.sh) |
 
-`base.yaml` is built for minimum fixed cost: private subnets only, no Internet Gateway, no NAT, no interface
-endpoints. VPC Lambdas can reach Aurora and S3 (free gateway endpoint, in `backend.yaml`) and nothing else.
+### Restricting the site to specific IPs
+
+The CloudFront WAF (`aws/waf.yaml`) owns two IP sets, `coolture-<env>-allowed-ipv4` and `-ipv6`, created empty. The
+addresses never live in code: manage them in the AWS console under WAF & Shield → IP sets (region "Global
+(CloudFront)"), entering CIDRs such as `203.0.113.7/32`. The restriction is always on: only listed addresses can open
+the site or call `/api`, and right after the first deploy the sets are empty, so add your address before testing.
+
+The network stack is built for minimum fixed cost: private subnets only, no Internet Gateway, no NAT, no interface
+endpoints. VPC Lambdas can reach Aurora and S3 (free gateway endpoint) and nothing else.
 Anything that needs the internet or another AWS API has to run outside the VPC.
-Two subnets in two AZs because Aurora's DB subnet group requires it.
 
 ## Embedding Pipeline (recommendations)
 
@@ -65,7 +79,7 @@ EventBridge rate(30 minutes) ──► UserEmbeddingFunction ──► user_embe
   workers are the separate `embedding-workers/` stack and can be deployed, rebuilt or removed on their own.
 - Why S3 in the middle: VPC Lambdas have no internet. Reaching SQS would need a paid interface endpoint
   (~$9/month) or NAT; the S3 **gateway** endpoint is free and S3 → SQS notifications are free.
-  The gateway endpoint route is added to the private route table from the base stack.
+  The gateway endpoint and its route on the private route table belong to the base stack.
 - `post-write` writes after the DB commit; a failed write is only logged (same as the Spring publisher).
   With `Environment=local` the bucket env var is empty and publishing is skipped.
 - The consumer reads the post from the DB at processing time, so duplicated/out-of-order S3 events still
@@ -448,7 +462,7 @@ Switching between local testing and actual AWS S3 is fully controlled by environ
 | `MEDIA_BUCKET_NAME`        | `coolture-bucket` (or set by `s3-init`)                            | `coolture-${Environment}-media` (from `backend.yaml`) |
 | `S3_ENDPOINT_URL`          | `http://localhost:3900`                                            | _Unset_ (SDK automatically targets native AWS S3)     |
 | `S3_PUBLIC_ENDPOINT_URL`   | `http://localhost:3900` (browser-reachable URL)                    | _Unset_ (defaults to AWS S3)                          |
-| `AWS_REGION`               | `garage`                                                           | `eu-central-1` (or Lambda execution region)           |
+| `AWS_REGION`               | `garage`                                                           | `eu-north-1` (or Lambda execution region)           |
 | `GARAGE_ACCESS_KEY_ID`     | `GK9f23fc115cfabe3da0a5bcb5`                                       | _Unset_ (Lambda IAM execution role is used)           |
 | `GARAGE_ACCESS_KEY_SECRET` | `8fa745da69f465aff2fafb09ab290c6358e6e58c0ec3d3fc174d27f300688111` | _Unset_ (Lambda IAM execution role is used)           |
 

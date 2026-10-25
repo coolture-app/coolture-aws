@@ -1,8 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >-
-  Coolture WAF - CloudFront-scoped web ACL protecting the whole distribution (SSR, static assets and /api/*).
-  CloudFront web ACLs must live in us-east-1. Pay-as-you-go: $5/month per web ACL + $1/month per rule
-  + $0.60 per 1M requests inspected.
+Description: Coolture WAF (CloudFront scope, must be deployed in us-east-1)
 
 Parameters:
   Environment:
@@ -13,14 +10,28 @@ Parameters:
     Type: Number
     Default: 2000
     MinValue: 10
-    Description: Requests one IP may send in any 5-minute window before it is blocked (page loads, assets and API calls all count)
 
 Resources:
+  AllowedIpv4Set:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: !Sub 'coolture-${Environment}-allowed-ipv4'
+      Scope: CLOUDFRONT
+      IPAddressVersion: IPV4
+      Addresses: []
+
+  AllowedIpv6Set:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: !Sub 'coolture-${Environment}-allowed-ipv6'
+      Scope: CLOUDFRONT
+      IPAddressVersion: IPV6
+      Addresses: []
+
   WebAcl:
     Type: AWS::WAFv2::WebACL
     Properties:
       Name: !Sub 'coolture-${Environment}'
-      Description: Per-IP rate limiting and AWS IP reputation list for the Coolture CloudFront distribution
       Scope: CLOUDFRONT
       DefaultAction:
         Allow: {}
@@ -29,8 +40,25 @@ Resources:
         CloudWatchMetricsEnabled: true
         MetricName: !Sub 'coolture-${Environment}'
       Rules:
-        - Name: rate-limit-per-ip
+        - Name: block-unlisted-ips
           Priority: 0
+          Action:
+            Block: {}
+          Statement:
+            NotStatement:
+              Statement:
+                OrStatement:
+                  Statements:
+                    - IPSetReferenceStatement:
+                        Arn: !GetAtt AllowedIpv4Set.Arn
+                    - IPSetReferenceStatement:
+                        Arn: !GetAtt AllowedIpv6Set.Arn
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub 'coolture-${Environment}-unlisted-ip'
+        - Name: rate-limit-per-ip
+          Priority: 1
           Action:
             Block: {}
           Statement:
@@ -43,7 +71,7 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: !Sub 'coolture-${Environment}-rate-limit'
         - Name: aws-ip-reputation
-          Priority: 1
+          Priority: 2
           OverrideAction:
             None: {}
           Statement:
