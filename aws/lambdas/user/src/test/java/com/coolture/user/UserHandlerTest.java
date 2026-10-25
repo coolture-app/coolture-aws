@@ -65,6 +65,22 @@ class UserHandlerTest {
     }
 
     @Test
+    void search_returns200WithPage_whenPathHasStagePrefix() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/dev/users", null, null);
+
+        var page = new CursorPage<UserSummaryDto>(List.of(), new PaginationMeta(20, false, null));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
+            when(service.search(eq(CALLER_ID), eq(null), eq(null), eq(20))).thenReturn(page);
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+        }
+    }
+
+    @Test
     void search_returns200WithPage_whenAuthenticated() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users", null, null);
 

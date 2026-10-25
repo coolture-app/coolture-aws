@@ -260,7 +260,7 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
     private boolean isRootUsersPath(String path) {
         if (path == null) return false;
         String clean = path.replaceAll("/+$", "");
-        return clean.equals("/users") || clean.isEmpty();
+        return clean.endsWith("/users") || clean.isEmpty();
     }
 
     private static boolean isUuid(String value) {
