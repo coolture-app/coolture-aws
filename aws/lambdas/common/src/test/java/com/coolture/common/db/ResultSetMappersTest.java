@@ -12,6 +12,9 @@ import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.storage.MediaUrls;
+import com.coolture.common.storage.S3StorageService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Array;
@@ -216,6 +219,72 @@ class ResultSetMappersTest {
         assertEquals(mediaId, pm.media().id());
         assertEquals(2, pm.position());
         assertTrue(pm.isCover());
+    }
+
+    @Test
+    void mapUserSummary_withAvatarObjectKey_presignsAvatarUrl() throws SQLException {
+        S3StorageService storage = mock(S3StorageService.class);
+        when(storage.presignGet("users/1/avatar.png")).thenReturn("https://signed/avatar");
+        MediaUrls.useStorage(storage);
+        ResultSet rs = mock(ResultSet.class);
+        when(rs.getObject("author_id")).thenReturn(UUID.randomUUID());
+        when(rs.getObject("avatar_id")).thenReturn(UUID.randomUUID());
+        when(rs.getString("avatar_purpose")).thenReturn("PROFILE_IMAGE_THUMBNAIL");
+        when(rs.getString("avatar_status")).thenReturn("UPLOADED");
+        when(rs.getString("avatar_object_key")).thenReturn("users/1/avatar.png");
+
+        UserSummaryDto user = ResultSetMappers.mapUserSummary(rs);
+
+        assertEquals("https://signed/avatar", user.avatar().url());
+    }
+
+    @Test
+    void mapCoverMedia_withObjectKey_presignsUrl() throws SQLException {
+        S3StorageService storage = mock(S3StorageService.class);
+        when(storage.presignGet("posts/1/cover.jpg")).thenReturn("https://signed/cover");
+        MediaUrls.useStorage(storage);
+        ResultSet rs = mock(ResultSet.class);
+        when(rs.getObject("cover_id")).thenReturn(UUID.randomUUID());
+        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
+        when(rs.getString("cover_status")).thenReturn("UPLOADED");
+        when(rs.getString("cover_object_key")).thenReturn("posts/1/cover.jpg");
+
+        MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
+
+        assertEquals("https://signed/cover", cover.url());
+    }
+
+    @Test
+    void mapPostMedia_withObjectKey_presignsUrl() throws SQLException {
+        S3StorageService storage = mock(S3StorageService.class);
+        when(storage.presignGet("posts/1/photo.jpg")).thenReturn("https://signed/photo");
+        MediaUrls.useStorage(storage);
+        ResultSet rs = mock(ResultSet.class);
+        when(rs.getObject("media_id")).thenReturn(UUID.randomUUID());
+        when(rs.getString("purpose")).thenReturn("EVENT_MEDIA");
+        when(rs.getString("status")).thenReturn("UPLOADED");
+        when(rs.getString("object_key")).thenReturn("posts/1/photo.jpg");
+
+        PostMediaDto pm = ResultSetMappers.mapPostMedia(rs);
+
+        assertEquals("https://signed/photo", pm.media().url());
+    }
+
+    @Test
+    void mapCoverMedia_withoutObjectKey_leavesUrlNull() throws SQLException {
+        ResultSet rs = mock(ResultSet.class);
+        when(rs.getObject("cover_id")).thenReturn(UUID.randomUUID());
+        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
+        when(rs.getString("cover_status")).thenReturn("UPLOADED");
+
+        MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
+
+        assertNull(cover.url());
+    }
+
+    @AfterEach
+    void resetMediaUrls() {
+        MediaUrls.useStorage(null);
     }
 
     @Test

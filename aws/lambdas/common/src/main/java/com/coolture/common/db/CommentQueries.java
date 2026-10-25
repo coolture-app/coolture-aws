@@ -27,7 +27,7 @@ public final class CommentQueries {
             avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose,
             avatar_m.mime_type AS avatar_mime_type,
             avatar_m.size_bytes AS avatar_size_bytes, avatar_m.status AS avatar_status,
-            avatar_m.created_at AS avatar_created_at, avatar_m.deleted_at AS avatar_deleted_at
+            avatar_m.created_at AS avatar_created_at, avatar_m.deleted_at AS avatar_deleted_at, avatar_m.object_key AS avatar_object_key
         """;
 
     public static final String AUTHOR_JOINS = """

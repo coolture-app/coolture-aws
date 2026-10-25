@@ -20,7 +20,7 @@ public final class MediaQueries {
     public static List<PostMediaDto> getPostMediaList(Connection conn, UUID postId) throws SQLException {
         String sql = """
             SELECT pm.position, pm.is_cover,
-                   m.id AS media_id, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at, m.deleted_at
+                   m.id AS media_id, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at, m.deleted_at, m.object_key
             FROM post_media pm
             JOIN media m ON m.id = pm.media_id
             WHERE pm.post_id = ?
