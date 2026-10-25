@@ -1,7 +1,8 @@
 package com.coolture.common.dto.enums;
 
 public enum MediaPurpose {
-    AVATAR,
-    POST_MEDIA,
-    OTHER
+    PROFILE_IMAGE,
+    PROFILE_IMAGE_THUMBNAIL,
+    EVENT_COVER,
+    EVENT_MEDIA
 }

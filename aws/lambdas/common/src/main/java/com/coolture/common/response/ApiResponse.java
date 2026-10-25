@@ -45,6 +45,10 @@ public class ApiResponse {
         return build(404, Map.of("error", message));
     }
 
+    public static APIGatewayV2HTTPResponse conflict(String message) {
+        return build(409, Map.of("error", message));
+    }
+
     public static APIGatewayV2HTTPResponse error(String message) {
         return build(500, Map.of("error", message));
     }

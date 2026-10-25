@@ -45,42 +45,42 @@ stack_name = "coolture-backend-dev"
 
 [backend-dev.build.parameters]
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=dev", "BaseStackName=coolture-base-dev"]
+parameter_overrides = ["Environment=dev", "BaseStackName=coolture-base-dev", "AuthStackName=coolture-auth-dev"]
 
 [backend-dev.deploy.parameters]
 stack_name = "coolture-backend-dev"
 capabilities = "CAPABILITY_IAM"
 resolve_s3 = true
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=dev", "BaseStackName=coolture-base-dev"]
+parameter_overrides = ["Environment=dev", "BaseStackName=coolture-base-dev", "AuthStackName=coolture-auth-dev"]
 
 [backend-staging.global.parameters]
 stack_name = "coolture-backend-staging"
 
 [backend-staging.build.parameters]
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=staging", "BaseStackName=coolture-base-staging"]
+parameter_overrides = ["Environment=staging", "BaseStackName=coolture-base-staging", "AuthStackName=coolture-auth-staging"]
 
 [backend-staging.deploy.parameters]
 stack_name = "coolture-backend-staging"
 capabilities = "CAPABILITY_IAM"
 resolve_s3 = true
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=staging", "BaseStackName=coolture-base-staging"]
+parameter_overrides = ["Environment=staging", "BaseStackName=coolture-base-staging", "AuthStackName=coolture-auth-staging"]
 
 [backend-prod.global.parameters]
 stack_name = "coolture-backend-prod"
 
 [backend-prod.build.parameters]
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod"]
+parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod", "AuthStackName=coolture-auth-prod"]
 
 [backend-prod.deploy.parameters]
 stack_name = "coolture-backend-prod"
 capabilities = "CAPABILITY_IAM"
 resolve_s3 = true
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod"]
+parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod", "AuthStackName=coolture-auth-prod"]
 
 [embeddings-dev.global.parameters]
 stack_name = "coolture-embeddings-dev"

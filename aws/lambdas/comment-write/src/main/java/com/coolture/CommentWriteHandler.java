@@ -1,5 +1,8 @@
 package com.coolture;
 
+import java.util.Map;
+import java.util.UUID;
+
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
@@ -11,9 +14,6 @@ import com.coolture.common.security.SecurityContext;
 import com.coolture.dto.CommentCreateRequest;
 import com.coolture.dto.CommentUpdateRequest;
 import com.coolture.services.CommentWriteService;
-
-import java.util.Map;
-import java.util.UUID;
 
 public class CommentWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
 
