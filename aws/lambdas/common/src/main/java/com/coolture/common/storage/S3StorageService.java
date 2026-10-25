@@ -183,8 +183,8 @@ public class S3StorageService {
     }
 
     private static AwsCredentialsProvider resolveCredentialsProvider() {
-        String accessKey = getEnvAny("GARAGE_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID");
-        String secretKey = getEnvAny("GARAGE_ACCESS_KEY_SECRET", "AWS_SECRET_ACCESS_KEY");
+        String accessKey = getEnvAny("GARAGE_ACCESS_KEY_ID");
+        String secretKey = getEnvAny("GARAGE_ACCESS_KEY_SECRET");
 
         if (accessKey != null && !accessKey.isBlank() && secretKey != null && !secretKey.isBlank()) {
             return StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKey, secretKey));

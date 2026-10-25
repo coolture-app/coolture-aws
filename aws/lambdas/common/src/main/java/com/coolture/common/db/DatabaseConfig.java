@@ -36,6 +36,7 @@ public class DatabaseConfig {
         config.setMinimumIdle(0);
         config.setIdleTimeout(60000);
         config.setConnectionTimeout(connectionTimeoutMs);
+        config.setInitializationFailTimeout(-1);
 
         dataSource = new HikariDataSource(config);
     }
