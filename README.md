@@ -6,9 +6,10 @@ NOTE: The docker image of the database was changed to match the image used in co
 
 ```
 aws/
-├── backend.yaml            # API Gateway, Lambda functions, Aurora database, S3 media bucket
-├── frontend.yaml           # SSR Lambda, S3 static hosting, CloudFront CDN
+├── base.yaml               # Network: VPC, 2 private subnets, route table, Lambda/DB security groups
 ├── auth.yaml               # Cognito User Pool and JWT configuration
+├── backend.yaml            # API Gateway, Java Lambdas, Aurora, S3 media bucket, embedding queue + requests bucket
+├── frontend.yaml           # SSR Lambda, S3 static hosting, CloudFront CDN
 ├── lambdas/
 │   ├── common/             # Shared Maven module (DB pool, DTOs, security, S3 storage, pagination, validation etc.)
 │   ├── media/              # Media upload lifecycle (init, complete, get, delete via presigned S3 URLs)
@@ -17,10 +18,76 @@ aws/
 │   ├── comment-write/      # Handles comment write operations (POST, PATCH, DELETE)
 │   ├── comment-read/       # Handles comment read operations (GET)
 │   ├── user/               # User profiles, avatar, relations (follow/block)
-│   ├── ssr/                # Angular SSR Lambda
-├── migrations/             # PostgreSQL schema migrations
-└── samconfig.toml          # SAM deployment configuration
+│   └── ssr/                # Angular SSR Lambda
+embedding-workers/          # Independent stack: Python embedding Lambdas (own template.yaml)
+├── template.yaml           # Imports network from base, queue ARN + DB endpoint from backend
+├── post-embedding/         # Container image: SQS → all-mpnet-base-v2 → post_embeddings
+└── user-embedding/         # Zip: every 30 min, weighted avg of post embeddings → user_embeddings
+migrations/                 # PostgreSQL schema migrations
+scripts/                    # Local helpers (embed-posts.sh)
+samconfig.toml              # SAM deployment configuration
 ```
+
+## Stacks & Deployment
+
+Deploy order (later stacks import earlier stacks' exports): `make deploy-base` → `make deploy-auth` →
+`make deploy-backend` → `make deploy-embeddings` → `make deploy-frontend` (or `make deploy-all`).
+Delete in reverse order.
+
+| Stack | Template | Imports from |
+|---|---|---|
+| `coolture-base-<env>` | `aws/base.yaml` | - |
+| `coolture-auth-<env>` | `aws/auth.yaml` | - |
+| `coolture-backend-<env>` | `aws/backend.yaml` | base (network), auth (Cognito client ID + issuer) |
+| `coolture-embeddings-<env>` | `embedding-workers/template.yaml` | base (network), backend (queue ARN, DB endpoint/port) |
+| `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API endpoint) |
+
+`base.yaml` is built for minimum fixed cost: private subnets only, no Internet Gateway, no NAT, no interface
+endpoints. VPC Lambdas can reach Aurora and S3 (free gateway endpoint, in `backend.yaml`) and nothing else.
+Anything that needs the internet or another AWS API has to run outside the VPC.
+Two subnets in two AZs because Aurora's DB subnet group requires it.
+
+## Embedding Pipeline (recommendations)
+
+Port of `coolture-core/{post,user}-embedding-worker` with SQS instead of RabbitMQ:
+
+```
+post-write (create, or update that changes title/description/tags)
+   └─► PutObject s3://coolture-<env>-embedding-requests-<account>/posts/<postId>   (empty object)
+          └─ S3 ObjectCreated notification ─► SQS coolture-<env>-post-embedding ─► PostEmbeddingFunction
+                                                 └─ after 3 failed receives ─► ...-post-embedding-dlq (14 days)
+PostEmbeddingFunction: SELECT title/description/tags FROM posts → all-mpnet-base-v2 → post_embeddings
+
+EventBridge rate(30 minutes) ──► UserEmbeddingFunction ──► user_embeddings
+```
+
+- Split: queue, DLQ, requests bucket and the publisher live in `backend.yaml` / `post-write`; the two Python
+  workers are the separate `embedding-workers/` stack and can be deployed, rebuilt or removed on their own.
+- Why S3 in the middle: VPC Lambdas have no internet. Reaching SQS would need a paid interface endpoint
+  (~$9/month) or NAT; the S3 **gateway** endpoint is free and S3 → SQS notifications are free.
+  The gateway endpoint route is added to the private route table from the base stack.
+- `post-write` writes after the DB commit; a failed write is only logged (same as the Spring publisher).
+  With `Environment=local` the bucket env var is empty and publishing is skipped.
+- The consumer reads the post from the DB at processing time, so duplicated/out-of-order S3 events still
+  end with the latest content embedded. Deleted posts and `s3:TestEvent` are skipped. Objects expire after 1 day.
+- `PostEmbeddingFunction` is a container image with CPU-only torch and the model baked in (needs Docker to build).
+- `sam build` for `UserEmbeddingFunction` needs `python3.13` with `pip` on PATH (e.g. run it inside a 3.13 venv) or `--use-container`.
+
+Locally, `sam local` emulates neither S3 notifications nor SQS triggers (and post-write skips the S3 write),
+so embeddings are computed on demand against the docker Postgres (`make up`, `make migrate`, `make build-embeddings` first):
+
+```bash
+make embed-posts                     # posts with no embedding, or edited since it was computed
+make embed-posts POST_ID=<uuid>      # one post
+make embed-posts ALL=1               # every non-deleted post (e.g. after changing the model)
+make embed-posts DRY_RUN=1           # print the generated SQS/S3 events, don't invoke
+make embed-users                     # what the 30-min schedule does in AWS
+```
+
+`embed-posts` (`scripts/embed-posts.sh`) builds the same SQS-wrapped S3 events AWS delivers and runs
+`sam local invoke PostEmbeddingFunction`, 50 posts per invocation (`BATCH_SIZE=`), and exits non-zero if any post fails.
+
+Unit tests: `pip install -r embedding-workers/<worker>/requirements-dev.txt` then `make test-python`.
 
 ## Shared Common Module (`com.coolture:common:1.0.0`)
 

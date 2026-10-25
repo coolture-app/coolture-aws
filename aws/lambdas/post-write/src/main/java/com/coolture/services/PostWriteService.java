@@ -10,24 +10,32 @@ import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.ParticipationRequest;
 import com.coolture.dto.ReactionRequest;
 import com.coolture.dto.UpdatePostRequest;
+import com.coolture.messaging.PostEmbeddingPublisher;
 import com.coolture.repository.PostWriteRepository;
 
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 public class PostWriteService {
 
     private final PostWriteRepository repository;
+    private final PostEmbeddingPublisher embeddingPublisher;
 
     public PostWriteService() {
         this(new PostWriteRepository());
     }
 
     PostWriteService(PostWriteRepository repository) {
+        this(repository, new PostEmbeddingPublisher());
+    }
+
+    PostWriteService(PostWriteRepository repository, PostEmbeddingPublisher embeddingPublisher) {
         this.repository = repository;
+        this.embeddingPublisher = embeddingPublisher;
     }
 
     public PostDetailDto createPost(UUID authorId, CreatePostRequest req) throws SQLException {
@@ -36,7 +44,9 @@ public class PostWriteService {
         validateMedia(req.mediaIds(), req.coverMediaId());
 
         repository.validateMediaOwnership(authorId, req.mediaIds());
-        return repository.createPost(authorId, req);
+        PostDetailDto created = repository.createPost(authorId, req);
+        embeddingPublisher.publish(created.id());
+        return created;
     }
 
     public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req) throws SQLException {
@@ -65,7 +75,11 @@ public class PostWriteService {
             repository.validateMediaOwnership(callerId, req.mediaIds());
         }
 
-        return repository.updatePost(postId, callerId, existing, req);
+        PostDetailDto updated = repository.updatePost(postId, callerId, existing, req);
+        if (embeddedContentChanged(existing, updated)) {
+            embeddingPublisher.publish(updated.id());
+        }
+        return updated;
     }
 
     public void deletePost(UUID postId, UUID callerId) throws SQLException {
@@ -172,6 +186,16 @@ public class PostWriteService {
             throw new IllegalArgumentException("Country code is required");
         }
         repository.deleteCountryCode(code.toUpperCase());
+    }
+
+    private boolean embeddedContentChanged(PostWriteRepository.ExistingPost existing, PostDetailDto updated) {
+        return !Objects.equals(existing.title(), updated.title())
+            || !Objects.equals(existing.description(), updated.description())
+            || !Objects.equals(normalizeTags(existing.tags()), normalizeTags(updated.tags()));
+    }
+
+    private List<String> normalizeTags(List<String> tags) {
+        return tags != null ? tags : List.of();
     }
 
     private void validateTypeLocationInvariant(PostType type, EventLocationDto location) {
