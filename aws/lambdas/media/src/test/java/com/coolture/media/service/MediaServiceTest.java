@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -96,6 +97,8 @@ class MediaServiceTest {
         );
 
         when(repository.findByIdAndOwnerId(MEDIA_ID, CALLER_ID)).thenReturn(Optional.of(record));
+        when(s3Storage.headObject("EVENT_COVER/123/abc.jpg"))
+                .thenReturn(Optional.of(new S3StorageService.StoredObject(102400L, "image/jpeg")));
         when(s3Storage.presignGet("EVENT_COVER/123/abc.jpg")).thenReturn("http://localhost:3900/get-url");
 
         MediaResourceDto dto = service.completeUpload(MEDIA_ID, CALLER_ID, new MediaCompleteRequest(null));
@@ -105,6 +108,75 @@ class MediaServiceTest {
         assertEquals(MediaStatus.UPLOADED, dto.status());
         assertEquals("http://localhost:3900/get-url", dto.url());
         verify(repository).updateStatus(MEDIA_ID, MediaStatus.UPLOADED);
+    }
+
+    @Test
+    void initUpload_throwsBadRequest_whenImageExceedsSizeLimit() throws SQLException {
+        MediaUploadInitRequest request = new MediaUploadInitRequest(
+                MediaPurpose.EVENT_COVER,
+                "image/png",
+                10L * 1024 * 1024 + 1,
+                "huge.png"
+        );
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.initUpload(CALLER_ID, request));
+        assertTrue(ex.getMessage().startsWith("File is too large"));
+        verify(repository, never()).insert(any());
+        verify(s3Storage, never()).presignPut(any(), any(), anyLong());
+    }
+
+    @Test
+    void initUpload_allowsLargerVideos_upToVideoLimit() throws SQLException {
+        MediaUploadInitRequest request = new MediaUploadInitRequest(
+                MediaPurpose.EVENT_COVER,
+                "video/mp4",
+                100L * 1024 * 1024,
+                "clip.mp4"
+        );
+        when(s3Storage.presignPut(any(), eq("video/mp4"), eq(100L * 1024 * 1024))).thenReturn(
+                new S3StorageService.PresignedPutResult("http://u", "PUT", Instant.now(), Map.of()));
+
+        assertDoesNotThrow(() -> service.initUpload(CALLER_ID, request));
+    }
+
+    @Test
+    void completeUpload_throwsBadRequest_whenObjectWasNotUploaded() throws SQLException {
+        MediaRecord record = pendingRecord();
+        when(repository.findByIdAndOwnerId(MEDIA_ID, CALLER_ID)).thenReturn(Optional.of(record));
+        when(s3Storage.headObject(record.objectKey())).thenReturn(Optional.empty());
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> service.completeUpload(MEDIA_ID, CALLER_ID, null));
+        assertTrue(ex.getMessage().startsWith("Uploaded file is missing"));
+        verify(repository, never()).updateStatus(any(), any());
+    }
+
+    @Test
+    void completeUpload_deletesObjectAndMedia_whenUploadedFileDoesNotMatch() throws SQLException {
+        MediaRecord record = pendingRecord();
+        when(repository.findByIdAndOwnerId(MEDIA_ID, CALLER_ID)).thenReturn(Optional.of(record));
+        when(s3Storage.headObject(record.objectKey()))
+                .thenReturn(Optional.of(new S3StorageService.StoredObject(999L, "image/jpeg")));
+
+        assertThrows(IllegalArgumentException.class, () -> service.completeUpload(MEDIA_ID, CALLER_ID, null));
+        verify(s3Storage).deleteObject(record.objectKey());
+        verify(repository).markDeleted(eq(MEDIA_ID), any(Instant.class));
+        verify(repository, never()).updateStatus(any(), any());
+    }
+
+    private static MediaRecord pendingRecord() {
+        return new MediaRecord(
+                MEDIA_ID,
+                CALLER_ID,
+                "EVENT_COVER/123/abc.jpg",
+                "cover.jpg",
+                MediaPurpose.EVENT_COVER,
+                "image/jpeg",
+                102400L,
+                MediaStatus.PENDING,
+                Instant.now(),
+                null
+        );
     }
 
     @Test

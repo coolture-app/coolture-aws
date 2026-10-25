@@ -48,12 +48,12 @@ class CommentReadServiceTest {
         when(repository.findRootCommentsForPost(eq(postId), isNull(), isNull(), eq(3)))
             .thenReturn(rows);
 
-        CursorPage<CommentSummaryDto> page = service.list(postId, null, null, 2);
+        CursorPage<CommentSummaryDto> page = service.list(postId, null, null, null, 2);
 
         assertEquals(2, page.items().size());
         assertTrue(page.page().hasMore());
         assertEquals(2, page.page().limit());
-        verify(repository).ensurePostActive(postId);
+        verify(repository).ensurePostVisible(postId, null);
     }
 
     @Test
@@ -66,7 +66,7 @@ class CommentReadServiceTest {
         when(repository.findRepliesForParent(eq(parentId), isNull(), isNull(), eq(21)))
             .thenReturn(rows);
 
-        CursorPage<CommentSummaryDto> page = service.list(postId, parentId, null, 20);
+        CursorPage<CommentSummaryDto> page = service.list(postId, null, parentId, null, 20);
 
         assertEquals(1, page.items().size());
         assertFalse(page.page().hasMore());
@@ -79,7 +79,7 @@ class CommentReadServiceTest {
         when(repository.findCommentHeader(parentId)).thenReturn(Optional.empty());
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.list(postId, parentId, null, 20));
+            () -> service.list(postId, null, parentId, null, 20));
 
         assertTrue(ex.getMessage().toLowerCase().contains("not found"));
     }
@@ -93,7 +93,7 @@ class CommentReadServiceTest {
                 new CommentReadRepository.CommentHeader(parentId, UUID.randomUUID(), "ACTIVE", false)));
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.list(postId, parentId, null, 20));
+            () -> service.list(postId, null, parentId, null, 20));
 
         assertTrue(ex.getMessage().toLowerCase().contains("not found"));
     }
@@ -109,7 +109,7 @@ class CommentReadServiceTest {
         when(repository.findRepliesForParent(eq(parentId), isNull(), isNull(), eq(21)))
             .thenReturn(rows);
 
-        CursorPage<CommentSummaryDto> page = service.list(postId, parentId, null, 20);
+        CursorPage<CommentSummaryDto> page = service.list(postId, null, parentId, null, 20);
 
         assertEquals(1, page.items().size());
     }
@@ -120,7 +120,7 @@ class CommentReadServiceTest {
         when(repository.findRootCommentsForPost(eq(postId), isNull(), isNull(), anyInt()))
             .thenReturn(List.of());
 
-        CursorPage<CommentSummaryDto> page = service.list(postId, null, "not-a-cursor!!!", 20);
+        CursorPage<CommentSummaryDto> page = service.list(postId, null, null, "not-a-cursor!!!", 20);
 
         assertEquals(0, page.items().size());
         verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), eq(21));
@@ -132,10 +132,10 @@ class CommentReadServiceTest {
         when(repository.findRootCommentsForPost(eq(postId), isNull(), isNull(), anyInt()))
             .thenReturn(List.of());
 
-        service.list(postId, null, null, 0);
+        service.list(postId, null, null, null, 0);
         verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), eq(21));
 
-        service.list(postId, null, null, 500);
+        service.list(postId, null, null, null, 500);
         verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), eq(101));
     }
 }

@@ -34,6 +34,7 @@ public class MediaService {
         }
 
         MediaMimeType.validate(request.mimeType());
+        MediaMimeType.validateSize(request.mimeType(), request.sizeBytes());
 
         UUID mediaId = UUID.randomUUID();
         String ext = extractExtension(request.fileName());
@@ -76,6 +77,15 @@ public class MediaService {
 
         if (!MediaStatus.PENDING.equals(media.status())) {
             throw new IllegalStateException("Media upload is already completed or invalid");
+        }
+
+        S3StorageService.StoredObject stored = s3StorageService.headObject(media.objectKey())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Uploaded file is missing - PUT it to the upload URL before completing"));
+        if (stored.sizeBytes() != media.sizeBytes() || !sameMimeType(stored.contentType(), media.mimeType())) {
+            s3StorageService.deleteObject(media.objectKey());
+            mediaRepository.markDeleted(mediaId, Instant.now());
+            throw new IllegalArgumentException("Uploaded file does not match the declared size or type");
         }
 
         mediaRepository.updateStatus(mediaId, MediaStatus.UPLOADED);
@@ -143,5 +153,12 @@ public class MediaService {
         return (dot >= 0 && dot < fileName.length() - 1)
                 ? fileName.substring(dot + 1).toLowerCase()
                 : "bin";
+    }
+
+    private static boolean sameMimeType(String stored, String declared) {
+        if (stored == null) {
+            return false;
+        }
+        return stored.split(";", 2)[0].trim().equalsIgnoreCase(declared);
     }
 }

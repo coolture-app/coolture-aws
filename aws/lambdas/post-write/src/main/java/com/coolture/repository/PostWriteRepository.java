@@ -1,6 +1,7 @@
 package com.coolture.repository;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.dto.CountryCodeDto;
@@ -575,7 +576,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!isActivePost(conn, postId)) {
+                if (!PostQueries.isPostVisible(conn, postId, userId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 Optional<ReactionType> oldTypeOpt = findReaction(conn, postId, userId);
@@ -602,7 +603,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!isActivePost(conn, postId)) {
+                if (!PostQueries.isPostVisible(conn, postId, userId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 Optional<ReactionType> oldTypeOpt = findReaction(conn, postId, userId);
@@ -622,7 +623,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!isActivePost(conn, postId)) {
+                if (!PostQueries.isPostVisible(conn, postId, userId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
@@ -646,7 +647,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!isActivePost(conn, postId)) {
+                if (!PostQueries.isPostVisible(conn, postId, userId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
@@ -658,16 +659,6 @@ public class PostWriteRepository {
             } catch (Exception e) {
                 conn.rollback();
                 throw e;
-            }
-        }
-    }
-
-    private boolean isActivePost(Connection conn, UUID postId) throws SQLException {
-        String sql = "SELECT 1 FROM posts WHERE id = ? AND deleted_at IS NULL AND status != 'DELETED'";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                return rs.next();
             }
         }
     }

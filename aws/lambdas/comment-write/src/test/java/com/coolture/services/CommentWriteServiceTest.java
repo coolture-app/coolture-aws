@@ -54,7 +54,7 @@ class CommentWriteServiceTest {
             postId, callerId, new CommentCreateRequest("hello", null));
 
         assertEquals(commentId, result.id());
-        verify(repository).ensurePostActive(postId);
+        verify(repository).ensurePostVisible(postId, callerId);
     }
 
     @Test

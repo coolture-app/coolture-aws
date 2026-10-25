@@ -9,7 +9,6 @@ import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.common.security.SecurityContext;
-import com.coolture.user.dto.CreateUserRequest;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
@@ -356,20 +355,6 @@ class UserHandlerTest {
 
             assertEquals(403, response.getStatusCode());
         }
-    }
-
-    @Test
-    void createUser_returns201_whenValid() throws Exception {
-        String body = "{\"username\":\"newuser\",\"firstName\":\"Jan\",\"lastName\":\"Kowalski\"}";
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/users", body, null);
-
-        var created = new UserEntity(UUID.randomUUID(), "newuser", "Jan", "Kowalski", null, Instant.now());
-        when(service.createUser(any(CreateUserRequest.class))).thenReturn(created);
-
-        APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-        assertEquals(201, response.getStatusCode());
-        assertTrue(response.getBody().contains("newuser"));
     }
 
     @Test

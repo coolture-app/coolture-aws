@@ -7,7 +7,6 @@ import com.coolture.common.pagination.CursorCodec;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.CursorPayload;
 import com.coolture.common.storage.S3StorageService;
-import com.coolture.user.dto.CreateUserRequest;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
@@ -20,6 +19,8 @@ import java.time.Instant;
 import java.util.*;
 
 public class UserService {
+
+    private static final int MAX_USERNAME_LENGTH = 32;
 
     private final UserRepository userRepository;
     private final S3StorageService s3StorageService;
@@ -122,16 +123,6 @@ public class UserService {
         return toProfileDto(user, callerId);
     }
 
-    public UserEntity createUser(CreateUserRequest request) throws SQLException {
-        return userRepository.createUser(
-                null,
-                request.username(),
-                request.firstName(),
-                request.lastName(),
-                request.bio()
-        );
-    }
-
     public ProfileImageResponse setProfileImage(UUID targetId, UUID callerId, SetProfileImageRequest request) throws SQLException {
         if (callerId == null) {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
@@ -164,7 +155,7 @@ public class UserService {
         if (callerId == null) {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
         }
-        String uname = (username != null && !username.isBlank()) ? username : callerId.toString();
+        String uname = toUsername(username, callerId);
         String fName = firstName != null ? firstName : "";
         String lName = lastName != null ? lastName : "";
         userRepository.createUserIfAbsent(callerId, uname, fName, lName);
@@ -364,5 +355,17 @@ public class UserService {
                 isFollowing,
                 isBlocked
         );
+    }
+
+    static String toUsername(String candidate, UUID callerId) {
+        String normalized = candidate == null ? "" : candidate.trim().toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9._]", "_");
+        if (normalized.length() > MAX_USERNAME_LENGTH) {
+            normalized = normalized.substring(0, MAX_USERNAME_LENGTH);
+        }
+        if (normalized.replace("_", "").isEmpty()) {
+            return "user_" + callerId.toString().replace("-", "").substring(0, 12);
+        }
+        return normalized;
     }
 }

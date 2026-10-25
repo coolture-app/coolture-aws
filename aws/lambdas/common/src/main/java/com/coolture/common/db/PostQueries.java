@@ -8,19 +8,30 @@ import java.util.UUID;
 
 public final class PostQueries {
 
+    public static final String VISIBLE_TO_CALLER = """
+        (p.visibility = 'PUBLIC'
+         OR p.author_id = ?::uuid
+         OR (p.visibility = 'FRIENDS' AND EXISTS (SELECT 1 FROM user_relations ur WHERE ur.source_user_id = ?::uuid AND ur.target_user_id = p.author_id AND ur.type = 'FOLLOW')))""";
+
     private PostQueries() {}
 
-    public static void ensurePostActive(Connection conn, UUID postId) throws SQLException {
-        String sql = "SELECT status, deleted_at FROM posts WHERE id = ?";
+    public static boolean isPostVisible(Connection conn, UUID postId, UUID callerId) throws SQLException {
+        String sql = "SELECT 1 FROM posts p WHERE p.id = ? AND p.deleted_at IS NULL AND p.status <> 'DELETED' AND "
+            + VISIBLE_TO_CALLER;
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
+            new ParamBinder(stmt, conn)
+                .bindUUID(postId)
+                .bindNullableUUID(callerId)
+                .bindNullableUUID(callerId);
             try (ResultSet rs = stmt.executeQuery()) {
-                if (!rs.next()
-                        || "DELETED".equals(rs.getString("status"))
-                        || rs.getTimestamp("deleted_at") != null) {
-                    throw new IllegalArgumentException("Post with id '" + postId + "' was not found");
-                }
+                return rs.next();
             }
+        }
+    }
+
+    public static void ensurePostVisible(Connection conn, UUID postId, UUID callerId) throws SQLException {
+        if (!isPostVisible(conn, postId, callerId)) {
+            throw new IllegalArgumentException("Post with id '" + postId + "' was not found");
         }
     }
 }

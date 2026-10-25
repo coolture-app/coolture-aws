@@ -10,7 +10,6 @@ import com.coolture.common.json.JsonUtils;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
-import com.coolture.user.dto.CreateUserRequest;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
@@ -102,7 +101,6 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             if (isRootUsersPath(path)) {
                 return switch (method.toUpperCase()) {
                     case "GET" -> searchUsers(event);
-                    case "POST" -> createUser(event);
                     default -> ApiResponse.badRequest("Unsupported method for /users: " + method);
                 };
             }
@@ -143,15 +141,6 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
 
         CursorPage<UserSummaryDto> page = service.search(callerId, q, cursor, limit);
         return ApiResponse.ok(page);
-    }
-
-    private APIGatewayV2HTTPResponse createUser(APIGatewayV2HTTPEvent event) throws Exception {
-        if (event.getBody() == null || event.getBody().isBlank()) {
-            return ApiResponse.badRequest("Request body is required");
-        }
-        CreateUserRequest request = JsonUtils.fromJsonAndValidate(event.getBody(), CreateUserRequest.class);
-        UserEntity created = service.createUser(request);
-        return ApiResponse.created(created);
     }
 
     private APIGatewayV2HTTPResponse getById(APIGatewayV2HTTPEvent event) throws Exception {
@@ -199,7 +188,10 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
 
     private APIGatewayV2HTTPResponse getMe(APIGatewayV2HTTPEvent event) throws Exception {
         UUID callerId = SecurityContext.getUserId(event);
-        String username = SecurityContext.getUsername(event).orElse(null);
+        String username = SecurityContext.getClaim(event, "preferred_username")
+            .or(() -> SecurityContext.getUsername(event).filter(name -> !isUuid(name)))
+            .or(() -> SecurityContext.getEmail(event).map(email -> email.split("@", 2)[0]))
+            .orElse(null);
         String firstName = SecurityContext.getClaim(event, "given_name").orElse(null);
         String lastName = SecurityContext.getClaim(event, "family_name").orElse(null);
         UserProfileDto me = service.getMe(callerId, username, firstName, lastName);
@@ -269,6 +261,15 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         if (path == null) return false;
         String clean = path.replaceAll("/+$", "");
         return clean.equals("/users") || clean.isEmpty();
+    }
+
+    private static boolean isUuid(String value) {
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private UUID extractUserId(APIGatewayV2HTTPEvent event) {

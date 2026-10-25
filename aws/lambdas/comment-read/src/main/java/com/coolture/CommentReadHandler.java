@@ -7,6 +7,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.coolture.common.dto.CommentSummaryDto;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
+import com.coolture.common.security.SecurityContext;
 import com.coolture.services.CommentReadService;
 
 import java.util.Collections;
@@ -43,7 +44,8 @@ public class CommentReadHandler implements RequestHandler<APIGatewayV2HTTPEvent,
             String cursor = qp.get("cursor");
             int limit = parseLimit(qp.get("limit"));
 
-            CursorPage<CommentSummaryDto> page = service.list(postId, parentCommentId, cursor, limit);
+            UUID callerId = SecurityContext.getUserIdOptional(event).orElse(null);
+            CursorPage<CommentSummaryDto> page = service.list(postId, callerId, parentCommentId, cursor, limit);
             return ApiResponse.ok(page);
 
         } catch (IllegalArgumentException e) {

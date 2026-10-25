@@ -203,6 +203,25 @@ class UserServiceTest {
     }
 
     @Test
+    void getMe_usesFallbackUsername_whenNoUsableCandidate() throws SQLException {
+        String fallback = "user_" + CALLER_ID.toString().replace("-", "").substring(0, 12);
+        var created = new UserEntity(CALLER_ID, fallback, "", "", null, Instant.now());
+        when(repository.findById(CALLER_ID)).thenReturn(Optional.of(created));
+
+        service.getMe(CALLER_ID, null, null, null);
+
+        verify(repository).createUserIfAbsent(eq(CALLER_ID), eq(fallback), eq(""), eq(""));
+    }
+
+    @Test
+    void toUsername_sanitizesAndTruncatesCandidate() {
+        assertEquals("jan.kowalski_99", UserService.toUsername(" Jan.Kowalski+99 ", CALLER_ID));
+        assertEquals("a".repeat(32), UserService.toUsername("a".repeat(40), CALLER_ID));
+        assertEquals("user_" + CALLER_ID.toString().replace("-", "").substring(0, 12),
+            UserService.toUsername("+++", CALLER_ID));
+    }
+
+    @Test
     void getFollowers_throwsNotFound_whenTargetUserDoesNotExist() throws SQLException {
         when(repository.existsById(USER_ID)).thenReturn(false);
 

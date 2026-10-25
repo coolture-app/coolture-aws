@@ -17,12 +17,23 @@ public final class MediaMimeType {
             "video/mp4", "video/webm", "video/quicktime", "video/x-msvideo"
     );
 
+    public static final long MAX_IMAGE_BYTES = 10L * 1024 * 1024;
+    public static final long MAX_VIDEO_BYTES = 100L * 1024 * 1024;
+
     private static final Set<String> ALLOWED = union(IMAGES, VIDEOS);
 
     public static void validate(String mimeType) {
         if (mimeType == null || !ALLOWED.contains(mimeType)) {
             throw new IllegalArgumentException(
                     "Unsupported media type '" + mimeType + "'. Allowed: images and videos.");
+        }
+    }
+
+    public static void validateSize(String mimeType, long sizeBytes) {
+        long max = VIDEOS.contains(mimeType) ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+        if (sizeBytes > max) {
+            throw new IllegalArgumentException(
+                    "File is too large: " + sizeBytes + " bytes. Maximum for " + mimeType + " is " + max + " bytes.");
         }
     }
 

@@ -132,6 +132,9 @@ public class PostReadRepository {
               AND (?::uuid IS NULL OR p.author_id = ?::uuid)
               AND (?::varchar IS NULL OR p.status = ?::varchar)
               AND (?::varchar IS NULL OR p.visibility = ?::varchar)
+              AND (p.visibility = 'PUBLIC'
+                   OR p.author_id = ?::uuid
+                   OR (p.visibility = 'FRIENDS' AND EXISTS (SELECT 1 FROM user_relations ur WHERE ur.source_user_id = ?::uuid AND ur.target_user_id = p.author_id AND ur.type = 'FOLLOW')))
               AND (?::varchar IS NULL OR p.type = ?::varchar)
               AND (?::timestamptz IS NULL OR p.starts_at >= ?::timestamptz)
               AND (?::timestamptz IS NULL OR p.starts_at <= ?::timestamptz)
@@ -178,6 +181,8 @@ public class PostReadRepository {
             // Visibility filter
             String visibilityFilter = f.visibility() != null ? f.visibility().name() : (callerId == null ? PostVisibility.PUBLIC.name() : null);
             b.bindStringFilterPair(visibilityFilter);
+            b.bindNullableUUID(callerId)
+             .bindNullableUUID(callerId);
 
             // Type filter
             String typeStr = f.type() != null ? f.type().name() : null;
@@ -250,6 +255,9 @@ public class PostReadRepository {
             LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid
             LEFT JOIN post_participations pp_my ON pp_my.post_id = p.id AND pp_my.user_id = ?::uuid
             WHERE p.id = ? AND p.deleted_at IS NULL
+              AND (p.visibility = 'PUBLIC'
+                   OR p.author_id = ?::uuid
+                   OR (p.visibility = 'FRIENDS' AND EXISTS (SELECT 1 FROM user_relations ur WHERE ur.source_user_id = ?::uuid AND ur.target_user_id = p.author_id AND ur.type = 'FOLLOW')))
         """;
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -258,7 +266,9 @@ public class PostReadRepository {
             new ParamBinder(stmt, conn)
                 .bindUUID(callerId)
                 .bindUUID(callerId)
-                .bindUUID(postId);
+                .bindUUID(postId)
+                .bindNullableUUID(callerId)
+                .bindNullableUUID(callerId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -323,6 +333,9 @@ public class PostReadRepository {
               AND (?::uuid IS NULL OR p.author_id = ?::uuid)
               AND (?::varchar IS NULL OR p.status = ?::varchar)
               AND (?::varchar IS NULL OR p.visibility = ?::varchar)
+              AND (p.visibility = 'PUBLIC'
+                   OR p.author_id = ?::uuid
+                   OR (p.visibility = 'FRIENDS' AND EXISTS (SELECT 1 FROM user_relations ur WHERE ur.source_user_id = ?::uuid AND ur.target_user_id = p.author_id AND ur.type = 'FOLLOW')))
               AND (?::varchar IS NULL OR p.type = ?::varchar)
               AND (?::timestamptz IS NULL OR p.starts_at >= ?::timestamptz)
               AND (?::timestamptz IS NULL OR p.starts_at <= ?::timestamptz)
@@ -352,6 +365,8 @@ public class PostReadRepository {
             // Visibility
             String visibilityFilter = f.visibility() != null ? f.visibility().name() : (callerId == null ? PostVisibility.PUBLIC.name() : null);
             b.bindStringFilterPair(visibilityFilter);
+            b.bindNullableUUID(callerId)
+             .bindNullableUUID(callerId);
 
             // Type
             b.bindStringFilterPair(f.type() != null ? f.type().name() : null);
