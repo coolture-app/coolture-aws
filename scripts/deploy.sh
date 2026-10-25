@@ -168,7 +168,8 @@ deploy_stack() {
 
     echo
     echo "==> [$stack] sam build"
-    sam build --template-file "$template" --build-dir "$build_dir" --parallel
+    sam build --template-file "$template" --build-dir "$build_dir" --parallel \
+        ${overrides:+--parameter-overrides "$overrides"}
 
     echo "==> [$stack] sam deploy"
     local deploy_args=(
