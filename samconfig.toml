@@ -127,6 +127,36 @@ resolve_image_repos = true
 s3_prefix = "coolture-embeddings"
 parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod", "BackendStackName=coolture-backend-prod"]
 
+[waf-dev.global.parameters]
+stack_name = "coolture-waf-dev"
+
+[waf-dev.deploy.parameters]
+stack_name = "coolture-waf-dev"
+template_file = "aws/waf.yaml"
+s3_prefix = "coolture-waf"
+region = "us-east-1"
+parameter_overrides = ["Environment=dev"]
+
+[waf-staging.global.parameters]
+stack_name = "coolture-waf-staging"
+
+[waf-staging.deploy.parameters]
+stack_name = "coolture-waf-staging"
+template_file = "aws/waf.yaml"
+s3_prefix = "coolture-waf"
+region = "us-east-1"
+parameter_overrides = ["Environment=staging"]
+
+[waf-prod.global.parameters]
+stack_name = "coolture-waf-prod"
+
+[waf-prod.deploy.parameters]
+stack_name = "coolture-waf-prod"
+template_file = "aws/waf.yaml"
+s3_prefix = "coolture-waf"
+region = "us-east-1"
+parameter_overrides = ["Environment=prod"]
+
 [frontend-dev.global.parameters]
 stack_name = "coolture-frontend-dev"
 

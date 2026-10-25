@@ -72,7 +72,7 @@ validate: ## Validate SAM templates
 deploy-base: ## Deploy network stack to AWS (dev) - first, others import from it
 	@scripts/deploy.sh dev base
 
-deploy-backend: ## Deploy backend to AWS (dev, arm64) - needs base + auth deployed and DB_PASSWORD
+deploy-backend: ## Deploy backend to AWS (dev, arm64) - needs base + auth deployed
 	@scripts/deploy.sh dev backend
 
 deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to AWS (dev) - needs backend deployed
@@ -84,13 +84,16 @@ deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
 build-embeddings: ## Build embedding workers for local runs (x86_64; post-embedding image needs Docker)
 	@sam build --template-file embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
-deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs base + backend deployed and DB_PASSWORD
+deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs base + backend deployed
 	@scripts/deploy.sh dev embeddings
 
-deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="base auth backend embeddings frontend", needs DB_PASSWORD)
+deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="base auth backend embeddings waf frontend")
 	@scripts/deploy.sh $(or $(ENV),dev) $(STACKS)
 
-deploy-all: ## Deploy all stacks (dev) - needs DB_PASSWORD
+deploy-waf: ## Deploy CloudFront WAF web ACL to us-east-1 (dev) - ~$7/month + $0.60 per 1M requests
+	@scripts/deploy.sh dev waf
+
+deploy-all: ## Deploy all stacks (dev)
 	@scripts/deploy.sh dev
 
 delete-embeddings: ## Delete embedding workers stack
