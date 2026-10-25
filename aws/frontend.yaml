@@ -1,6 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Coolture Frontend
+Description: >-
+  Coolture Frontend - Angular SSR (../coolture-frontend) on Lambda via Lambda Web Adapter behind CloudFront.
+  Hashed browser assets are served from S3, /api/* is proxied to the backend HTTP API (same origin, no CORS).
 
 Parameters:
   Environment:
@@ -10,36 +12,85 @@ Parameters:
   BackendStackName:
     Type: String
     Default: coolture-backend-dev
+  LambdaWebAdapterLayerVersion:
+    Type: Number
+    Default: 30
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+  AllowedViewerIps:
+    Type: String
+    Default: ''
+    Description: >-
+      Comma-separated IPv4 addresses/CIDRs (e.g. 203.0.113.7,198.51.100.0/24) allowed to open the site.
+      Empty = public. When set, IPv6 is disabled on the distribution so viewers connect over IPv4.
+  WebAclArn:
+    Type: String
+    Default: ''
+    Description: CloudFront-scoped WAF web ACL from the us-east-1 waf stack (aws/waf.yaml); empty = no WAF
+
+Conditions:
+  RestrictViewers: !Not [!Equals [!Ref AllowedViewerIps, '']]
+  HasWebAcl: !Not [!Equals [!Ref WebAclArn, '']]
 
 Resources:
+  SSRLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-ssr'
+      RetentionInDays: !Ref LogRetentionDays
+
   SSRFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-ssr'
       CodeUri: lambdas/ssr/
-      Handler: index.handler
-      Runtime: nodejs20.x
+      Handler: run.sh
+      Runtime: nodejs22.x
+      Architectures: [arm64]
       MemorySize: 1024
       Timeout: 30
+      Layers:
+        - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerArm64:${LambdaWebAdapterLayerVersion}'
+      LoggingConfig:
+        LogGroup: !Ref SSRLogGroup
       Environment:
         Variables:
-          NODE_ENV: !Ref Environment
-          API_ENDPOINT:
-            Fn::ImportValue: !Sub '${BackendStackName}-ApiEndpoint'
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_READINESS_CHECK_PROTOCOL: tcp
+          PORT: '8080'
+          NODE_ENV: production
+          NG_ALLOWED_HOSTS: !Sub '*.cloudfront.net,*.lambda-url.${AWS::Region}.on.aws'
+          ORIGIN_VERIFY_SECRET: !Sub '{{resolve:secretsmanager:coolture-${Environment}-origin-verify:SecretString}}'
       FunctionUrlConfig:
-        AuthType: NONE
-        Cors:
-          AllowOrigins: ['*']
-          AllowMethods: [GET, HEAD]
-          AllowHeaders: ['*']
-          MaxAge: 86400
+        AuthType: AWS_IAM
+      Tags:
+        Project: coolture
+        Environment: !Ref Environment
+    Metadata:
+      BuildMethod: makefile
+
+  SSRFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SSRFunction
+      Action: lambda:InvokeFunctionUrl
+      FunctionUrlAuthType: AWS_IAM
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  SSRFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SSRFunction
+      Action: lambda:InvokeFunction
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
 
   StaticAssetsBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub 'coolture-${Environment}-static-assets'
-      VersioningConfiguration:
-        Status: Enabled
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -49,15 +100,6 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
-
-  CloudFrontOAC:
-    Type: AWS::CloudFront::OriginAccessControl
-    Properties:
-      OriginAccessControlConfig:
-        Name: !Sub 'coolture-${Environment}-oac'
-        OriginAccessControlOriginType: s3
-        SigningBehavior: always
-        SigningProtocol: sigv4
 
   StaticAssetsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -72,53 +114,207 @@ Resources:
             Resource: !Sub '${StaticAssetsBucket.Arn}/*'
             Condition:
               StringEquals:
-                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+                'AWS:SourceArn': !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  S3OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'coolture-${Environment}-s3-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  LambdaOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'coolture-${Environment}-lambda-oac'
+        OriginAccessControlOriginType: lambda
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  ViewerRequestFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub 'coolture-${Environment}-viewer-request'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Optional viewer IP allowlist; strip /api for the HTTP API origin; pass the viewer host to Angular SSR
+        Runtime: cloudfront-js-2.0
+      FunctionCode: !Sub |
+        var ALLOWED = '${AllowedViewerIps}'.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+
+        function ipv4ToNumber(ip) {
+          var parts = ip.split('.');
+          if (parts.length !== 4) return null;
+          var value = 0;
+          for (var i = 0; i < 4; i++) {
+            var octet = parseInt(parts[i], 10);
+            if (isNaN(octet) || octet < 0 || octet > 255) return null;
+            value = value * 256 + octet;
+          }
+          return value;
+        }
+
+        function isAllowed(ip) {
+          if (ALLOWED.length === 0) return true;
+          var address = ipv4ToNumber(ip);
+          for (var i = 0; i < ALLOWED.length; i++) {
+            var entry = ALLOWED[i];
+            if (entry === ip) return true;
+            var slash = entry.indexOf('/');
+            if (slash < 0 || address === null) continue;
+            var base = ipv4ToNumber(entry.substring(0, slash));
+            var bits = parseInt(entry.substring(slash + 1), 10);
+            if (base === null || isNaN(bits) || bits < 0 || bits > 32) continue;
+            var block = Math.pow(2, 32 - bits);
+            if (Math.floor(address / block) === Math.floor(base / block)) return true;
+          }
+          return false;
+        }
+
+        function handler(event) {
+          var request = event.request;
+          if (!isAllowed(event.viewer.ip)) {
+            return { statusCode: 403, statusDescription: 'Forbidden' };
+          }
+          if (request.uri === '/api' || request.uri.startsWith('/api/')) {
+            request.uri = request.uri.substring(4) || '/';
+          } else if (request.headers.host) {
+            request.headers['x-forwarded-host'] = { value: request.headers.host.value };
+          }
+          return request;
+        }
+
+  ApiCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'coolture-${Environment}-api'
+        MinTTL: 0
+        DefaultTTL: 0
+        MaxTTL: 1
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers: [Authorization]
+          CookiesConfig:
+            CookieBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: all
 
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Enabled: true
+        Comment: !Sub 'coolture-${Environment}'
         HttpVersion: http2and3
-        IPV6Enabled: true
+        IPV6Enabled: !If [RestrictViewers, false, true]
+        WebACLId: !If [HasWebAcl, !Ref WebAclArn, !Ref AWS::NoValue]
         PriceClass: PriceClass_100
         Origins:
           - Id: s3-assets
             DomainName: !GetAtt StaticAssetsBucket.RegionalDomainName
-            OriginAccessControlId: !Ref CloudFrontOAC
-            S3OriginConfig: {}
+            OriginAccessControlId: !Ref S3OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ''
           - Id: lambda-ssr
             DomainName: !Select [2, !Split ['/', !GetAtt SSRFunctionUrl.FunctionUrl]]
+            OriginAccessControlId: !Ref LambdaOriginAccessControl
             CustomOriginConfig:
               HTTPSPort: 443
               OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+          - Id: http-api
+            DomainName:
+              Fn::ImportValue: !Sub '${BackendStackName}-ApiDomain'
+            OriginPath: !Sub '/${Environment}'
+            OriginCustomHeaders:
+              - HeaderName: X-Origin-Verify
+                HeaderValue: !Sub '{{resolve:secretsmanager:coolture-${Environment}-origin-verify:SecretString}}'
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
         DefaultCacheBehavior:
           TargetOriginId: lambda-ssr
           ViewerProtocolPolicy: redirect-to-https
           Compress: true
-          AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
-          CachedMethods: [GET, HEAD, OPTIONS]
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
         CacheBehaviors:
-          - PathPattern: /assets/*
+          - PathPattern: /api/*
+            TargetOriginId: http-api
+            ViewerProtocolPolicy: https-only
+            Compress: true
+            AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: !Ref ApiCachePolicy
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
+          - PathPattern: '*.js'
             TargetOriginId: s3-assets
             ViewerProtocolPolicy: redirect-to-https
             Compress: true
-            AllowedMethods: [GET, HEAD, OPTIONS]
+            AllowedMethods: [GET, HEAD]
             CachedMethods: [GET, HEAD]
             CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-            MinTTL: 0
-            DefaultTTL: 86400
-            MaxTTL: 31536000
-        CustomErrorResponses:
-          - ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 10
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
+          - PathPattern: '*.css'
+            TargetOriginId: s3-assets
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
+          - PathPattern: /media/*
+            TargetOriginId: s3-assets
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
+          - PathPattern: /i18n/*
+            TargetOriginId: s3-assets
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
+          - PathPattern: /favicon.ico
+            TargetOriginId: s3-assets
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
         ViewerCertificate:
           CloudFrontDefaultCertificate: true
-          MinimumProtocolVersion: TLSv1.2_2021
         Restrictions:
           GeoRestriction:
             RestrictionType: none
@@ -128,6 +324,14 @@ Outputs:
     Value: !GetAtt SSRFunctionUrl.FunctionUrl
     Export:
       Name: !Sub '${AWS::StackName}-SSRUrl'
+  StaticAssetsBucketName:
+    Value: !Ref StaticAssetsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-StaticAssetsBucket'
+  CloudFrontDistributionId:
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-DistributionId'
   CloudFrontDomain:
     Value: !GetAtt CloudFrontDistribution.DomainName
     Export:
