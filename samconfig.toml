@@ -13,38 +13,119 @@ template_file = "aws/backend.yaml"
 s3_prefix = "coolture-backend"
 region = "eu-central-1"
 
+[base-dev.global.parameters]
+stack_name = "coolture-base-dev"
+
+[base-dev.deploy.parameters]
+stack_name = "coolture-base-dev"
+template_file = "aws/base.yaml"
+s3_prefix = "coolture-base"
+parameter_overrides = ["Environment=dev"]
+
+[base-staging.global.parameters]
+stack_name = "coolture-base-staging"
+
+[base-staging.deploy.parameters]
+stack_name = "coolture-base-staging"
+template_file = "aws/base.yaml"
+s3_prefix = "coolture-base"
+parameter_overrides = ["Environment=staging"]
+
+[base-prod.global.parameters]
+stack_name = "coolture-base-prod"
+
+[base-prod.deploy.parameters]
+stack_name = "coolture-base-prod"
+template_file = "aws/base.yaml"
+s3_prefix = "coolture-base"
+parameter_overrides = ["Environment=prod"]
+
 [backend-dev.global.parameters]
 stack_name = "coolture-backend-dev"
 
 [backend-dev.build.parameters]
 template_file = "aws/backend.yaml"
+parameter_overrides = ["Environment=dev", "BaseStackName=coolture-base-dev"]
 
 [backend-dev.deploy.parameters]
 stack_name = "coolture-backend-dev"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=dev"]
+parameter_overrides = ["Environment=dev", "BaseStackName=coolture-base-dev"]
 
 [backend-staging.global.parameters]
 stack_name = "coolture-backend-staging"
 
 [backend-staging.build.parameters]
 template_file = "aws/backend.yaml"
+parameter_overrides = ["Environment=staging", "BaseStackName=coolture-base-staging"]
 
 [backend-staging.deploy.parameters]
 stack_name = "coolture-backend-staging"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=staging"]
+parameter_overrides = ["Environment=staging", "BaseStackName=coolture-base-staging"]
 
 [backend-prod.global.parameters]
 stack_name = "coolture-backend-prod"
 
 [backend-prod.build.parameters]
 template_file = "aws/backend.yaml"
+parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod"]
 
 [backend-prod.deploy.parameters]
 stack_name = "coolture-backend-prod"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/backend.yaml"
-parameter_overrides = ["Environment=prod"]
+parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod"]
+
+[embeddings-dev.global.parameters]
+stack_name = "coolture-embeddings-dev"
+
+[embeddings-dev.build.parameters]
+template_file = "embedding-workers/template.yaml"
+parameter_overrides = ["Environment=dev", "BaseStackName=coolture-base-dev", "BackendStackName=coolture-backend-dev"]
+
+[embeddings-dev.deploy.parameters]
+stack_name = "coolture-embeddings-dev"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "coolture-embeddings"
+parameter_overrides = ["Environment=dev", "BaseStackName=coolture-base-dev", "BackendStackName=coolture-backend-dev"]
+
+[embeddings-staging.global.parameters]
+stack_name = "coolture-embeddings-staging"
+
+[embeddings-staging.build.parameters]
+template_file = "embedding-workers/template.yaml"
+parameter_overrides = ["Environment=staging", "BaseStackName=coolture-base-staging", "BackendStackName=coolture-backend-staging"]
+
+[embeddings-staging.deploy.parameters]
+stack_name = "coolture-embeddings-staging"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "coolture-embeddings"
+parameter_overrides = ["Environment=staging", "BaseStackName=coolture-base-staging", "BackendStackName=coolture-backend-staging"]
+
+[embeddings-prod.global.parameters]
+stack_name = "coolture-embeddings-prod"
+
+[embeddings-prod.build.parameters]
+template_file = "embedding-workers/template.yaml"
+parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod", "BackendStackName=coolture-backend-prod"]
+
+[embeddings-prod.deploy.parameters]
+stack_name = "coolture-embeddings-prod"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "coolture-embeddings"
+parameter_overrides = ["Environment=prod", "BaseStackName=coolture-base-prod", "BackendStackName=coolture-backend-prod"]
 
 [frontend-dev.global.parameters]
 stack_name = "coolture-frontend-dev"

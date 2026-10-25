@@ -1,12 +1,14 @@
 package com.coolture.services;
 
 import com.coolture.common.dto.EventLocationDto;
+import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
+import com.coolture.messaging.PostEmbeddingPublisher;
 import com.coolture.repository.PostWriteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,12 +25,14 @@ import static org.mockito.Mockito.*;
 class PostWriteServiceTest {
 
     private PostWriteRepository repository;
+    private PostEmbeddingPublisher embeddingPublisher;
     private PostWriteService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(PostWriteRepository.class);
-        service = new PostWriteService(repository);
+        embeddingPublisher = mock(PostEmbeddingPublisher.class);
+        service = new PostWriteService(repository, embeddingPublisher);
     }
 
     @Test
@@ -186,5 +190,90 @@ class PostWriteServiceTest {
         service.deletePost(postId, authorId);
 
         verify(repository).softDeletePost(postId);
+    }
+
+    @Test
+    void createPost_whenValid_publishesEmbeddingMessage() throws SQLException {
+        UUID authorId = UUID.randomUUID();
+        CreatePostRequest req = new CreatePostRequest(
+            "Online Event", "Description", "https://example.com",
+            Instant.now(), Instant.now().plusSeconds(3600),
+            List.of("talk"), PostType.ONLINE, PostVisibility.PUBLIC,
+            null, null, null
+        );
+        PostDetailDto created = postDetail(UUID.randomUUID(), "Online Event", "Description", List.of("talk"));
+        when(repository.createPost(authorId, req)).thenReturn(created);
+
+        PostDetailDto result = service.createPost(authorId, req);
+
+        assertSame(created, result);
+        verify(embeddingPublisher).publish(created.id());
+    }
+
+    @Test
+    void createPost_whenValidationFails_doesNotPublish() {
+        UUID authorId = UUID.randomUUID();
+        CreatePostRequest req = new CreatePostRequest(
+            "Concert", "Description", "https://example.com",
+            Instant.now(), Instant.now().plusSeconds(3600),
+            List.of("music"), PostType.OFFLINE, PostVisibility.PUBLIC,
+            null, null, null
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> service.createPost(authorId, req));
+        verifyNoInteractions(embeddingPublisher);
+    }
+
+    @Test
+    void updatePost_whenEmbeddedContentChanged_publishesEmbeddingMessage() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
+        when(repository.findById(postId)).thenReturn(Optional.of(existing));
+
+        UpdatePostRequest req = new UpdatePostRequest(
+            "New Title", null, null, null, null, null, null, null, null, null, null
+        );
+        PostDetailDto updated = postDetail(postId, "New Title", "Desc", List.of());
+        when(repository.updatePost(postId, authorId, existing, req)).thenReturn(updated);
+
+        service.updatePost(postId, authorId, req);
+
+        verify(embeddingPublisher).publish(postId);
+    }
+
+    @Test
+    void updatePost_whenEmbeddedContentUnchanged_doesNotPublish() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
+        when(repository.findById(postId)).thenReturn(Optional.of(existing));
+
+        UpdatePostRequest req = new UpdatePostRequest(
+            "Title", null, "https://new.example.com", null, null, null, null, null, null, null, null
+        );
+        PostDetailDto updated = postDetail(postId, "Title", "Desc", null);
+        when(repository.updatePost(postId, authorId, existing, req)).thenReturn(updated);
+
+        service.updatePost(postId, authorId, req);
+
+        verifyNoInteractions(embeddingPublisher);
+    }
+
+    private PostWriteRepository.ExistingPost activeExistingPost(UUID postId, UUID authorId) {
+        return new PostWriteRepository.ExistingPost(
+            postId, authorId, null, "Title", "Desc", "url",
+            Instant.now(), null, List.of(), PostType.ONLINE,
+            PostStatus.ACTIVE, PostVisibility.PUBLIC, Instant.now(), null, null, null
+        );
+    }
+
+    private PostDetailDto postDetail(UUID postId, String title, String description, List<String> tags) {
+        return new PostDetailDto(
+            postId, null, null, title, description, null,
+            Instant.now(), null, tags, 0, 0, 0, 0,
+            PostType.ONLINE, PostStatus.ACTIVE, PostVisibility.PUBLIC,
+            Instant.now(), null, null, null, null, null, null
+        );
     }
 }
