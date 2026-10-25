@@ -21,6 +21,11 @@ Parameters:
     Type: String
     Default: admin
     NoEcho: true
+    Description: Local (sam local) only - on AWS the master password is generated in Secrets Manager and Lambdas use IAM auth
+  DbAppUsername:
+    Type: String
+    Default: coolture_app
+    Description: IAM-authenticated database role used by the Lambdas on AWS (created by migration V7)
   DbHost:
     Type: String
     Default: host.docker.internal
@@ -38,6 +43,24 @@ Parameters:
     Type: String
     Default: ''
     NoEcho: true
+  AuroraEngineVersion:
+    Type: String
+    Default: '16.8'
+    Description: Aurora PostgreSQL version; scale-to-zero (MinCapacity 0) needs 13.15+, 14.12+, 15.7+ or 16.3+
+  CorsAllowedOrigins:
+    Type: String
+    Default: 'http://localhost:4200'
+    Description: Comma-separated browser origins allowed to call the API directly (the CloudFront frontend uses same-origin /api/*)
+  ApiThrottlingRateLimit:
+    Type: Number
+    Default: 20
+    Description: Steady-state requests per second per route
+  ApiThrottlingBurstLimit:
+    Type: Number
+    Default: 40
+  LogRetentionDays:
+    Type: Number
+    Default: 7
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
@@ -54,9 +77,11 @@ Globals:
         DB_HOST: !If [IsAWS, !GetAtt AuroraCluster.Endpoint.Address, !Ref DbHost]
         DB_PORT: !If [IsAWS, !GetAtt AuroraCluster.Endpoint.Port, !Ref DbPort]
         DB_NAME: !Ref DbName
-        DB_USERNAME: !Ref DbUsername
-        DB_PASSWORD: !Ref DbPassword
-        MEDIA_BUCKET_NAME: !If [IsAWS, !Sub 'coolture-${Environment}-media', 'coolture-bucket']
+        DB_USERNAME: !If [IsAWS, !Ref DbAppUsername, !Ref DbUsername]
+        DB_PASSWORD: !If [IsAWS, '', !Ref DbPassword]
+        DB_IAM_AUTH: !If [IsAWS, 'true', 'false']
+        DB_CONNECTION_TIMEOUT_MS: !If [IsAWS, '25000', '5000']
+        MEDIA_BUCKET_NAME: !If [IsAWS, !Ref MediaBucket, 'coolture-bucket']
         S3_ENDPOINT_URL: !If [IsAWS, '', 'http://host.docker.internal:3900']
         S3_PUBLIC_ENDPOINT_URL: !If [IsAWS, '', 'http://localhost:3900']
         GARAGE_ACCESS_KEY_ID: !If [IsAWS, '', !Ref GarageAccessKeyId]
@@ -65,11 +90,6 @@ Globals:
     Tags:
       Project: coolture
       Environment: !Ref Environment
-  Api:
-    Cors:
-      AllowOrigin: "'*'"
-      AllowMethods: "'*'"
-      AllowHeaders: "'*'"
 
 Resources:
   DbSecret:
@@ -77,15 +97,56 @@ Resources:
     Condition: IsAWS
     Properties:
       Name: !Sub 'coolture-${Environment}-db-credentials'
-      SecretString: !Sub |
-        {
-          "username": "${DbUsername}",
-          "password": "${DbPassword}",
-          "engine": "postgres",
-          "host": "${AuroraCluster.Endpoint.Address}",
-          "port": ${AuroraCluster.Endpoint.Port},
-          "dbname": "${DbName}"
-        }
+      Description: Aurora master credentials, used only by Aurora and the migration Lambda
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DbUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'' '
+
+  DbSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Condition: IsAWS
+    Properties:
+      SecretId: !Ref DbSecret
+      TargetId: !Ref AuroraCluster
+      TargetType: AWS::RDS::DBCluster
+
+  DbConnectPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: IsAWS
+    Properties:
+      Description: IAM database authentication as the application role
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: rds-db:connect
+            Resource: !Sub 'arn:${AWS::Partition}:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:${AuroraCluster.DBClusterResourceId}/${DbAppUsername}'
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: IsAWS
+    Properties:
+      GroupName: !Sub 'coolture-${Environment}-lambda-sg'
+      GroupDescription: VPC-attached Coolture Lambdas
+      VpcId: !ImportValue {'Fn::Sub': '${BaseStackName}-VpcId'}
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: IsAWS
+    Properties:
+      GroupName: !Sub 'coolture-${Environment}-database-sg'
+      GroupDescription: Aurora PostgreSQL, reachable only from the Lambda security group
+      VpcId: !ImportValue {'Fn::Sub': '${BaseStackName}-VpcId'}
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
 
   AuroraSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -100,17 +161,19 @@ Resources:
     Condition: IsAWS
     Properties:
       Engine: aurora-postgresql
-      EngineVersion: '15.4'
+      EngineVersion: !Ref AuroraEngineVersion
       DatabaseName: !Ref DbName
       MasterUsername: !Ref DbUsername
-      MasterUserPassword: !Ref DbPassword
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DbSecret}:SecretString:password}}'
+      EnableIAMDatabaseAuthentication: true
       DBClusterIdentifier: !Sub 'coolture-${Environment}-cluster'
       DBSubnetGroupName: !Ref AuroraSubnetGroup
       VpcSecurityGroupIds:
-        - !ImportValue {'Fn::Sub': '${BaseStackName}-DatabaseSecurityGroupId'}
+        - !Ref DatabaseSecurityGroup
       ServerlessV2ScalingConfiguration:
-        MinCapacity: 0.5
+        MinCapacity: 0
         MaxCapacity: 1.0
+        SecondsUntilAutoPause: 180
       BackupRetentionPeriod: 7
       StorageEncrypted: true
 
@@ -124,20 +187,79 @@ Resources:
       Engine: aurora-postgresql
       PubliclyAccessible: false
 
+  MigrationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsAWS
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-db-migrations'
+      RetentionInDays: !Ref LogRetentionDays
+
+  MigrationFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsAWS
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-db-migrations'
+      LoggingConfig:
+        LogGroup: !Ref MigrationLogGroup
+      CodeUri: lambdas/migrations/src/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      MemorySize: 256
+      Timeout: 600
+      AutoPublishAlias: live
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DbUsername
+          DB_PASSWORD: !Sub '{{resolve:secretsmanager:${DbSecret}:SecretString:password}}'
+          DB_IAM_AUTH: 'false'
+          DB_CONNECT_TIMEOUT_SECONDS: '30'
+      VpcConfig:
+        SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+
+  DatabaseMigrations:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: IsAWS
+    DependsOn: [AuroraInstance, S3GatewayEndpoint]
+    Properties:
+      ServiceToken: !Ref MigrationFunction.Alias
+      ServiceTimeout: 900
+      CodeVersion: !Ref MigrationFunction.Version
+
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Environment
+      CorsConfiguration:
+        AllowOrigins: !Split [',', !Ref CorsAllowedOrigins]
+        AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+        AllowHeaders: [authorization, content-type]
+        AllowCredentials: true
+        MaxAge: 600
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ApiThrottlingRateLimit
+        ThrottlingBurstLimit: !Ref ApiThrottlingBurstLimit
       Auth:
-        DefaultAuthorizer: CognitoAuthorizer
+        DefaultAuthorizer: RequiredAuthorizer
         Authorizers:
-          CognitoAuthorizer:
-            IdentitySource: "$request.header.Authorization"
-            JwtConfiguration:
-              Audience:
-                - Fn::ImportValue: !Sub '${AuthStackName}-ClientId'
-              Issuer:
-                Fn::ImportValue: !Sub '${AuthStackName}-Issuer'
+          RequiredAuthorizer:
+            FunctionArn:
+              Fn::ImportValue: !Sub '${AuthStackName}-RequiredAuthFunctionArn'
+            AuthorizerPayloadFormatVersion: '2.0'
+            EnableSimpleResponses: true
+            EnableFunctionDefaultPermissions: true
+            Identity:
+              Headers: [Authorization, X-Origin-Verify]
+              ReauthorizeEvery: 300
+          OptionalAuthorizer:
+            FunctionArn:
+              Fn::ImportValue: !Sub '${AuthStackName}-OptionalAuthFunctionArn'
+            AuthorizerPayloadFormatVersion: '2.0'
+            EnableSimpleResponses: true
+            EnableFunctionDefaultPermissions: true
+            Identity:
+              ReauthorizeEvery: 0
 
   S3GatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -209,10 +331,18 @@ Resources:
                     Value: posts/
 
   # Lambda Functions
+  UserLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-user'
+      RetentionInDays: !Ref LogRetentionDays
+
   UserFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-user'
+      LoggingConfig:
+        LogGroup: !Ref UserLogGroup
       CodeUri: lambdas/user/
       Handler: com.coolture.user.UserHandler::handleRequest
       MemorySize: 512
@@ -220,11 +350,12 @@ Resources:
         - IsAWS
         - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
           SecurityGroupIds:
-            - !ImportValue {'Fn::Sub': '${BaseStackName}-LambdaSecurityGroupId'}
+            - !Ref LambdaSecurityGroup
         - !Ref AWS::NoValue
       Policies:
+        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:
-            BucketName: !Sub 'coolture-${Environment}-media'
+            BucketName: !Ref MediaBucket
       Events:
         SearchUsers:
           Type: HttpApi
@@ -232,12 +363,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /users
             Method: GET
-        CreateUser:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /users
-            Method: POST
         GetUserById:
           Type: HttpApi
           Properties:
@@ -245,7 +370,7 @@ Resources:
             Path: /users/{userId}
             Method: GET
             Auth:
-              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer so logged-in users get isFollowing/isBlocked
+              Authorizer: OptionalAuthorizer
         GetUserByUsername:
           Type: HttpApi
           Properties:
@@ -253,7 +378,7 @@ Resources:
             Path: /users/by-username/{username}
             Method: GET
             Auth:
-              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer
+              Authorizer: OptionalAuthorizer
         UpdateUser:
           Type: HttpApi
           Properties:
@@ -285,7 +410,7 @@ Resources:
             Path: /users/{userId}/followers
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: OptionalAuthorizer
         GetFollowing:
           Type: HttpApi
           Properties:
@@ -293,7 +418,7 @@ Resources:
             Path: /users/{userId}/following
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: OptionalAuthorizer
         FollowUser:
           Type: HttpApi
           Properties:
@@ -325,10 +450,18 @@ Resources:
             Path: /users/{userId}/block
             Method: DELETE
 
+  PostWriteLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-post-write'
+      RetentionInDays: !Ref LogRetentionDays
+
   PostWriteFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-post-write'
+      LoggingConfig:
+        LogGroup: !Ref PostWriteLogGroup
       CodeUri: lambdas/post-write/
       Handler: com.coolture.PostWriteHandler::handleRequest
       MemorySize: 1024
@@ -336,6 +469,7 @@ Resources:
         Variables:
           EMBEDDING_REQUESTS_BUCKET: !If [IsAWS, !Ref EmbeddingRequestsBucket, '']
       Policies:
+        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
         - Statement:
             - Effect: Allow
               Action: s3:PutObject
@@ -344,7 +478,7 @@ Resources:
         - IsAWS
         - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
           SecurityGroupIds:
-            - !ImportValue {'Fn::Sub': '${BaseStackName}-LambdaSecurityGroupId'}
+            - !Ref LambdaSecurityGroup
         - !Ref AWS::NoValue
       Events:
         CreatePost:
@@ -444,18 +578,28 @@ Resources:
             Path: /dicts/admin/country-codes/{code}
             Method: DELETE
 
+  PostReadLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-post-read'
+      RetentionInDays: !Ref LogRetentionDays
+
   PostReadFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-post-read'
+      LoggingConfig:
+        LogGroup: !Ref PostReadLogGroup
       CodeUri: lambdas/post-read/
       Handler: com.coolture.PostReadHandler::handleRequest
       MemorySize: 1024
+      Policies:
+        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
       VpcConfig: !If
         - IsAWS
         - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
           SecurityGroupIds:
-            - !ImportValue {'Fn::Sub': '${BaseStackName}-LambdaSecurityGroupId'}
+            - !Ref LambdaSecurityGroup
         - !Ref AWS::NoValue
       Events:
         HealthCheck:
@@ -465,7 +609,7 @@ Resources:
             Path: /actuator/health
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: OptionalAuthorizer
         GetCountryCodes:
           Type: HttpApi
           Properties:
@@ -473,7 +617,7 @@ Resources:
             Path: /dicts/country-codes
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: OptionalAuthorizer
         GetRecommendations:
           Type: HttpApi
           Properties:
@@ -487,7 +631,7 @@ Resources:
             Path: /posts/map
             Method: GET
             Auth:
-              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for myReaction/myParticipation
+              Authorizer: OptionalAuthorizer
         GetPostById:
           Type: HttpApi
           Properties:
@@ -495,7 +639,7 @@ Resources:
             Path: /posts/{id}
             Method: GET
             Auth:
-              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for myReaction/myParticipation
+              Authorizer: OptionalAuthorizer
         GetFeed:
           Type: HttpApi
           Properties:
@@ -503,7 +647,7 @@ Resources:
             Path: /posts
             Method: GET
             Auth:
-              Authorizer: NONE # TODO: needs optional-auth Lambda authorizer for participation/reaction filters
+              Authorizer: OptionalAuthorizer
         GetEventLocations:
           Type: HttpApi
           Properties:
@@ -511,7 +655,7 @@ Resources:
             Path: /event-locations
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: OptionalAuthorizer
         GetEventLocationsAdmin:
           Type: HttpApi
           Properties:
@@ -519,18 +663,28 @@ Resources:
             Path: /event-locations/admin
             Method: GET
 
+  CommentReadLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-comment-read'
+      RetentionInDays: !Ref LogRetentionDays
+
   CommentReadFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-comment-read'
+      LoggingConfig:
+        LogGroup: !Ref CommentReadLogGroup
       CodeUri: lambdas/comment-read/
       Handler: com.coolture.CommentReadHandler::handleRequest
       MemorySize: 1024
+      Policies:
+        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
       VpcConfig: !If
         - IsAWS
         - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
           SecurityGroupIds:
-            - !ImportValue {'Fn::Sub': '${BaseStackName}-LambdaSecurityGroupId'}
+            - !Ref LambdaSecurityGroup
         - !Ref AWS::NoValue
       Events:
         ListComments:
@@ -540,20 +694,30 @@ Resources:
             Path: /posts/{postId}/comments
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: OptionalAuthorizer
+
+  CommentWriteLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-comment-write'
+      RetentionInDays: !Ref LogRetentionDays
 
   CommentWriteFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-comment-write'
+      LoggingConfig:
+        LogGroup: !Ref CommentWriteLogGroup
       CodeUri: lambdas/comment-write/
       Handler: com.coolture.CommentWriteHandler::handleRequest
       MemorySize: 1024
+      Policies:
+        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
       VpcConfig: !If
         - IsAWS
         - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
           SecurityGroupIds:
-            - !ImportValue {'Fn::Sub': '${BaseStackName}-LambdaSecurityGroupId'}
+            - !Ref LambdaSecurityGroup
         - !Ref AWS::NoValue
       Events:
         CreateComment:
@@ -586,10 +750,18 @@ Resources:
             AllowedOrigins: ['*']
             MaxAge: 3600
 
+  MediaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-media'
+      RetentionInDays: !Ref LogRetentionDays
+
   MediaFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'coolture-${Environment}-media'
+      LoggingConfig:
+        LogGroup: !Ref MediaLogGroup
       CodeUri: lambdas/media/
       Handler: com.coolture.media.MediaHandler::handleRequest
       MemorySize: 512
@@ -597,11 +769,12 @@ Resources:
         - IsAWS
         - SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
           SecurityGroupIds:
-            - !ImportValue {'Fn::Sub': '${BaseStackName}-LambdaSecurityGroupId'}
+            - !Ref LambdaSecurityGroup
         - !Ref AWS::NoValue
       Policies:
+        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
         - S3CrudPolicy:
-            BucketName: !Sub 'coolture-${Environment}-media'
+            BucketName: !Ref MediaBucket
       Events:
         InitUpload:
           Type: HttpApi
@@ -622,7 +795,7 @@ Resources:
             Path: /media/{mediaId}
             Method: GET
             Auth:
-              Authorizer: NONE
+              Authorizer: OptionalAuthorizer
         DeleteMedia:
           Type: HttpApi
           Properties:
@@ -635,6 +808,10 @@ Outputs:
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
     Export:
       Name: !Sub '${AWS::StackName}-ApiEndpoint'
+  ApiDomain:
+    Value: !Sub '${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiDomain'
   DbEndpoint:
     Value: !If [IsAWS, !GetAtt AuroraCluster.Endpoint.Address, 'localhost']
     Export:
@@ -643,6 +820,19 @@ Outputs:
     Value: !If [IsAWS, !GetAtt AuroraCluster.Endpoint.Port, !Ref DbPort]
     Export:
       Name: !Sub '${AWS::StackName}-DbPort'
+  DbConnectPolicyArn:
+    Condition: IsAWS
+    Value: !Ref DbConnectPolicy
+    Export:
+      Name: !Sub '${AWS::StackName}-DbConnectPolicyArn'
+  DbSecretArn:
+    Condition: IsAWS
+    Value: !Ref DbSecret
+  LambdaSecurityGroupId:
+    Condition: IsAWS
+    Value: !Ref LambdaSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaSecurityGroupId'
   PostEmbeddingQueueArn:
     Value: !GetAtt PostEmbeddingQueue.Arn
     Export:
