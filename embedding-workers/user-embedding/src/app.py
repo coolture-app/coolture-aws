@@ -28,11 +28,22 @@ def _get_connection() -> psycopg.Connection:
             port=settings.db_port,
             dbname=settings.db_name,
             user=settings.db_username,
-            password=settings.db_password,
-            connect_timeout=5,
+            connect_timeout=settings.db_connect_timeout_seconds,
             autocommit=True,
+            **_db_credentials(),
         )
     return _conn
+
+
+def _db_credentials() -> dict[str, str]:
+    if not settings.db_iam_auth:
+        return {"password": settings.db_password}
+    import boto3
+
+    token = boto3.client("rds", region_name=settings.aws_region).generate_db_auth_token(
+        DBHostname=settings.db_host, Port=settings.db_port, DBUsername=settings.db_username
+    )
+    return {"password": token, "sslmode": "require"}
 
 
 def compute_user_vectors(
