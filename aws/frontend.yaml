@@ -197,6 +197,7 @@ Resources:
           AllowedMethods: [GET, HEAD, OPTIONS]
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
           FunctionAssociations:
             - EventType: viewer-request
               FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
@@ -208,14 +209,15 @@ Resources:
             AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
             CachePolicyId: !Ref ApiCachePolicy
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
             FunctionAssociations:
               - EventType: viewer-request
                 FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
-          - {PathPattern: '*.js', TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
-          - {PathPattern: '*.css', TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
-          - {PathPattern: /media/*, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
-          - {PathPattern: /i18n/*, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
-          - {PathPattern: /favicon.ico, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6}
+          - {PathPattern: '*.js', TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6, ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03}
+          - {PathPattern: '*.css', TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6, ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03}
+          - {PathPattern: /media/*, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6, ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03}
+          - {PathPattern: /i18n/*, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6, ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03}
+          - {PathPattern: /favicon.ico, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6, ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03}
 
 Outputs:
   StaticAssetsBucketName:

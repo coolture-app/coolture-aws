@@ -7,12 +7,6 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
-  LocalCallbackUrls:
-    Type: String
-    Default: 'http://localhost:4200/auth/callback,http://localhost:4000/auth/callback'
-  LocalLogoutUrls:
-    Type: String
-    Default: 'http://localhost:4200/,http://localhost:4000/'
   FrontendUrl:
     Type: String
     Default: ''
@@ -45,6 +39,7 @@ Resources:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: !Sub 'coolture-${Environment}'
+      DeletionProtection: ACTIVE
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
       Policies:
@@ -73,13 +68,12 @@ Resources:
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-        - ALLOW_USER_PASSWORD_AUTH
       PreventUserExistenceErrors: ENABLED
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid, email, profile]
       AllowedOAuthFlowsUserPoolClient: true
-      CallbackURLs: !Split [',', !If [HasFrontendUrl, !Sub '${LocalCallbackUrls},${FrontendUrl}/auth/callback', !Ref LocalCallbackUrls]]
-      LogoutURLs: !Split [',', !If [HasFrontendUrl, !Sub '${LocalLogoutUrls},${FrontendUrl}/', !Ref LocalLogoutUrls]]
+      CallbackURLs: [!If [HasFrontendUrl, !Sub '${FrontendUrl}/auth/callback', 'https://frontend-not-deployed.invalid/auth/callback']]
+      LogoutURLs: [!If [HasFrontendUrl, !Sub '${FrontendUrl}/', 'https://frontend-not-deployed.invalid/']]
       SupportedIdentityProviders: [COGNITO]
 
   UserPoolDomain:

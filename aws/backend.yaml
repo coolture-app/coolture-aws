@@ -23,6 +23,9 @@ Parameters:
   DbAppUsername:
     Type: String
     Default: coolture_app
+  DbReadUsername:
+    Type: String
+    Default: coolture_reader
   DbHost:
     Type: String
     Default: host.docker.internal
@@ -120,6 +123,17 @@ Resources:
           - Effect: Allow
             Action: rds-db:connect
             Resource: !Sub 'arn:${AWS::Partition}:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:${AuroraCluster.DBClusterResourceId}/${DbAppUsername}'
+
+  DbReadConnectPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: IsAWS
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: rds-db:connect
+            Resource: !Sub 'arn:${AWS::Partition}:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:${AuroraCluster.DBClusterResourceId}/${DbReadUsername}'
 
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -318,12 +332,41 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub 'coolture-${Environment}-media'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders: ['*']
-            AllowedMethods: [GET, PUT, HEAD, DELETE]
-            AllowedOrigins: ['*']
+            AllowedMethods: [GET, PUT, HEAD]
+            AllowedOrigins: !Split [',', !Ref CorsAllowedOrigins]
             MaxAge: 3600
+
+  MediaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MediaBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt MediaBucket.Arn
+              - !Sub '${MediaBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
 
   UserLogGroup:
     Type: AWS::Logs::LogGroup
@@ -418,8 +461,11 @@ Resources:
       CodeUri: lambdas/post-read/
       Handler: com.coolture.PostReadHandler::handleRequest
       MemorySize: 1024
+      Environment:
+        Variables:
+          DB_USERNAME: !If [IsAWS, !Ref DbReadUsername, !Ref DbUsername]
       Policies:
-        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
+        - !If [IsAWS, !Ref DbReadConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:
             BucketName: !Ref MediaBucket
       Events:
@@ -447,8 +493,11 @@ Resources:
       CodeUri: lambdas/comment-read/
       Handler: com.coolture.CommentReadHandler::handleRequest
       MemorySize: 1024
+      Environment:
+        Variables:
+          DB_USERNAME: !If [IsAWS, !Ref DbReadUsername, !Ref DbUsername]
       Policies:
-        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
+        - !If [IsAWS, !Ref DbReadConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:
             BucketName: !Ref MediaBucket
       Events:

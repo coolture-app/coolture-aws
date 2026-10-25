@@ -9,7 +9,8 @@ usage() {
 Usage: $0 [dev|staging|prod] [stack...]
 
 Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (default: all)
-Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS, USER_EMBEDDING_SCHEDULE=true, FRONTEND_DIR (default ../coolture-frontend)
+Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url), USER_EMBEDDING_SCHEDULE=true,
+  FRONTEND_DIR (default ../coolture-frontend)
 EOF
 }
 
@@ -38,6 +39,11 @@ wants() {
 cd "$(dirname "$0")/.."
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-eu-north-1}"
 FRONTEND_DIR="${FRONTEND_DIR:-../coolture-frontend}"
+
+if ! python3.13 -m pip --version > /dev/null 2>&1; then
+    [[ -x .aws-sam/python3.13/bin/pip ]] || python3.13 -m venv .aws-sam/python3.13
+    export PATH="$PWD/.aws-sam/python3.13/bin:$PATH"
+fi
 
 NETWORK_STACK=mgmt-stack-networking
 [[ "$ENVIRONMENT" == dev ]] || NETWORK_STACK="mgmt-stack-networking-$ENVIRONMENT"
@@ -68,13 +74,21 @@ frontend_url() {
     echo "$url"
 }
 
+cors_origins() {
+    local origins="" url
+    url="$(frontend_url)"
+    [[ "$ENVIRONMENT" == dev ]] && origins="http://localhost:4200"
+    [[ -n "$url" ]] && origins="${origins:+$origins,}$url"
+    echo "${CORS_ALLOWED_ORIGINS:-${origins:-https://no-browser-origin.invalid}}"
+}
+
 overrides_for() {
     case "$1" in
         auth)
             echo "Environment=$ENVIRONMENT FrontendUrl=\"$(frontend_url)\""
             ;;
         backend)
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"${CORS_ALLOWED_ORIGINS:-http://localhost:4200}\""
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\""
             ;;
         embeddings)
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT UserEmbeddingScheduleEnabled=${USER_EMBEDDING_SCHEDULE:-false}"
@@ -172,14 +186,25 @@ deploy_stack() {
     sam deploy "${deploy_args[@]}"
 }
 
-sync_auth_frontend_url() {
+stack_param() {
+    local value
+    value="$(aws cloudformation describe-stacks --stack-name "coolture-$1-$ENVIRONMENT" \
+        --query "Stacks[0].Parameters[?ParameterKey=='$2'].ParameterValue" --output text 2> /dev/null)" || return 1
+    [[ "$value" == None ]] && value=""
+    echo "$value"
+}
+
+sync_frontend_url() {
     local url current
     url="$(frontend_url)"
-    current="$(aws cloudformation describe-stacks --stack-name "coolture-auth-$ENVIRONMENT" \
-        --query "Stacks[0].Parameters[?ParameterKey=='FrontendUrl'].ParameterValue" --output text 2> /dev/null)" || return 0
-    [[ "$current" == None ]] && current=""
-    if [[ -n "$url" && "$url" != "$current" ]]; then
-        deploy_stack auth
+    [[ -n "$url" ]] || return 0
+
+    current="$(stack_param auth FrontendUrl)" || current="$url"
+    [[ "$current" == "$url" ]] || deploy_stack auth
+
+    if [[ -z "${CORS_ALLOWED_ORIGINS:-}" ]]; then
+        current="$(stack_param backend CorsAllowedOrigins)" || current="$url"
+        [[ "$current" == *"$url"* ]] || deploy_stack backend
     fi
 }
 
@@ -193,7 +218,7 @@ for stack in "${ALL_STACKS[@]}"; do
     deploy_stack "$stack"
     if [[ "$stack" == frontend ]]; then
         publish_frontend_assets
-        sync_auth_frontend_url
+        sync_frontend_url
     fi
 done
 
