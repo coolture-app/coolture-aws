@@ -135,6 +135,8 @@ template_file = "aws/frontend.yaml"
 
 [frontend-dev.deploy.parameters]
 stack_name = "coolture-frontend-dev"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/frontend.yaml"
 s3_prefix = "coolture-frontend"
 parameter_overrides = ["Environment=dev", "BackendStackName=coolture-backend-dev"]
@@ -147,6 +149,8 @@ template_file = "aws/frontend.yaml"
 
 [frontend-staging.deploy.parameters]
 stack_name = "coolture-frontend-staging"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/frontend.yaml"
 s3_prefix = "coolture-frontend"
 parameter_overrides = ["Environment=staging", "BackendStackName=coolture-backend-staging"]
@@ -159,6 +163,8 @@ template_file = "aws/frontend.yaml"
 
 [frontend-prod.deploy.parameters]
 stack_name = "coolture-frontend-prod"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/frontend.yaml"
 s3_prefix = "coolture-frontend"
 parameter_overrides = ["Environment=prod", "BackendStackName=coolture-backend-prod"]
@@ -168,6 +174,8 @@ stack_name = "coolture-auth-dev"
 
 [auth-dev.deploy.parameters]
 stack_name = "coolture-auth-dev"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/auth.yaml"
 s3_prefix = "coolture-auth"
 parameter_overrides = ["Environment=dev"]
@@ -177,6 +185,8 @@ stack_name = "coolture-auth-staging"
 
 [auth-staging.deploy.parameters]
 stack_name = "coolture-auth-staging"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/auth.yaml"
 s3_prefix = "coolture-auth"
 parameter_overrides = ["Environment=staging"]
@@ -186,6 +196,8 @@ stack_name = "coolture-auth-prod"
 
 [auth-prod.deploy.parameters]
 stack_name = "coolture-auth-prod"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
 template_file = "aws/auth.yaml"
 s3_prefix = "coolture-auth"
 parameter_overrides = ["Environment=prod"]

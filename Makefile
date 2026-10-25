@@ -69,28 +69,29 @@ validate: ## Validate SAM templates
 	@sam validate --template-file aws/auth.yaml
 	@sam validate --template-file embedding-workers/template.yaml
 
-deploy-base: validate ## Deploy network stack to AWS (dev) - first, others import from it
-	@sam deploy --config-env base-dev --template-file aws/base.yaml
+deploy-base: ## Deploy network stack to AWS (dev) - first, others import from it
+	@scripts/deploy.sh dev base
 
-deploy-backend: build-common validate ## Deploy backend to AWS (dev, arm64) - needs base deployed
-	@sam build --config-env backend-dev --parallel --build-dir .aws-sam/backend-dev
-	@sam deploy --config-env backend-dev --template-file .aws-sam/backend-dev/template.yaml
+deploy-backend: ## Deploy backend to AWS (dev, arm64) - needs base + auth deployed and DB_PASSWORD
+	@scripts/deploy.sh dev backend
 
-deploy-frontend: validate ## Deploy frontend to AWS (dev)
-	@sam build --template-file aws/frontend.yaml
-	@sam deploy --config-env frontend-dev
+deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to AWS (dev) - needs backend deployed
+	@scripts/deploy.sh dev frontend
 
-deploy-auth: validate ## Deploy auth to AWS (dev)
-	@sam deploy --config-env auth-dev --template-file aws/auth.yaml
+deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
+	@scripts/deploy.sh dev auth
 
 build-embeddings: ## Build embedding workers for local runs (x86_64; post-embedding image needs Docker)
 	@sam build --template-file embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
-deploy-embeddings: validate ## Deploy embedding workers to AWS (dev, arm64) - needs base + backend deployed
-	@sam build --config-env embeddings-dev --build-dir .aws-sam/embeddings-dev
-	@sam deploy --config-env embeddings-dev --template-file .aws-sam/embeddings-dev/template.yaml
+deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs base + backend deployed and DB_PASSWORD
+	@scripts/deploy.sh dev embeddings
 
-deploy-all: deploy-base deploy-auth deploy-backend deploy-embeddings deploy-frontend ## Deploy all stacks (dev)
+deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="base auth backend embeddings frontend", needs DB_PASSWORD)
+	@scripts/deploy.sh $(or $(ENV),dev) $(STACKS)
+
+deploy-all: ## Deploy all stacks (dev) - needs DB_PASSWORD
+	@scripts/deploy.sh dev
 
 delete-embeddings: ## Delete embedding workers stack
 	@sam delete --stack-name coolture-embeddings-dev --no-prompts

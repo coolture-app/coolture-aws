@@ -199,17 +199,15 @@ curl "http://localhost:3000/users?q=john&limit=20" \
   -H "X-User-Id: 00000000-0000-0000-0000-000000000001"
 ```
 
-##### 2. Create User
+##### 2. Create User (provisioned on first `GET /auth/me`)
+
+Users are never created directly. The first authenticated `GET /auth/me` creates the profile from the token claims
+(`sub`, username, `given_name`, `family_name`). Locally the claims come from the `X-User-*` headers:
 
 ```bash
-curl -X POST http://localhost:3000/users \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "johndoe",
-    "firstName": "John",
-    "lastName": "Doe",
-    "bio": "Software engineer"
-  }'
+curl http://localhost:3000/auth/me \
+  -H "X-User-Id: 00000000-0000-0000-0000-000000000002" \
+  -H "X-User-Name: johndoe"
 ```
 
 ##### 3. Get User Profile by ID
@@ -315,7 +313,7 @@ curl "http://localhost:3000/event-locations?limit=20"
 
 ### Posts - Write Operations (`post-write`)
 
-> **Authentication**: On AWS Cloud, endpoints extract the user ID from the Cognito JWT token (`Authorization: Bearer <TOKEN>`). For **local development and testing**, you can pass `-H "X-User-Id: <USER_UUID>"` (e.g. the ID returned by `POST /users`).
+> **Authentication**: On AWS Cloud, endpoints extract the user ID from the Cognito JWT token (`Authorization: Bearer <TOKEN>`). For **local development and testing**, you can pass `-H "X-User-Id: <USER_UUID>"` (e.g. the ID you provisioned via `GET /auth/me`).
 
 #### 1. Create Post (ONLINE)
 
