@@ -5,7 +5,7 @@ ifneq ($(wildcard $(HOME)/.docker/run/docker.sock),)
 export DOCKER_HOST ?= unix://$(HOME)/.docker/run/docker.sock
 endif
 
-export AWS_DEFAULT_REGION ?= eu-central-1
+export AWS_DEFAULT_REGION ?= eu-north-1
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'

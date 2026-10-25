@@ -29,7 +29,7 @@ def cfn_event(request_type: str) -> dict:
     return {
         "RequestType": request_type,
         "ResponseURL": "https://cloudformation-custom-resource-response.example/abc",
-        "StackId": "arn:aws:cloudformation:eu-central-1:123:stack/coolture-backend-dev/x",
+        "StackId": "arn:aws:cloudformation:eu-north-1:123:stack/coolture-backend-dev/x",
         "RequestId": "req-1",
         "LogicalResourceId": "DatabaseMigrations",
     }
@@ -202,7 +202,7 @@ def test_should_put_cloudformation_response_when_sending_result(monkeypatch):
             "Status": "SUCCESS",
             "Reason": "",
             "PhysicalResourceId": "coolture-db-migrations",
-            "StackId": "arn:aws:cloudformation:eu-central-1:123:stack/coolture-backend-dev/x",
+            "StackId": "arn:aws:cloudformation:eu-north-1:123:stack/coolture-backend-dev/x",
             "RequestId": "req-1",
             "LogicalResourceId": "DatabaseMigrations",
             "Data": {"Applied": ""},

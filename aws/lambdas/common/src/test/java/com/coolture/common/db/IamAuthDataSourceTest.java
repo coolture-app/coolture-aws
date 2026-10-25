@@ -21,7 +21,7 @@ class IamAuthDataSourceTest {
         System.setProperty("aws.secretAccessKey", "secret");
         IamAuthDataSource dataSource = new IamAuthDataSource(
             "jdbc:postgresql://db.example.com:5432/coolture?sslmode=require",
-            "db.example.com", 5432, "coolture_app", Region.EU_CENTRAL_1);
+            "db.example.com", 5432, "coolture_app", Region.EU_NORTH_1);
 
         String token = dataSource.generateToken();
 
@@ -32,7 +32,7 @@ class IamAuthDataSourceTest {
         assertEquals("db.example.com:5432", uri.getHost() + ":" + uri.getPort());
         assertEquals("connect", query.get("Action"));
         assertEquals("coolture_app", query.get("DBUser"));
-        assertTrue(query.get("X-Amz-Credential").contains("/eu-central-1/rds-db/aws4_request"));
+        assertTrue(query.get("X-Amz-Credential").contains("/eu-north-1/rds-db/aws4_request"));
         assertEquals("coolture_app", dataSource.getUser());
     }
 }

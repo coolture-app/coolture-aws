@@ -1,22 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ALL_STACKS=(base auth backend embeddings waf frontend)
+ALL_STACKS=(auth backend embeddings waf frontend)
+WAF_REGION=us-east-1
 
 usage() {
     cat <<EOF
 Usage: $0 [dev|staging|prod] [stack...]
 
-Builds (sam build) and deploys (sam deploy) the stacks in dependency order.
-Stacks: ${ALL_STACKS[*]} (default: all)
-
-Environment:
-  CONFIRM=1     Ask before executing each changeset
-  FRONTEND_DIR  Angular app to build and serve (default: ../coolture-frontend)
-  CORS_ALLOWED_ORIGINS  Comma-separated origins allowed to call the API directly (default: http://localhost:4200)
-  ALLOWED_VIEWER_IPS    Comma-separated IPv4 addresses/CIDRs allowed to open the CloudFront site (default: public)
-  USER_EMBEDDING_SCHEDULE=true  Enable the user-embedding schedule (default: disabled)
-  AWS_PROFILE / AWS_DEFAULT_REGION are honoured (region defaults to eu-central-1)
+Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (default: all)
+Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS, USER_EMBEDDING_SCHEDULE=true, FRONTEND_DIR (default ../coolture-frontend)
 EOF
 }
 
@@ -28,7 +21,6 @@ fi
 ENVIRONMENT="${1:-dev}"
 shift || true
 if [[ ! "$ENVIRONMENT" =~ ^(dev|staging|prod)$ ]]; then
-    echo "Unknown environment '$ENVIRONMENT'." >&2
     usage >&2
     exit 1
 fi
@@ -36,11 +28,7 @@ fi
 requested=("$@")
 [[ ${#requested[@]} -eq 0 ]] && requested=("${ALL_STACKS[@]}")
 for stack in "${requested[@]}"; do
-    if [[ ! " ${ALL_STACKS[*]} " =~ " $stack " ]]; then
-        echo "Unknown stack '$stack'." >&2
-        usage >&2
-        exit 1
-    fi
+    [[ " ${ALL_STACKS[*]} " =~ " $stack " ]] || { usage >&2; exit 1; }
 done
 
 wants() {
@@ -48,62 +36,14 @@ wants() {
 }
 
 cd "$(dirname "$0")/.."
-export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-eu-central-1}"
-WAF_REGION=us-east-1
-
-for tool in sam aws; do
-    command -v "$tool" > /dev/null || { echo "Missing '$tool' on PATH." >&2; exit 1; }
-done
-
-if wants backend; then
-    if [[ -x ./mvnw ]]; then
-        MVN=./mvnw
-    elif command -v mvn > /dev/null; then
-        MVN=mvn
-    else
-        echo "Missing Maven (./mvnw or mvn) needed to build the shared common module." >&2
-        exit 1
-    fi
-fi
-
+export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-eu-north-1}"
 FRONTEND_DIR="${FRONTEND_DIR:-../coolture-frontend}"
-if wants frontend; then
-    command -v npx > /dev/null || { echo "Missing 'npx' (Node.js) needed to build the frontend." >&2; exit 1; }
-    [[ -d "$FRONTEND_DIR/node_modules" ]] || {
-        echo "No node_modules in $FRONTEND_DIR - run 'npm ci' there first." >&2
-        exit 1
-    }
-    FRONTEND_DIR="$(cd "$FRONTEND_DIR" && pwd)"
-fi
 
-if wants embeddings; then
-    docker info > /dev/null 2>&1 || { echo "Docker is required to build the post-embedding image." >&2; exit 1; }
-fi
-
-if wants auth || wants backend || wants embeddings; then
-    if ! python3.13 -m pip --version > /dev/null 2>&1; then
-        command -v python3.13 > /dev/null || { echo "python3.13 is required to build the Python Lambdas." >&2; exit 1; }
-        build_venv=".aws-sam/python3.13"
-        if [[ ! -x "$build_venv/bin/pip" ]]; then
-            echo "==> Creating $build_venv so sam build finds python3.13 with pip"
-            python3.13 -m venv "$build_venv" || {
-                echo "Could not create a python3.13 venv - install python3.13-venv." >&2
-                exit 1
-            }
-        fi
-        export PATH="$PWD/$build_venv/bin:$PATH"
-    fi
-fi
-
-account="$(aws sts get-caller-identity --query Account --output text)" || {
-    echo "AWS credentials are not valid - run 'aws configure' or 'aws sso login' first." >&2
-    exit 1
-}
-echo "Deploying [${requested[*]}] to '$ENVIRONMENT' in account $account ($AWS_DEFAULT_REGION)"
+NETWORK_STACK=mgmt-stack-networking
+[[ "$ENVIRONMENT" == dev ]] || NETWORK_STACK="mgmt-stack-networking-$ENVIRONMENT"
 
 template_for() {
     case "$1" in
-        base) echo aws/base.yaml ;;
         auth) echo aws/auth.yaml ;;
         backend) echo aws/backend.yaml ;;
         embeddings) echo embedding-workers/template.yaml ;;
@@ -112,10 +52,18 @@ template_for() {
     esac
 }
 
+region_for() {
+    [[ "$1" == waf ]] && echo "$WAF_REGION" || echo "$AWS_DEFAULT_REGION"
+}
+
+stack_output() {
+    aws cloudformation describe-stacks --stack-name "$1" --region "${3:-$AWS_DEFAULT_REGION}" \
+        --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" --output text
+}
+
 frontend_url() {
     local url
-    url="$(aws cloudformation describe-stacks --stack-name "coolture-frontend-$ENVIRONMENT" \
-        --query "Stacks[0].Outputs[?OutputKey=='WebsiteUrl'].OutputValue" --output text 2> /dev/null)" || true
+    url="$(stack_output "coolture-frontend-$ENVIRONMENT" WebsiteUrl 2> /dev/null)" || true
     [[ "$url" == None ]] && url=""
     echo "$url"
 }
@@ -126,52 +74,33 @@ overrides_for() {
             echo "Environment=$ENVIRONMENT FrontendUrl=\"$(frontend_url)\""
             ;;
         backend)
-            echo "Environment=$ENVIRONMENT BaseStackName=coolture-base-$ENVIRONMENT AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"${CORS_ALLOWED_ORIGINS:-http://localhost:4200}\""
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"${CORS_ALLOWED_ORIGINS:-http://localhost:4200}\""
             ;;
         embeddings)
-            echo "Environment=$ENVIRONMENT BaseStackName=coolture-base-$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT UserEmbeddingScheduleEnabled=${USER_EMBEDDING_SCHEDULE:-false}"
-            ;;
-        waf)
-            echo "Environment=$ENVIRONMENT"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT UserEmbeddingScheduleEnabled=${USER_EMBEDDING_SCHEDULE:-false}"
             ;;
         frontend)
             local web_acl
             web_acl="$(stack_output "coolture-waf-$ENVIRONMENT" WebAclArn "$WAF_REGION" 2> /dev/null)" || web_acl=""
             [[ "$web_acl" == None ]] && web_acl=""
             [[ -z "$web_acl" ]] && echo "WARNING: no coolture-waf-$ENVIRONMENT stack in $WAF_REGION - frontend deploys without WAF" >&2
-            echo "Environment=$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT AllowedViewerIps=\"${ALLOWED_VIEWER_IPS:-}\" WebAclArn=\"$web_acl\""
+            echo "Environment=$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT WebAclArn=\"$web_acl\""
             ;;
     esac
-}
-
-region_for() {
-    if [[ "$1" == waf ]]; then
-        echo "$WAF_REGION"
-    else
-        echo "$AWS_DEFAULT_REGION"
-    fi
-}
-
-stack_output() {
-    aws cloudformation describe-stacks --stack-name "$1" --region "${3:-$AWS_DEFAULT_REGION}" \
-        --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" --output text
 }
 
 build_frontend() {
     local api_endpoint cognito_domain cognito_client_id src dist
     api_endpoint="$(stack_output "coolture-backend-$ENVIRONMENT" ApiEndpoint)"
     api_endpoint="${api_endpoint%/}"
-    if [[ -z "$api_endpoint" || "$api_endpoint" == None ]]; then
-        echo "Backend stack coolture-backend-$ENVIRONMENT has no ApiEndpoint output - deploy backend first." >&2
-        exit 1
-    fi
     cognito_domain="$(stack_output "coolture-auth-$ENVIRONMENT" HostedUiUrl)"
     cognito_client_id="$(stack_output "coolture-auth-$ENVIRONMENT" UserPoolClientId)"
-    if [[ -z "$cognito_domain" || "$cognito_domain" == None || -z "$cognito_client_id" || "$cognito_client_id" == None ]]; then
-        echo "Auth stack coolture-auth-$ENVIRONMENT has no HostedUiUrl/UserPoolClientId output - deploy auth first." >&2
+    if [[ -z "$api_endpoint" || "$api_endpoint" == None || -z "$cognito_domain" || "$cognito_domain" == None || -z "$cognito_client_id" || "$cognito_client_id" == None ]]; then
+        echo "Backend or auth stack outputs are missing - deploy auth and backend first." >&2
         exit 1
     fi
 
+    FRONTEND_DIR="$(cd "$FRONTEND_DIR" && pwd)"
     src=".aws-sam/frontend-src-$ENVIRONMENT"
     dist="aws/lambdas/ssr/dist"
     echo "==> [frontend] ng build from $FRONTEND_DIR (SSR API: $api_endpoint, browser API: /api)"
@@ -217,77 +146,59 @@ publish_frontend_assets() {
         --query 'Invalidation.Id' --output text
 }
 
-sync_auth_frontend_url() {
-    local stack="coolture-auth-$ENVIRONMENT" url current
-    url="$(frontend_url)"
-    current="$(aws cloudformation describe-stacks --stack-name "$stack" \
-        --query "Stacks[0].Parameters[?ParameterKey=='FrontendUrl'].ParameterValue" --output text 2> /dev/null)" || return 0
-    [[ "$current" == None ]] && current=""
-    [[ -z "$url" || "$url" == "$current" ]] && return 0
-
-    echo "==> [auth] adding $url to Cognito callback/logout URLs"
-    aws cloudformation update-stack --stack-name "$stack" --use-previous-template \
-        --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
-        --parameters ParameterKey=Environment,UsePreviousValue=true \
-                     ParameterKey=LocalCallbackUrls,UsePreviousValue=true \
-                     ParameterKey=LocalLogoutUrls,UsePreviousValue=true \
-                     ParameterKey=LogRetentionDays,UsePreviousValue=true \
-                     "ParameterKey=FrontendUrl,ParameterValue=$url" > /dev/null
-    aws cloudformation wait stack-update-complete --stack-name "$stack"
-}
-
-confirm_flag="--no-confirm-changeset"
-[[ -n "${CONFIRM:-}" ]] && confirm_flag="--confirm-changeset"
-
 deploy_stack() {
-    local stack="$1"
-    local config_env="$stack-$ENVIRONMENT"
-    local template build_dir overrides
+    local stack="$1" template build_dir overrides
     template="$(template_for "$stack")"
-    build_dir=".aws-sam/$config_env"
+    build_dir=".aws-sam/$stack-$ENVIRONMENT"
     overrides="$(overrides_for "$stack")"
 
     echo
-    echo "==> [$stack] sam validate"
-    sam validate --template-file "$template" --region "$(region_for "$stack")"
-
     echo "==> [$stack] sam build"
-    sam build --config-file "$PWD/samconfig.toml" --config-env "$config_env" \
-        --template-file "$template" --build-dir "$build_dir" --parallel
+    sam build --template-file "$template" --build-dir "$build_dir" --parallel
 
     echo "==> [$stack] sam deploy"
     local deploy_args=(
-        --config-file "$PWD/samconfig.toml"
-        --config-env "$config_env"
         --stack-name "coolture-$stack-$ENVIRONMENT"
         --template-file "$build_dir/template.yaml"
         --region "$(region_for "$stack")"
         --capabilities CAPABILITY_IAM
-        --resolve-s3
+        --no-confirm-changeset
         --no-fail-on-empty-changeset
-        "$confirm_flag"
     )
+    [[ -n "${CFN_ROLE_ARN:-}" ]] && deploy_args+=(--role-arn "$CFN_ROLE_ARN")
+    [[ "$stack" != waf ]] && deploy_args+=(--resolve-s3)
     [[ "$stack" == embeddings ]] && deploy_args+=(--resolve-image-repos)
     [[ -n "$overrides" ]] && deploy_args+=(--parameter-overrides "$overrides")
     sam deploy "${deploy_args[@]}"
 }
 
+sync_auth_frontend_url() {
+    local url current
+    url="$(frontend_url)"
+    current="$(aws cloudformation describe-stacks --stack-name "coolture-auth-$ENVIRONMENT" \
+        --query "Stacks[0].Parameters[?ParameterKey=='FrontendUrl'].ParameterValue" --output text 2> /dev/null)" || return 0
+    [[ "$current" == None ]] && current=""
+    if [[ -n "$url" && "$url" != "$current" ]]; then
+        deploy_stack auth
+    fi
+}
+
 if wants backend; then
-    echo "==> Installing shared common module"
-    "$MVN" -q clean install -f aws/lambdas/common/pom.xml
+    mvn -q clean install -f aws/lambdas/common/pom.xml
 fi
 
 for stack in "${ALL_STACKS[@]}"; do
     wants "$stack" || continue
     [[ "$stack" == frontend ]] && build_frontend
     deploy_stack "$stack"
-    [[ "$stack" == frontend ]] && publish_frontend_assets && sync_auth_frontend_url
+    if [[ "$stack" == frontend ]]; then
+        publish_frontend_assets
+        sync_auth_frontend_url
+    fi
 done
 
 echo
-echo "Done. Stack outputs:"
-for stack in "${ALL_STACKS[@]}"; do
-    wants "$stack" || continue
-    aws cloudformation describe-stacks --stack-name "coolture-$stack-$ENVIRONMENT" --region "$(region_for "$stack")" \
-        --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output table || true
-done
+echo "Deployed [${requested[*]}] to '$ENVIRONMENT'."
+if wants frontend; then
+    echo "Frontend: $(frontend_url)"
+fi

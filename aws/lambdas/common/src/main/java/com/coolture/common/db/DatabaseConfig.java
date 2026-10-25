@@ -25,7 +25,7 @@ public class DatabaseConfig {
         String jdbcUrl = String.format("jdbc:postgresql://%s:%s/%s?connectTimeout=%d%s",
             host, port, name, Math.max(1, connectionTimeoutMs / 1000), iamAuth ? "&sslmode=require" : "");
         if (iamAuth) {
-            Region region = Region.of(getEnvOrDefault("AWS_REGION", "eu-central-1"));
+            Region region = Region.of(getEnvOrDefault("AWS_REGION", "eu-north-1"));
             config.setDataSource(new IamAuthDataSource(jdbcUrl, host, Integer.parseInt(port), user, region));
         } else {
             config.setJdbcUrl(jdbcUrl);

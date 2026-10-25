@@ -179,7 +179,7 @@ public class S3StorageService {
         if (regionStr != null && !regionStr.isBlank()) {
             return Region.of(regionStr);
         }
-        return Region.EU_CENTRAL_1;
+        return Region.EU_NORTH_1;
     }
 
     private static AwsCredentialsProvider resolveCredentialsProvider() {
