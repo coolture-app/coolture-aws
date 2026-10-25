@@ -90,13 +90,19 @@ public class SecurityContext {
             if (jwt != null && jwt.getClaims() != null && jwt.getClaims().containsKey(claimName)) {
                 return Optional.ofNullable(jwt.getClaims().get(claimName));
             }
+            Optional<String> lambdaClaim = getLambdaAuthorizerClaim(event.getRequestContext().getAuthorizer().getLambda(), claimName);
+            if (lambdaClaim.isPresent()) {
+                return lambdaClaim;
+            }
         }
 
         // 2. Fallback: Parse claims directly from Authorization: Bearer <jwt> header
         // Supports optionally-authenticated routes where API Gateway authorizer is NONE
-        Optional<String> headerClaim = getClaimFromAuthorizationHeader(event, claimName);
-        if (headerClaim.isPresent()) {
-            return headerClaim;
+        if (isDevFallbackEnabled()) {
+            Optional<String> headerClaim = getClaimFromAuthorizationHeader(event, claimName);
+            if (headerClaim.isPresent()) {
+                return headerClaim;
+            }
         }
 
         // 3. Local development fallback (only active when isDevFallbackEnabled() is true)
@@ -139,6 +145,22 @@ public class SecurityContext {
         }
 
         return Optional.empty();
+    }
+
+    private static Optional<String> getLambdaAuthorizerClaim(Map<String, Object> context, String claimName) {
+        if (context == null || context.isEmpty()) {
+            return Optional.empty();
+        }
+        String key = switch (claimName) {
+            case "cognito:username" -> "username";
+            case "cognito:groups" -> "groups";
+            default -> claimName;
+        };
+        Object value = context.get(key);
+        if (value == null || value.toString().isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(value.toString());
     }
 
     private static String getHeaderCaseInsensitive(Map<String, String> headers, String targetKey) {
@@ -231,10 +253,21 @@ public class SecurityContext {
                     return claims;
                 }
             }
+            if (authorizer != null && authorizer.getLambda() != null && !authorizer.getLambda().isEmpty()) {
+                Map<String, String> lambdaClaims = new HashMap<>();
+                authorizer.getLambda().forEach((k, v) -> {
+                    if (v != null && !v.toString().isBlank()) {
+                        lambdaClaims.put(k, v.toString());
+                    }
+                });
+                return lambdaClaims;
+            }
         }
-        Map<String, String> headerClaims = getAllClaimsFromAuthorizationHeader(event);
-        if (!headerClaims.isEmpty()) {
-            return headerClaims;
+        if (isDevFallbackEnabled()) {
+            Map<String, String> headerClaims = getAllClaimsFromAuthorizationHeader(event);
+            if (!headerClaims.isEmpty()) {
+                return headerClaims;
+            }
         }
         if (isDevFallbackEnabled()) {
             Map<String, String> devClaims = new HashMap<>();
