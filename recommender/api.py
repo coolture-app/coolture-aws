@@ -7,7 +7,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from catalogue import list_active_interests
-from selection import EmbeddingsNotReady, SelectionRejected, SelectionRequest, UserUnknown, replace_selection
+from selection import (EmbeddingsNotReady, ProfileChanged, SelectionRejected, SelectionRequest, UserUnknown,
+                       replace_selection)
 
 
 def create_app(database_url: str, model_key: str) -> FastAPI:
@@ -26,6 +27,8 @@ def create_app(database_url: str, model_key: str) -> FastAPI:
                 profile = replace_selection(conn, user_id, body.interests, model_key)
         except UserUnknown:
             return JSONResponse({'error': 'user_unknown'}, 404)
+        except ProfileChanged:
+            return JSONResponse({'error': 'profile_changed'}, 409)
         except SelectionRejected as rejected:
             return JSONResponse({'error': 'selection_rejected', **asdict(rejected.problems)}, 422)
         except EmbeddingsNotReady as missing:

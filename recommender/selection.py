@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass
 from uuid import UUID
 
+import psycopg
 from pydantic import BaseModel, Field
 
 from catalogue import latest_version
@@ -46,6 +47,10 @@ class UserUnknown(Exception):
     pass
 
 
+class ProfileChanged(Exception):
+    pass
+
+
 class SelectionRejected(Exception):
     def __init__(self, problems: SelectionProblems):
         super().__init__('replace selection: selection rejected')
@@ -77,7 +82,7 @@ def user_vector(weighted: list[tuple[float, list[float]]]) -> list[float]:
 
 
 def replace_selection(conn, user_id: UUID, choices: tuple[InterestChoice, ...], model_key: str) -> ProfileRevision:
-    if not conn.execute('SELECT 1 FROM users WHERE id=%s FOR UPDATE', (user_id,)).fetchone():
+    if not conn.execute('SELECT 1 FROM app_views.users WHERE id=%s', (user_id,)).fetchone():
         raise UserUnknown(f'replace selection: user {user_id} unknown')
     statuses = dict(conn.execute('SELECT key, status FROM interests').fetchall())
     problems = find_problems(choices, statuses)
@@ -93,9 +98,12 @@ def replace_selection(conn, user_id: UUID, choices: tuple[InterestChoice, ...], 
             return ProfileRevision(user_id, latest, False, sorted_choices(current))
     vector = interest_user_vector(conn, wanted, model_key)
     revision = (latest or 0) + 1
-    conn.execute(
-        'INSERT INTO user_interest_profiles(user_id, revision, catalogue_version, model_key) VALUES (%s, %s, %s, %s)',
-        (user_id, revision, latest_version(conn), model_key))
+    try:
+        conn.execute(
+            'INSERT INTO user_interest_profiles(user_id, revision, catalogue_version, model_key) VALUES (%s, %s, %s, %s)',
+            (user_id, revision, latest_version(conn), model_key))
+    except psycopg.errors.UniqueViolation as conflict:
+        raise ProfileChanged(f'replace selection: user {user_id} revision {revision} already exists') from conflict
     for key, weight in wanted.items():
         conn.execute(
             'INSERT INTO user_interest_selections(user_id, revision, interest_key, weight) VALUES (%s, %s, %s, %s)',
