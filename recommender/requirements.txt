@@ -1,6 +1,5 @@
-fastapi==0.115.12
-uvicorn==0.34.2
 psycopg[binary]==3.2.9
+pydantic==2.14.2
 pytest==8.3.5
 boto3==1.35.99
 neo4j==6.4.1
