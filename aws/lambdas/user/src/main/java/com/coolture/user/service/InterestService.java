@@ -8,13 +8,11 @@ import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.InterestRepository.InterestEntity;
 
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class InterestService {
@@ -41,17 +39,19 @@ public class InterestService {
     }
 
     public InterestCatalogDto getCatalog() throws SQLException {
-        List<InterestEntity> interests = repository.findAll();
-        List<Category> categories = new ArrayList<>();
-        for (InterestEntity category : interests) {
-            if (category.isCategory()) {
-                List<Interest> children = interests.stream()
-                        .filter(interest -> category.key().equals(interest.parentKey()))
-                        .map(interest -> new Interest(interest.key(), interest.labelPl(), interest.labelEn()))
-                        .toList();
-                categories.add(new Category(category.key(), category.labelPl(), category.labelEn(), children));
-            }
-        }
+        Map<String, List<Interest>> interestsByCategory = repository.findInterests().stream()
+                .collect(Collectors.groupingBy(
+                        InterestEntity::categoryKey,
+                        Collectors.mapping(
+                                interest -> new Interest(interest.key(), interest.labelPl(), interest.labelEn()),
+                                Collectors.toList())));
+        List<Category> categories = repository.findCategories().stream()
+                .map(category -> new Category(
+                        category.key(),
+                        category.labelPl(),
+                        category.labelEn(),
+                        interestsByCategory.getOrDefault(category.key(), List.of())))
+                .toList();
         return new InterestCatalogDto(minSelections, maxSelections, categories);
     }
 
@@ -63,21 +63,14 @@ public class InterestService {
     public UserInterestsDto replaceSelection(UUID targetId, UUID callerId, UserInterestsDto request) throws SQLException {
         requireOwner(targetId, callerId);
 
-        Map<String, InterestEntity> known = repository.findAll().stream()
-                .collect(Collectors.toMap(InterestEntity::key, Function.identity()));
+        Set<String> known = repository.findInterests().stream()
+                .map(InterestEntity::key)
+                .collect(Collectors.toSet());
         Set<String> keys = new LinkedHashSet<>(request.interests());
-
-        long selected = 0;
-        for (String key : keys) {
-            InterestEntity interest = known.get(key);
-            if (interest == null) {
-                throw new IllegalArgumentException("Unknown interest");
-            }
-            if (!interest.isCategory()) {
-                selected++;
-            }
+        if (!known.containsAll(keys)) {
+            throw new IllegalArgumentException("Unknown interest");
         }
-        if (selected < minSelections || selected > maxSelections) {
+        if (keys.size() < minSelections || keys.size() > maxSelections) {
             throw new IllegalArgumentException(
                     "Select between " + minSelections + " and " + maxSelections + " interests");
         }

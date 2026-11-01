@@ -3,6 +3,7 @@ package com.coolture.user.service;
 import com.coolture.user.dto.InterestCatalogDto;
 import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.repository.InterestRepository;
+import com.coolture.user.repository.InterestRepository.CategoryEntity;
 import com.coolture.user.repository.InterestRepository.InterestEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,8 +31,11 @@ class InterestServiceTest {
 
     @BeforeEach
     void catalogue() throws SQLException {
-        when(repository.findAll()).thenReturn(List.of(
-                new InterestEntity("music", null, "Muzyka", "Music"),
+        when(repository.findCategories()).thenReturn(List.of(
+                new CategoryEntity("music", "Muzyka", "Music"),
+                new CategoryEntity("art", "Sztuka", "Art")
+        ));
+        when(repository.findInterests()).thenReturn(List.of(
                 new InterestEntity("jazz", "music", "Jazz", "Jazz"),
                 new InterestEntity("rock", "music", "Rock", "Rock"),
                 new InterestEntity("opera", "music", "Opera", "Opera"),
@@ -45,22 +49,31 @@ class InterestServiceTest {
 
         assertEquals(2, catalog.minSelections());
         assertEquals(3, catalog.maxSelections());
-        assertEquals(1, catalog.categories().size());
-        assertEquals("music", catalog.categories().getFirst().key());
-        assertEquals(4, catalog.categories().getFirst().interests().size());
+        assertEquals(List.of("music", "art"), catalog.categories().stream().map(c -> c.key()).toList());
+        assertEquals(List.of("jazz", "rock", "opera", "hip_hop"),
+                catalog.categories().getFirst().interests().stream().map(i -> i.key()).toList());
+        assertEquals(List.of(), catalog.categories().get(1).interests());
     }
 
     @Test
-    void replaceSelection_storesInterestsAndCategories_withoutCountingCategories() throws SQLException {
-        service.replaceSelection(USER_ID, USER_ID, request("music", "jazz", "rock"));
+    void replaceSelection_storesInterests() throws SQLException {
+        service.replaceSelection(USER_ID, USER_ID, request("jazz", "rock"));
 
-        verify(repository).replaceSelection(USER_ID, Set.of("music", "jazz", "rock"));
+        verify(repository).replaceSelection(USER_ID, Set.of("jazz", "rock"));
     }
 
     @Test
-    void replaceSelection_rejectsTooFewInterests_evenWithCategory() throws SQLException {
+    void replaceSelection_rejectsCategoryKey() throws SQLException {
         assertThrows(IllegalArgumentException.class,
-                () -> service.replaceSelection(USER_ID, USER_ID, request("music", "jazz")));
+                () -> service.replaceSelection(USER_ID, USER_ID, request("music", "jazz", "rock")));
+
+        verify(repository, never()).replaceSelection(any(), any());
+    }
+
+    @Test
+    void replaceSelection_rejectsTooFewInterests() throws SQLException {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.replaceSelection(USER_ID, USER_ID, request("jazz")));
 
         verify(repository, never()).replaceSelection(any(), any());
     }

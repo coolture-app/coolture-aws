@@ -13,14 +13,30 @@ import java.util.UUID;
 
 public class InterestRepository {
 
-    public record InterestEntity(String key, String parentKey, String labelPl, String labelEn) {
-        public boolean isCategory() {
-            return parentKey == null;
+    public record CategoryEntity(String key, String labelPl, String labelEn) {}
+
+    public record InterestEntity(String key, String categoryKey, String labelPl, String labelEn) {}
+
+    public List<CategoryEntity> findCategories() throws SQLException {
+        String sql = "SELECT key, label_pl, label_en FROM interest_categories ORDER BY position, key";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            List<CategoryEntity> categories = new ArrayList<>();
+            while (rs.next()) {
+                categories.add(new CategoryEntity(
+                        rs.getString("key"),
+                        rs.getString("label_pl"),
+                        rs.getString("label_en")
+                ));
+            }
+            return categories;
         }
     }
 
-    public List<InterestEntity> findAll() throws SQLException {
-        String sql = "SELECT key, parent_key, label_pl, label_en FROM interests ORDER BY position, key";
+    public List<InterestEntity> findInterests() throws SQLException {
+        String sql = "SELECT key, category_key, label_pl, label_en FROM interests ORDER BY position, key";
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql);
@@ -29,7 +45,7 @@ public class InterestRepository {
             while (rs.next()) {
                 interests.add(new InterestEntity(
                         rs.getString("key"),
-                        rs.getString("parent_key"),
+                        rs.getString("category_key"),
                         rs.getString("label_pl"),
                         rs.getString("label_en")
                 ));
@@ -50,6 +66,18 @@ public class InterestRepository {
                     keys.add(rs.getString("interest_key"));
                 }
                 return keys;
+            }
+        }
+    }
+
+    public boolean hasSelection(UUID userId) throws SQLException {
+        String sql = "SELECT 1 FROM user_interests WHERE user_id = ? LIMIT 1";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
             }
         }
     }

@@ -1,16 +1,30 @@
 -- V10: Interest catalogue and user selections
--- The "embed-interests" action of the post-embedding worker fills in the vectors.
+-- Users pick interests; categories only group them. The "embed-interests" action
+-- of the post-embedding worker fills interest_embeddings.
 
--- A row without parent_key is a category, the rest are the interests a user selects.
+CREATE TABLE interest_categories (
+    key VARCHAR(64) PRIMARY KEY,
+    label_pl VARCHAR(128) NOT NULL,
+    label_en VARCHAR(128) NOT NULL,
+    position INTEGER NOT NULL
+);
+
 CREATE TABLE interests (
     key VARCHAR(64) PRIMARY KEY,
-    parent_key VARCHAR(64) REFERENCES interests(key),
+    category_key VARCHAR(64) NOT NULL REFERENCES interest_categories(key),
     label_pl VARCHAR(128) NOT NULL,
     label_en VARCHAR(128) NOT NULL,
     embedding_text TEXT NOT NULL,
-    position INTEGER NOT NULL,
-    embedding vector(768),
-    embedding_model VARCHAR(128)
+    position INTEGER NOT NULL
+);
+
+-- embedded_text records what was embedded, so editing embedding_text triggers a re-embed.
+CREATE TABLE interest_embeddings (
+    interest_key VARCHAR(64) PRIMARY KEY REFERENCES interests(key) ON DELETE CASCADE,
+    embedding vector(768) NOT NULL,
+    model VARCHAR(128) NOT NULL,
+    embedded_text TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE user_interests (
@@ -19,19 +33,21 @@ CREATE TABLE user_interests (
     PRIMARY KEY (user_id, interest_key)
 );
 
-INSERT INTO interests (key, parent_key, label_pl, label_en, embedding_text, position) VALUES
-    ('music', NULL, 'Muzyka', 'Music', 'Muzyka: koncerty, festiwale, występy na żywo, zespoły i artyści.', 0),
-    ('film_tv', NULL, 'Film i seriale', 'Film and TV', 'Film i seriale: seanse, kino, premiery i festiwale filmowe.', 1),
-    ('stage', NULL, 'Scena', 'On stage', 'Scena: spektakle, występy, taniec i komedia na żywo.', 2),
-    ('art', NULL, 'Sztuka', 'Art', 'Sztuka: wystawy, galerie, muzea i twórczość.', 3),
-    ('books', NULL, 'Książki i wiedza', 'Books and knowledge', 'Książki i wiedza: czytanie, wykłady, spotkania i rozwój.', 4),
-    ('going_out', NULL, 'Wyjścia', 'Going out', 'Wyjścia na miasto: bary, kluby, imprezy i spotkania ze znajomymi.', 5),
-    ('food', NULL, 'Jedzenie i picie', 'Food and drink', 'Jedzenie i picie: smaki, restauracje, degustacje i gotowanie.', 6),
-    ('sports', NULL, 'Sport', 'Sports', 'Sport: aktywność fizyczna, zawody, treningi i kibicowanie.', 7),
-    ('outdoors', NULL, 'Natura i podróże', 'Nature and travel', 'Natura i podróże: wyjazdy, przyroda i czas na świeżym powietrzu.', 8),
-    ('games', NULL, 'Gry', 'Games', 'Gry: planszówki, gry wideo, turnieje i zabawa w grupie.', 9),
-    ('wellbeing', NULL, 'Styl życia', 'Lifestyle', 'Styl życia: zdrowie, spokój i codzienne przyjemności.', 10),
-    ('community', NULL, 'Społeczność', 'Community', 'Społeczność: ludzie, wspólne działania i ważne sprawy.', 11),
+INSERT INTO interest_categories (key, label_pl, label_en, position) VALUES
+    ('music', 'Muzyka', 'Music', 0),
+    ('film_tv', 'Film i seriale', 'Film and TV', 1),
+    ('stage', 'Scena', 'On stage', 2),
+    ('art', 'Sztuka', 'Art', 3),
+    ('books', 'Książki i wiedza', 'Books and knowledge', 4),
+    ('going_out', 'Wyjścia', 'Going out', 5),
+    ('food', 'Jedzenie i picie', 'Food and drink', 6),
+    ('sports', 'Sport', 'Sports', 7),
+    ('outdoors', 'Natura i podróże', 'Nature and travel', 8),
+    ('games', 'Gry', 'Games', 9),
+    ('wellbeing', 'Styl życia', 'Lifestyle', 10),
+    ('community', 'Społeczność', 'Community', 11);
+
+INSERT INTO interests (key, category_key, label_pl, label_en, embedding_text, position) VALUES
     ('concerts', 'music', 'Koncerty', 'Concerts', 'Koncerty na żywo: występy zespołów i artystów w klubach, halach i plenerze.', 0),
     ('music_festivals', 'music', 'Festiwale muzyczne', 'Music festivals', 'Festiwale muzyczne: wielodniowe imprezy plenerowe, sceny, line-up, pole namiotowe.', 1),
     ('rock', 'music', 'Rock', 'Rock', 'Rock: koncerty zespołów rockowych, gitary, punk rock i klasyka rocka.', 2),

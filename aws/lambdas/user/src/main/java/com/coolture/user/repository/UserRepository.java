@@ -243,13 +243,7 @@ public class UserRepository {
     }
 
     public boolean hasSelectedInterests(UUID userId) throws SQLException {
-        String sql = """
-            SELECT 1
-            FROM user_interests ui
-            JOIN interests i ON i.key = ui.interest_key
-            WHERE ui.user_id = ? AND i.parent_key IS NOT NULL
-            LIMIT 1
-        """;
+        String sql = "SELECT 1 FROM user_interests WHERE user_id = ? LIMIT 1";
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, userId);
