@@ -17,6 +17,5 @@ public record UserProfileDto(
     String bio,
     Instant createdAt,
     boolean isFollowing,
-    boolean isBlocked,
-    Boolean interestsSelected
+    boolean isBlocked
 ) {}

@@ -65,6 +65,10 @@ public class InterestService {
         return new UserInterestsDto(repository.findSelectedKeys(targetId));
     }
 
+    public boolean hasSelection(UUID userId) throws SQLException {
+        return repository.hasSelection(userId);
+    }
+
     public UserInterestsDto replaceSelection(UUID targetId, UUID callerId, UserInterestsDto request) throws SQLException {
         requireOwner(targetId, callerId);
 

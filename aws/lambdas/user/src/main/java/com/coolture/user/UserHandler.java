@@ -10,6 +10,7 @@ import com.coolture.common.json.JsonUtils;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
+import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserInterestsDto;
@@ -228,8 +229,8 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             .orElse(null);
         String firstName = SecurityContext.getClaim(event, "given_name").orElse(null);
         String lastName = SecurityContext.getClaim(event, "family_name").orElse(null);
-        UserProfileDto me = service.getMe(callerId, username, firstName, lastName);
-        return ApiResponse.ok(me);
+        UserProfileDto profile = service.getMe(callerId, username, firstName, lastName);
+        return ApiResponse.ok(new MeDto(profile, interestService.hasSelection(callerId)));
     }
 
     private APIGatewayV2HTTPResponse getFollowers(APIGatewayV2HTTPEvent event) throws Exception {

@@ -456,11 +456,13 @@ class UserHandlerTest {
 
             when(service.getMe(eq(CALLER_ID), eq(FAKE_USERNAME), eq("Jan"), eq("Kowalski")))
                     .thenReturn(profile(CALLER_ID, FAKE_USERNAME));
+            when(interestService.hasSelection(CALLER_ID)).thenReturn(true);
 
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            assertTrue(response.getBody().contains(FAKE_USERNAME));
+            assertTrue(response.getBody().contains("\"username\":\"" + FAKE_USERNAME + "\""));
+            assertTrue(response.getBody().contains("\"interestsSelected\":true"));
         }
     }
 
@@ -614,6 +616,6 @@ class UserHandlerTest {
     private static UserProfileDto profile(UUID id, String username) {
         return new UserProfileDto(
                 id, username, "Kunegunda", "Kowalska", null,
-                0, 0, "Bio", Instant.now(), false, false, null);
+                0, 0, "Bio", Instant.now(), false, false);
     }
 }
