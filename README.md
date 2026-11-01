@@ -22,7 +22,9 @@ embedding-workers/          # Independent stack: Python embedding Lambdas (own t
 ├── template.yaml           # Imports network from mgmt-stack-networking[-<env>], queue ARN + DB endpoint from backend
 ├── post-embedding/         # Container image: SQS → all-mpnet-base-v2 → post_embeddings
 └── user-embedding/         # Zip: every 30 min, weighted avg of post embeddings → user_embeddings
-migrations/                 # PostgreSQL schema migrations
+migrations/                 # PostgreSQL schema migrations (app + recommender schema `rec`)
+recommender/                # Recommender worker and AuraDB graph gateway (see recommender/README.md)
+db/                         # Local Postgres image (PostGIS + pgvector) and local dev seed
 scripts/                    # Local helpers (embed-posts.sh)
 samconfig.toml              # SAM deployment configuration
 ```
@@ -88,7 +90,7 @@ EventBridge rate(30 minutes) ──► UserEmbeddingFunction ──► user_embe
 - `sam build` for `UserEmbeddingFunction` needs `python3.13` with `pip` on PATH (e.g. run it inside a 3.13 venv) or `--use-container`.
 
 Locally, `sam local` emulates neither S3 notifications nor SQS triggers (and post-write skips the S3 write),
-so embeddings are computed on demand against the docker Postgres (`make up`, `make migrate`, `make build-embeddings` first):
+so embeddings are computed on demand against the docker Postgres (`make up` and `make build-embeddings` first):
 
 ```bash
 make embed-posts                     # posts with no embedding, or edited since it was computed
@@ -136,7 +138,7 @@ When `ENVIRONMENT=local` (set automatically in `make local`):
 
 ### 3. Database Isolation (Local vs. AWS)
 - **Production Migrations** (`migrations/*.sql`): Strictly schema DDL (tables, indexes, extensions). No mock users are present, ensuring clean AWS deployments.
-- **Local Dev Seed** (`db/local-dev-seed.sql`): Creates the `local_dev` user only in local Docker Postgres via `docker-compose.yml` and `make migrate`.
+- **Local Dev Seed** (`db/local-dev-seed.sql`): Creates the `local_dev` user and a small demo dataset (3 users, 6 posts, follows, likes) only in local Docker Postgres, applied by the `migrate` compose service after the migrations.
 
 ## Prerequisites
 
@@ -144,7 +146,7 @@ When `ENVIRONMENT=local` (set automatically in `make local`):
 - Docker
 - Maven 3.x
 - Java 21
-- PostgreSQL client (optional, for running migrations)
+- Python 3.13 (`sam build` of the Python functions)
 
 ## Local Development
 
@@ -156,27 +158,30 @@ Start local PostgreSQL and local S3 (Garage):
 make up
 ```
 
-> `make up` automatically runs PostgreSQL (port `5430`), S3 Garage (port `3900`), and `s3-init` which provisions the `coolture-bucket` with CORS enabled for direct browser uploads.
+> `make up` runs PostgreSQL (port `5430`), S3 Garage (port `3900`), `s3-init` which provisions the `coolture-bucket` with CORS enabled for direct browser uploads, and `migrate`, which applies `migrations/` with the same runner as on AWS (`aws/lambdas/migrations`) and then `db/local-dev-seed.sql`. It returns once the database is migrated and seeded.
 
-Build Lambda functions:
-
-```bash
-make build
-```
-
-Run database migrations and local dev seed:
+After adding a migration, apply it without restarting anything (already applied files are skipped):
 
 ```bash
 make migrate
 ```
 
+Start the recommender (local SQS + worker) and run its tests, see [recommender/README.md](recommender/README.md):
+
+```bash
+make rec-up
+make rec-test
+```
+
 ### Running Local API
 
-Start API Gateway locally on port 3000:
+Build the Lambdas and start API Gateway locally on port 3000:
 
 ```bash
 make local
 ```
+
+`make dev` does `make up` and `make local` in one go.
 
 The API will use these default connection parameters:
 
@@ -185,6 +190,10 @@ The API will use these default connection parameters:
 - Database: `coolture`
 - User: `coolture_admin`
 - Password: `admin`
+
+### Running the frontend against the local API
+
+In `../coolture-frontend`, `npm install` and `npx ng serve` serve the app on `http://localhost:4200`. Its development environment points at `http://localhost:3000`, where `make local` serves the routes without the `/api` prefix that CloudFront strips on AWS. There is no local login: pages that need no login work, and authenticated calls are easiest with curl and `X-User-Id` (see Authentication & Authorization).
 
 ### Testing the API
 
