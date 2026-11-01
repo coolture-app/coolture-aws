@@ -13,6 +13,8 @@ import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.UserRepository.UserEntity;
+import com.coolture.user.dto.UserInterestsDto;
+import com.coolture.user.service.InterestService;
 import com.coolture.user.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +36,8 @@ class UserHandlerTest {
 
     private final UserService service = mock(UserService.class);
     private final Context lambdaContext = mock(Context.class);
-    private final UserHandler handler = new UserHandler(service);
+    private final InterestService interestService = mock(InterestService.class);
+    private final UserHandler handler = new UserHandler(service, interestService);
 
     private static final UUID USER_ID = UUID.randomUUID();
     private static final UUID CALLER_ID = UUID.randomUUID();
@@ -46,6 +49,74 @@ class UserHandlerTest {
     @BeforeEach
     void setUp() {
         lenient().when(lambdaContext.getLogger()).thenReturn(mock(LambdaLogger.class));
+    }
+
+
+    @Test
+    void interestCatalog_isRoutedBehindStagePrefix() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/dev/dicts/interests", null, null);
+
+        APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+        assertEquals(200, response.getStatusCode());
+        verify(interestService).getCatalog();
+    }
+
+    @Test
+    void getInterests_passesTargetAndCaller() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "GET", "/users/" + USER_ID + "/interests", null, Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            verify(interestService).getSelection(USER_ID, CALLER_ID);
+        }
+    }
+
+    @Test
+    void replaceInterests_passesTheSelection() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "PUT", "/users/" + USER_ID + "/interests",
+                "{\"interests\":[\"jazz\",\"opera\"]}", Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            verify(interestService).replaceSelection(USER_ID, USER_ID, new UserInterestsDto(List.of("jazz", "opera")));
+        }
+    }
+
+    @Test
+    void replaceInterests_returns400_whenBodyIsMissing() {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "PUT", "/users/" + USER_ID + "/interests", null, Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
+
+            assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+        }
+    }
+
+    @Test
+    void usernameInterests_isNotTreatedAsInterestsRoute() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "GET", "/users/by-username/interests", null, Map.of("username", "interests"));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
+            when(service.getByUsernameForCaller("interests", null)).thenReturn(profile(USER_ID, "interests"));
+
+            assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
+            verifyNoInteractions(interestService);
+        }
     }
 
     // --- Search Tests ---
@@ -543,6 +614,6 @@ class UserHandlerTest {
     private static UserProfileDto profile(UUID id, String username) {
         return new UserProfileDto(
                 id, username, "Kunegunda", "Kowalska", null,
-                0, 0, "Bio", Instant.now(), false, false);
+                0, 0, "Bio", Instant.now(), false, false, null);
     }
 }

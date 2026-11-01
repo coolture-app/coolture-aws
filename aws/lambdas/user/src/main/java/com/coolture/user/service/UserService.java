@@ -341,6 +341,7 @@ public class UserService {
 
         boolean isFollowing = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(callerId, user.id());
         boolean isBlocked = callerId != null && !callerId.equals(user.id()) && userRepository.isBlocked(callerId, user.id());
+        Boolean interestsSelected = user.id().equals(callerId) ? userRepository.hasSelectedInterests(user.id()) : null;
 
         return new UserProfileDto(
                 user.id(),
@@ -353,7 +354,8 @@ public class UserService {
                 user.bio(),
                 user.createdAt(),
                 isFollowing,
-                isBlocked
+                isBlocked,
+                interestsSelected
         );
     }
 

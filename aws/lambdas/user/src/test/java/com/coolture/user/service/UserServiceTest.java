@@ -203,6 +203,16 @@ class UserServiceTest {
     }
 
     @Test
+    void getByIdForCaller_reportsInterestsOnlyOnOwnProfile() throws SQLException {
+        UserEntity user = new UserEntity(USER_ID, "kunegunda", "K", "K", null, Instant.now());
+        when(repository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(repository.hasSelectedInterests(USER_ID)).thenReturn(true);
+
+        assertEquals(true, service.getByIdForCaller(USER_ID, USER_ID).interestsSelected());
+        assertNull(service.getByIdForCaller(USER_ID, CALLER_ID).interestsSelected());
+    }
+
+    @Test
     void getMe_usesFallbackUsername_whenNoUsableCandidate() throws SQLException {
         String fallback = "user_" + CALLER_ID.toString().replace("-", "").substring(0, 12);
         var created = new UserEntity(CALLER_ID, fallback, "", "", null, Instant.now());

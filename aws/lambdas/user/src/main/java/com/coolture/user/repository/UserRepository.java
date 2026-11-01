@@ -242,6 +242,23 @@ public class UserRepository {
         }
     }
 
+    public boolean hasSelectedInterests(UUID userId) throws SQLException {
+        String sql = """
+            SELECT 1
+            FROM user_interests ui
+            JOIN interests i ON i.key = ui.interest_key
+            WHERE ui.user_id = ? AND i.parent_key IS NOT NULL
+            LIMIT 1
+        """;
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
     public boolean existsById(UUID id) throws SQLException {
         if (id == null) return false;
         String sql = "SELECT 1 FROM users WHERE id = ?";

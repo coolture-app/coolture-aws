@@ -382,6 +382,10 @@ Resources:
         LogGroup: !Ref UserLogGroup
       CodeUri: lambdas/user/
       Handler: com.coolture.user.UserHandler::handleRequest
+      Environment:
+        Variables:
+          INTERESTS_MIN_SELECTIONS: '3'
+          INTERESTS_MAX_SELECTIONS: '6'
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:
@@ -394,6 +398,9 @@ Resources:
         SetProfileImage: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/profile-image', Method: PUT}}
         DeleteProfileImage: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/profile-image', Method: DELETE}}
         GetMe: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /auth/me, Method: GET}}
+        GetInterestCatalog: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/interests, Method: GET}}
+        GetUserInterests: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/interests', Method: GET}}
+        ReplaceUserInterests: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/interests', Method: PUT}}
         GetFollowers: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/followers', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetFollowing: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/following', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         FollowUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/follow', Method: POST}}
