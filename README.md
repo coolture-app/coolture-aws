@@ -21,7 +21,7 @@ aws/
 embedding-workers/          # Independent stack: Python embedding Lambdas (own template.yaml)
 ├── template.yaml           # Imports network from mgmt-stack-networking[-<env>], queue ARN + DB endpoint from backend
 ├── post-embedding/         # Container image: SQS → all-mpnet-base-v2 → post_embeddings
-└── user-embedding/         # Zip: every 30 min, weighted avg of post embeddings → user_embeddings
+└── user-embedding/         # Zip: on schedule, blends interests and interactions → user_embeddings
 migrations/                 # PostgreSQL schema migrations (app + recommender schema `rec`)
 recommender/                # Recommender worker and AuraDB graph gateway (see recommender/README.md)
 db/                         # Local Postgres image (PostGIS + pgvector) and local dev seed
@@ -74,8 +74,13 @@ post-write (create, or update that changes title/description/tags)
                                                  └─ after 3 failed receives ─► ...-post-embedding-dlq (14 days)
 PostEmbeddingFunction: SELECT title/description/tags FROM posts → all-mpnet-base-v2 → post_embeddings
 
-EventBridge rate(30 minutes) ──► UserEmbeddingFunction ──► user_embeddings
+EventBridge schedule ──► UserEmbeddingFunction ──► user_embeddings
 ```
+
+Invoking `PostEmbeddingFunction` with `{"action":"embed-interests"}` embeds interests that have no vector.
+`scripts/deploy.sh` does this after deploying the embeddings stack. Locally use `make embed-interests`.
+
+The schedule is every 30 minutes, 08:00-15:59 Warsaw time, and stays off unless you deploy with `USER_EMBEDDING_SCHEDULE=true`.
 
 - Split: queue, DLQ, requests bucket and the publisher live in `backend.yaml` / `post-write`; the two Python
   workers are the separate `embedding-workers/` stack and can be deployed, rebuilt or removed on their own.
@@ -97,13 +102,29 @@ make embed-posts                     # posts with no embedding, or edited since 
 make embed-posts POST_ID=<uuid>      # one post
 make embed-posts ALL=1               # every non-deleted post (e.g. after changing the model)
 make embed-posts DRY_RUN=1           # print the generated SQS/S3 events, don't invoke
-make embed-users                     # what the 30-min schedule does in AWS
+make embed-users                     # what the schedule does in AWS
 ```
 
 `embed-posts` (`scripts/embed-posts.sh`) builds the same SQS-wrapped S3 events AWS delivers and runs
 `sam local invoke PostEmbeddingFunction`, 50 posts per invocation (`BATCH_SIZE=`), and exits non-zero if any post fails.
 
 Unit tests: `pip install -r embedding-workers/<worker>/requirements-dev.txt` then `make test-python`.
+
+## Interest onboarding
+
+`GET /dicts/interests` returns the catalogue from migration V10, and `GET`/`PUT /users/{userId}/interests` read and replace the caller's selection.
+Once interests are embedded, `PUT` stores the user's vector immediately, and each `UserEmbeddingFunction` run blends it with the user's interactions.
+`/auth/me` returns `interestsSelected`. The frontend shows a user without a selection a blocking overlay on top of the page, and `/interests` is for later edits.
+
+| Setting | Default | Where | Meaning |
+|---|---|---|---|
+| `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 3, 6 | `aws/backend.yaml` | selection limits, also sent to the frontend |
+| `INTEREST_WEIGHT_CATEGORY` | 0.25 | `embedding-workers/template.yaml` | weight of an opened category against a selected interest |
+| `INTEREST_WEIGHT_MINIMUM` | 0.2 | `embedding-workers/template.yaml` | lowest share of interests in the user's vector |
+| `INTEREST_DECAY_SCALE` | 10 | `embedding-workers/template.yaml` | engagement at which the share falls to about 37% |
+| `ENGAGEMENT_WINDOW_DAYS` | 30 | `embedding-workers/template.yaml` | days of interactions that count as engagement |
+
+To use another decay formula, change `interest_share` in `embedding-workers/user-embedding/src/app.py`.
 
 ## Shared Common Module (`com.coolture:common:1.0.0`)
 
