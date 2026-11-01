@@ -106,13 +106,24 @@ def load_interactions(
 
 
 def load_interest_vectors(cur: psycopg.Cursor) -> dict[Any, np.ndarray]:
-    cur.execute("SELECT key, embedding::real[], parent_key IS NULL FROM interests WHERE embedding IS NOT NULL")
-    interests = {
-        key: (np.array(embedding, dtype=np.float32), settings.interest_weight_category if is_category else 1.0)
-        for key, embedding, is_category in cur
-    }
+    cur.execute(
+        """
+        SELECT i.key, i.category_key, ie.embedding::real[]
+        FROM interests i
+        JOIN interest_embeddings ie ON ie.interest_key = i.key
+        """
+    )
+    interests = {key: (category_key, np.array(embedding, dtype=np.float32)) for key, category_key, embedding in cur}
+    categories = weighted_vectors((category_key, vector, 1.0) for category_key, vector in interests.values())
+
     cur.execute("SELECT user_id, interest_key FROM user_interests")
-    return weighted_vectors((user_id, *interests[key]) for user_id, key in cur if key in interests)
+    rows = []
+    for user_id, key in cur:
+        if key in interests:
+            category_key, vector = interests[key]
+            rows.append((user_id, vector, 1.0))
+            rows.append((user_id, categories[category_key], settings.interest_weight_category))
+    return weighted_vectors(rows)
 
 
 def run_once(conn: psycopg.Connection) -> int:

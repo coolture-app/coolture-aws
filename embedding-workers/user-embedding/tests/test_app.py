@@ -11,7 +11,7 @@ STARTED_AT = "2026-11-01T10:00:00+00:00"
 A = [1.0, 0.0]
 B = [0.0, 1.0]
 POSTS = [("post-a", A), ("post-b", B)]
-INTERESTS = [("jazz", A, False), ("rock", B, False), ("music", B, True)]
+INTERESTS = [("jazz", "music", A), ("rock", "music", B), ("running", "sports", B)]
 
 
 def as_lists(vectors: dict) -> dict:
@@ -149,14 +149,15 @@ def test_should_sign_iam_token_and_require_ssl_when_iam_auth_is_enabled(monkeypa
     )
 
 
-def test_should_weight_categories_below_selected_interests():
-    conn, cursor = connection_returning(selections=[("u1", "jazz"), ("u1", "music")])
+def test_should_add_the_category_average_to_each_pick_at_a_lower_weight():
+    conn, cursor = connection_returning(selections=[("u1", "jazz")])
 
     app.run_once(conn)
 
-    norm = (1 + 0.25 ** 2) ** 0.5
+    music = np.array([1.0, 1.0]) / 2 ** 0.5
+    expected = np.array(A) + 0.25 * music
     stored = np.fromstring(stored_rows(cursor)[0][1][1:-1], sep=",")
-    assert stored == pytest.approx([1 / norm, 0.25 / norm], rel=1e-6)
+    assert stored == pytest.approx(expected / np.linalg.norm(expected), rel=1e-6)
 
 
 def test_should_ignore_selection_when_interest_has_no_embedding():
@@ -168,12 +169,12 @@ def test_should_ignore_selection_when_interest_has_no_embedding():
 
 
 def test_should_use_interests_alone_when_user_has_no_interactions():
-    conn, cursor = connection_returning(selections=[("u1", "jazz")])
+    conn, cursor = connection_returning(selections=[("u1", "running")])
 
     upserted = app.run_once(conn)
 
     assert upserted == 1
-    assert stored_rows(cursor) == [("u1", "[1.0,0.0]", MODEL, STARTED_AT)]
+    assert stored_rows(cursor) == [("u1", "[0.0,1.0]", MODEL, STARTED_AT)]
 
 
 def test_should_keep_interactions_alone_when_user_has_no_interests():
@@ -200,7 +201,7 @@ def test_should_count_only_recent_interactions_as_engagement():
             ("recent", "post-a", "LIKE", True),
             ("old", "post-a", "LIKE", False),
         ],
-        selections=[("recent", "rock"), ("old", "rock")],
+        selections=[("recent", "running"), ("old", "running")],
     )
 
     app.run_once(conn)

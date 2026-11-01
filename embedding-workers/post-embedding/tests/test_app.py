@@ -198,4 +198,4 @@ def test_should_embed_only_interests_returned_when_invoked_with_embed_interests(
 
     assert result == {"interests": 1}
     assert model.encode.call_args_list == [call("Jazz: koncerty")]
-    assert conn.execute.call_args_list[1] == call(ANY, (EMBEDDING, "all-mpnet-base-v2", "jazz"))
+    assert conn.execute.call_args_list[1] == call(ANY, ("jazz", EMBEDDING, "all-mpnet-base-v2", "Jazz: koncerty"))
