@@ -10,26 +10,30 @@ export AWS_DEFAULT_REGION ?= eu-north-1
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-up: ## Start PostgreSQL
+COMPOSE_ALL := docker compose --profile rec --profile graph
+
+up: ## Start PostgreSQL (migrated and seeded) and Garage
 	docker compose up -d --build
-	@sleep 3
-	@docker compose exec postgres pg_isready -U coolture_admin > /dev/null && echo "PostgreSQL ready"
+	@docker compose wait migrate > /dev/null && echo "PostgreSQL ready"
 
-down: ## Stop PostgreSQL
-	docker compose down
+down: ## Stop all local services
+	$(COMPOSE_ALL) down
 
-migrate: ## Run database migrations
-	@for f in migrations/*.sql; do \
-		echo "Applying $$f..."; \
-		docker compose exec -T postgres psql -U coolture_admin -d coolture < "$$f"; \
-	done
-	@[ -f db/local-dev-seed.sql ] && echo "Applying db/local-dev-seed.sql..." && docker compose exec -T postgres psql -U coolture_admin -d coolture < db/local-dev-seed.sql || true
+migrate: ## Apply new database migrations and the local seed
+	docker compose run --rm migrate
 
 reset-db: ## Reset PostgreSQL database and volumes
-	docker compose down -v
+	$(COMPOSE_ALL) down -v
 
-logs: ## Tail PostgreSQL logs
-	docker compose logs -f postgres
+logs: ## Tail PostgreSQL logs (SERVICE=worker for another service)
+	$(COMPOSE_ALL) logs -f $(or $(SERVICE),postgres)
+
+rec-up: ## Start the recommender (local SQS + worker) on top of `up`
+	docker compose --profile rec up -d --build
+	@docker compose wait migrate > /dev/null && echo "Recommender worker running"
+
+rec-test: ## Run recommender tests in the worker container
+	docker compose --profile rec run --rm worker python -m pytest -p no:cacheprovider -rs tests
 
 clean: ## Clean build artifacts
 	@rm -rf .aws-sam
