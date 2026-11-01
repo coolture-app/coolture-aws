@@ -1,5 +1,7 @@
+import json
 import sys
 from unittest.mock import ANY, MagicMock, call
+from uuid import UUID
 
 import numpy as np
 import pytest
@@ -10,7 +12,7 @@ MODEL = "all-mpnet-base-v2"
 STARTED_AT = "2026-11-01T10:00:00+00:00"
 A = [1.0, 0.0]
 B = [0.0, 1.0]
-POSTS = [("post-a", A), ("post-b", B)]
+USER_ID = UUID("11111111-1111-1111-1111-111111111111")
 INTERESTS = [("jazz", "music", A), ("rock", "music", B), ("running", "sports", B)]
 
 
@@ -23,12 +25,24 @@ def weighted(*rows) -> dict:
         (user_id, np.array(vector), weight) for user_id, vector, weight in rows))
 
 
-def connection_returning(posts=POSTS, interactions=(), selections=()):
+def connection_returning(interactions=(), selections=()):
     conn = MagicMock()
     cursor = conn.cursor.return_value.__enter__.return_value
     cursor.execute.return_value.fetchone.return_value = (STARTED_AT,)
-    cursor.__iter__.side_effect = [iter(posts), iter(interactions), iter(INTERESTS), iter(selections)]
+    cursor.__iter__.side_effect = [iter(interactions), iter(INTERESTS), iter(selections)]
     return conn, cursor
+
+
+def sqs_event(*keys: str) -> dict:
+    body = {"Records": [{"s3": {"object": {"key": key}}} for key in keys]}
+    return {"Records": [{"messageId": "m0", "body": json.dumps(body)}]}
+
+
+def run_once_recorder(monkeypatch) -> list:
+    calls = []
+    monkeypatch.setattr(app, "_get_connection", lambda: "conn")
+    monkeypatch.setattr(app, "run_once", lambda conn, user_ids=None: calls.append(user_ids) or 1)
+    return calls
 
 
 def stored_rows(cursor) -> list:
@@ -66,8 +80,8 @@ def test_should_skip_user_when_vectors_cancel_out_or_weight_is_zero():
 def test_should_upsert_one_row_per_user_when_interactions_exist():
     # given
     conn, cursor = connection_returning(interactions=[
-        ("u1", "post-a", "LIKE", True),
-        ("u2", "post-b", "INTERESTED", True),
+        ("u1", A, "LIKE", True),
+        ("u2", B, "INTERESTED", True),
     ])
 
     # when
@@ -79,15 +93,6 @@ def test_should_upsert_one_row_per_user_when_interactions_exist():
         call(ANY, [("u1", "[1.0,0.0]", MODEL, STARTED_AT), ("u2", "[0.0,1.0]", MODEL, STARTED_AT)]),
     ]
     assert conn.transaction.call_count == 1
-
-
-def test_should_ignore_interaction_when_post_has_no_embedding():
-    conn, cursor = connection_returning(interactions=[("u1", "post-without-vector", "LIKE", True)])
-
-    upserted = app.run_once(conn)
-
-    assert upserted == 0
-    assert cursor.executemany.call_args_list == []
 
 
 def test_should_write_nothing_when_there_are_no_interactions():
@@ -104,7 +109,7 @@ def test_should_write_nothing_when_there_are_no_interactions():
 
 def test_should_return_upserted_count_when_invoked_by_schedule(monkeypatch):
     # given
-    conn, _ = connection_returning(interactions=[("u1", "post-a", "LIKE", True)])
+    conn, _ = connection_returning(interactions=[("u1", A, "LIKE", True)])
     monkeypatch.setattr(app, "_get_connection", lambda: conn)
 
     # when
@@ -112,6 +117,47 @@ def test_should_return_upserted_count_when_invoked_by_schedule(monkeypatch):
 
     # then
     assert result == {"upserted": 1}
+
+
+def test_should_read_only_the_requested_users():
+    conn, cursor = connection_returning()
+
+    app.run_once(conn, [USER_ID])
+
+    params = [c.args[1] for c in cursor.execute.call_args_list if len(c.args) > 1]
+    assert [p["users"] for p in params] == [[USER_ID], [USER_ID]]
+
+
+def test_should_read_every_user_when_invoked_by_schedule(monkeypatch):
+    calls = run_once_recorder(monkeypatch)
+
+    app.lambda_handler({}, None)
+
+    assert calls == [None]
+
+
+def test_should_refresh_users_named_in_sqs_messages(monkeypatch):
+    calls = run_once_recorder(monkeypatch)
+
+    result = app.lambda_handler(sqs_event(f"users/{USER_ID}"), None)
+
+    assert (result, calls) == ({"upserted": 1}, [[USER_ID]])
+
+
+def test_should_skip_s3_test_event(monkeypatch):
+    calls = run_once_recorder(monkeypatch)
+    event = {"Records": [{"messageId": "m0", "body": json.dumps({"Event": "s3:TestEvent"})}]}
+
+    result = app.lambda_handler(event, None)
+
+    assert (result, calls) == ({"upserted": 0}, [])
+
+
+def test_should_reject_key_outside_users_prefix(monkeypatch):
+    run_once_recorder(monkeypatch)
+
+    with pytest.raises(ValueError):
+        app.lambda_handler(sqs_event(f"posts/{USER_ID}"), None)
 
 
 def test_should_use_password_when_iam_auth_is_disabled(monkeypatch):
@@ -197,9 +243,9 @@ def test_should_move_towards_interactions_as_engagement_grows():
 def test_should_count_only_recent_interactions_as_engagement():
     conn, cursor = connection_returning(
         interactions=[
-            ("recent", "post-a", "DISLIKE", True),
-            ("recent", "post-a", "LIKE", True),
-            ("old", "post-a", "LIKE", False),
+            ("recent", A, "DISLIKE", True),
+            ("recent", A, "LIKE", True),
+            ("old", A, "LIKE", False),
         ],
         selections=[("recent", "running"), ("old", "running")],
     )

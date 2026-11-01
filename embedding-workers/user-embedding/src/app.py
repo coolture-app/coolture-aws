@@ -1,8 +1,11 @@
+import json
 import logging
 import math
 from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import unquote_plus
+from uuid import UUID
 
 import numpy as np
 import psycopg
@@ -11,6 +14,8 @@ from settings import settings
 
 logger = logging.getLogger("user-embedding")
 logger.setLevel(logging.INFO)
+
+KEY_PREFIX = "users/"
 
 WEIGHTS: dict[str, float] = {
     "LIKE": settings.weight_like,
@@ -80,32 +85,33 @@ def blend_user_vectors(
 
 
 def load_interactions(
-    cur: psycopg.Cursor, post_vectors: dict[Any, np.ndarray]
+    cur: psycopg.Cursor, user_ids: list[UUID] | None
 ) -> tuple[dict[Any, np.ndarray], dict[Any, float]]:
     cur.execute(
         """
-        SELECT user_id, post_id, type, created_at >= now() - make_interval(days => %s)
+        SELECT interactions.user_id, pe.embedding::real[], interactions.type,
+               interactions.created_at >= now() - make_interval(days => %(days)s)
         FROM (
             SELECT user_id, post_id, type, created_at FROM post_reactions
             UNION ALL
             SELECT user_id, post_id, type, created_at FROM post_participations
         ) interactions
+        JOIN post_embeddings pe ON pe.post_id = interactions.post_id
+        WHERE %(users)s::uuid[] IS NULL OR interactions.user_id = ANY(%(users)s)
         """,
-        (settings.engagement_window_days,),
+        {"days": settings.engagement_window_days, "users": user_ids},
     )
     engagement: dict[Any, float] = defaultdict(float)
     rows = []
-    for user_id, post_id, interaction_type, is_recent in cur:
-        vector = post_vectors.get(post_id)
+    for user_id, embedding, interaction_type, is_recent in cur:
         weight = WEIGHTS.get(interaction_type, 0.0)
-        if vector is not None:
-            rows.append((user_id, vector, weight))
-            if is_recent:
-                engagement[user_id] += abs(weight)
+        rows.append((user_id, np.array(embedding, dtype=np.float32), weight))
+        if is_recent:
+            engagement[user_id] += abs(weight)
     return weighted_vectors(rows), engagement
 
 
-def load_interest_vectors(cur: psycopg.Cursor) -> dict[Any, np.ndarray]:
+def load_interest_vectors(cur: psycopg.Cursor, user_ids: list[UUID] | None) -> dict[Any, np.ndarray]:
     cur.execute(
         """
         SELECT i.key, i.category_key, ie.embedding::real[]
@@ -116,7 +122,10 @@ def load_interest_vectors(cur: psycopg.Cursor) -> dict[Any, np.ndarray]:
     interests = {key: (category_key, np.array(embedding, dtype=np.float32)) for key, category_key, embedding in cur}
     categories = weighted_vectors((category_key, vector, 1.0) for category_key, vector in interests.values())
 
-    cur.execute("SELECT user_id, interest_key FROM user_interests")
+    cur.execute(
+        "SELECT user_id, interest_key FROM user_interests WHERE %(users)s::uuid[] IS NULL OR user_id = ANY(%(users)s)",
+        {"users": user_ids},
+    )
     rows = []
     for user_id, key in cur:
         if key in interests:
@@ -126,13 +135,12 @@ def load_interest_vectors(cur: psycopg.Cursor) -> dict[Any, np.ndarray]:
     return weighted_vectors(rows)
 
 
-def run_once(conn: psycopg.Connection) -> int:
+def run_once(conn: psycopg.Connection, user_ids: list[UUID] | None = None) -> int:
+    """Recomputes the vectors of the given users, or of every user when user_ids is None."""
     with conn.cursor() as cur:
         started_at = cur.execute("SELECT now()").fetchone()[0]
-        cur.execute("SELECT post_id, embedding::real[] FROM post_embeddings")
-        post_vectors = {post_id: np.array(embedding, dtype=np.float32) for post_id, embedding in cur}
-        behaviour_vectors, engagement = load_interactions(cur, post_vectors)
-        interest_vectors = load_interest_vectors(cur)
+        behaviour_vectors, engagement = load_interactions(cur, user_ids)
+        interest_vectors = load_interest_vectors(cur, user_ids)
 
     user_vectors = blend_user_vectors(behaviour_vectors, interest_vectors, engagement)
 
@@ -145,6 +153,7 @@ def run_once(conn: psycopg.Connection) -> int:
         for user_id, vector in user_vectors.items()
     ]
 
+    # A run that read its data before a newer run wrote must not overwrite the newer vector.
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
             """
@@ -163,5 +172,24 @@ def run_once(conn: psycopg.Connection) -> int:
     return len(rows)
 
 
-def lambda_handler(_event: dict[str, Any], _context: Any) -> dict[str, int]:
-    return {"upserted": run_once(_get_connection())}
+def user_ids_from_s3_event(body: str) -> list[UUID]:
+    notification = json.loads(body)
+    if notification.get("Event") == "s3:TestEvent":
+        return []
+
+    user_ids = []
+    for s3_record in notification["Records"]:
+        key = unquote_plus(s3_record["s3"]["object"]["key"])
+        if not key.startswith(KEY_PREFIX):
+            raise ValueError(f"unexpected object key: {key}")
+        user_ids.append(UUID(key.removeprefix(KEY_PREFIX)))
+    return user_ids
+
+
+def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, int]:
+    """The schedule refreshes every user; SQS messages from S3 refresh the users whose interests changed."""
+    if "Records" not in event:
+        return {"upserted": run_once(_get_connection())}
+
+    user_ids = [user_id for record in event["Records"] for user_id in user_ids_from_s3_event(record["body"])]
+    return {"upserted": run_once(_get_connection(), user_ids) if user_ids else 0}

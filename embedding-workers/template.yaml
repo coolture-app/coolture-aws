@@ -140,3 +140,11 @@ Resources:
             ScheduleExpression: !Ref UserEmbeddingSchedule
             ScheduleExpressionTimezone: !Ref UserEmbeddingScheduleTimezone
             State: !If [UserEmbeddingScheduleOn, ENABLED, DISABLED]
+        InterestChanges:
+          Type: SQS
+          Properties:
+            Queue: !If
+              - IsAWS
+              - !ImportValue {'Fn::Sub': '${BackendStackName}-UserEmbeddingQueueArn'}
+              - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:coolture-${Environment}-user-embedding'
+            BatchSize: 10
