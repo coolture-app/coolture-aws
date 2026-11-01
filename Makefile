@@ -14,7 +14,7 @@ COMPOSE_ALL := docker compose --profile rec --profile graph
 
 up: ## Start PostgreSQL (migrated and seeded) and Garage
 	docker compose up -d --build
-	@docker compose wait migrate > /dev/null && echo "PostgreSQL ready"
+	@docker compose wait migrate > /dev/null 2>&1; test "$$(docker compose ps -a --format '{{.ExitCode}}' migrate)" = 0 && echo "PostgreSQL ready"
 
 down: ## Stop all local services
 	$(COMPOSE_ALL) down
@@ -30,7 +30,6 @@ logs: ## Tail PostgreSQL logs (SERVICE=worker for another service)
 
 rec-up: ## Start the recommender (local SQS + worker) on top of `up`
 	docker compose --profile rec up -d --build
-	@docker compose wait migrate > /dev/null && echo "Recommender worker running"
 
 rec-test: ## Run recommender tests in the worker container
 	docker compose --profile rec run --rm worker python -m pytest -p no:cacheprovider -rs tests
