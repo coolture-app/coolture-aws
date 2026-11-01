@@ -58,18 +58,6 @@ public class InterestRepository {
         String lockSql = "SELECT 1 FROM users WHERE id = ? FOR NO KEY UPDATE";
         String deleteSql = "DELETE FROM user_interests WHERE user_id = ?";
         String insertSql = "INSERT INTO user_interests (user_id, interest_key) VALUES (?, ?)";
-        String embeddingSql = """
-            INSERT INTO user_embeddings (user_id, embedding, model, updated_at)
-            SELECT ?, l2_normalize(avg(i.embedding)), max(i.embedding_model), clock_timestamp()
-            FROM user_interests ui
-            JOIN interests i ON i.key = ui.interest_key
-            WHERE ui.user_id = ? AND i.parent_key IS NOT NULL AND i.embedding IS NOT NULL
-            HAVING count(*) > 0
-            ON CONFLICT (user_id) DO UPDATE
-                SET embedding  = EXCLUDED.embedding,
-                    model      = EXCLUDED.model,
-                    updated_at = clock_timestamp()
-        """;
 
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
@@ -93,11 +81,6 @@ public class InterestRepository {
                         insert.addBatch();
                     }
                     insert.executeBatch();
-                }
-                try (PreparedStatement embedding = conn.prepareStatement(embeddingSql)) {
-                    embedding.setObject(1, userId);
-                    embedding.setObject(2, userId);
-                    embedding.executeUpdate();
                 }
                 conn.commit();
             } catch (Exception e) {
