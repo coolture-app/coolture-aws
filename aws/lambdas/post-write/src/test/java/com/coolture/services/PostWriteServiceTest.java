@@ -8,7 +8,7 @@ import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
-import com.coolture.messaging.PostEmbeddingPublisher;
+import com.coolture.common.messaging.EmbeddingRequestPublisher;
 import com.coolture.repository.PostWriteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,13 +25,13 @@ import static org.mockito.Mockito.*;
 class PostWriteServiceTest {
 
     private PostWriteRepository repository;
-    private PostEmbeddingPublisher embeddingPublisher;
+    private EmbeddingRequestPublisher embeddingPublisher;
     private PostWriteService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(PostWriteRepository.class);
-        embeddingPublisher = mock(PostEmbeddingPublisher.class);
+        embeddingPublisher = mock(EmbeddingRequestPublisher.class);
         service = new PostWriteService(repository, embeddingPublisher);
     }
 
@@ -416,7 +416,7 @@ class PostWriteServiceTest {
         PostDetailDto result = service.createPost(authorId, req);
 
         assertSame(created, result);
-        verify(embeddingPublisher).publish(created.id());
+        verify(embeddingPublisher).requestPost(created.id());
     }
 
     @Test
@@ -448,7 +448,7 @@ class PostWriteServiceTest {
 
         service.updatePost(postId, authorId, req);
 
-        verify(embeddingPublisher).publish(postId);
+        verify(embeddingPublisher).requestPost(postId);
     }
 
     @Test

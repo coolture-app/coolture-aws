@@ -10,7 +10,7 @@ import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.ParticipationRequest;
 import com.coolture.dto.ReactionRequest;
 import com.coolture.dto.UpdatePostRequest;
-import com.coolture.messaging.PostEmbeddingPublisher;
+import com.coolture.common.messaging.EmbeddingRequestPublisher;
 import com.coolture.repository.PostWriteRepository;
 
 import java.sql.SQLException;
@@ -23,17 +23,17 @@ import java.util.UUID;
 public class PostWriteService {
 
     private final PostWriteRepository repository;
-    private final PostEmbeddingPublisher embeddingPublisher;
+    private final EmbeddingRequestPublisher embeddingPublisher;
 
     public PostWriteService() {
         this(new PostWriteRepository());
     }
 
     PostWriteService(PostWriteRepository repository) {
-        this(repository, new PostEmbeddingPublisher());
+        this(repository, new EmbeddingRequestPublisher());
     }
 
-    PostWriteService(PostWriteRepository repository, PostEmbeddingPublisher embeddingPublisher) {
+    PostWriteService(PostWriteRepository repository, EmbeddingRequestPublisher embeddingPublisher) {
         this.repository = repository;
         this.embeddingPublisher = embeddingPublisher;
     }
@@ -45,7 +45,7 @@ public class PostWriteService {
 
         repository.validateMediaOwnership(authorId, req.mediaIds());
         PostDetailDto created = repository.createPost(authorId, req);
-        embeddingPublisher.publish(created.id());
+        embeddingPublisher.requestPost(created.id());
         return created;
     }
 
@@ -77,7 +77,7 @@ public class PostWriteService {
 
         PostDetailDto updated = repository.updatePost(postId, callerId, existing, req);
         if (embeddedContentChanged(existing, updated)) {
-            embeddingPublisher.publish(updated.id());
+            embeddingPublisher.requestPost(updated.id());
         }
         return updated;
     }
