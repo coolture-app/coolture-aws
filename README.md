@@ -74,20 +74,26 @@ post-write (create, or update that changes title/description/tags)
                                                  └─ after 3 failed receives ─► ...-post-embedding-dlq (14 days)
 PostEmbeddingFunction: SELECT title/description/tags FROM posts → all-mpnet-base-v2 → post_embeddings
 
-EventBridge schedule ──► UserEmbeddingFunction ──► user_embeddings
+user (PUT /users/{userId}/interests)
+   └─► PutObject s3://coolture-<env>-embedding-requests-<account>/users/<userId>   (empty object)
+          └─ S3 ObjectCreated notification ─► SQS coolture-<env>-user-embedding ─► UserEmbeddingFunction (that user)
+                                                 └─ after 3 failed receives ─► ...-user-embedding-dlq (14 days)
+EventBridge schedule ──► UserEmbeddingFunction (every user) ──► user_embeddings
 ```
 
-Invoking `PostEmbeddingFunction` with `{"action":"embed-interests"}` embeds interests that have no vector.
+Invoking `PostEmbeddingFunction` with `{"action":"embed-interests"}` embeds interests with no vector, or whose
+`embedding_text` or model changed, into `interest_embeddings`.
 `scripts/deploy.sh` does this after deploying the embeddings stack. Locally use `make embed-interests`.
 
 The schedule is every 30 minutes, 08:00-15:59 Warsaw time, and stays off unless you deploy with `USER_EMBEDDING_SCHEDULE=true`.
 
-- Split: queue, DLQ, requests bucket and the publisher live in `backend.yaml` / `post-write`; the two Python
+- Split: queues, DLQs and requests bucket live in `backend.yaml`, the publisher in `common`; the two Python
   workers are the separate `embedding-workers/` stack and can be deployed, rebuilt or removed on their own.
 - Why S3 in the middle: VPC Lambdas have no internet. Reaching SQS would need a paid interface endpoint
   (~$9/month) or NAT; the S3 **gateway** endpoint is free and S3 → SQS notifications are free.
   The gateway endpoint and its route on the private route table belong to the base stack.
-- `post-write` writes after the DB commit; a failed write is only logged (same as the Spring publisher).
+- `post-write` and `user` write after the DB commit; a failed write is only logged (same as the Spring publisher).
+- S3 delivers notifications typically within seconds, sometimes a minute or longer.
   With `Environment=local` the bucket env var is empty and publishing is skipped.
 - The consumer reads the post from the DB at processing time, so duplicated/out-of-order S3 events still
   end with the latest content embedded. Deleted posts and `s3:TestEvent` are skipped. Objects expire after 1 day.
@@ -112,14 +118,17 @@ Unit tests: `pip install -r embedding-workers/<worker>/requirements-dev.txt` the
 
 ## Interest onboarding
 
-`GET /dicts/interests` returns the catalogue from migration V10, and `GET`/`PUT /users/{userId}/interests` read and replace the caller's selection.
-Once interests are embedded, `PUT` stores the user's vector immediately, and each `UserEmbeddingFunction` run blends it with the user's interactions.
+`GET /dicts/interests` returns the catalogue from migration V10 (`interest_categories` group `interests`), and `GET`/`PUT /users/{userId}/interests` read and replace the caller's selection.
+`UserEmbeddingFunction` alone computes the user's vector. `PUT` asks it to refresh that user right away, and the schedule refreshes everyone.
+Each picked interest counts with weight 1, and its category with `INTEREST_WEIGHT_CATEGORY`; a category's vector is the average of its interests' vectors.
+The interests then share the vector with the user's interactions, less as the user engages more.
+Locally there are no S3 notifications: run `make embed-users` after picking interests.
 `/auth/me` returns `interestsSelected`. The frontend shows a user without a selection a blocking overlay on top of the page, and `/interests` is for later edits.
 
 | Setting | Default | Where | Meaning |
 |---|---|---|---|
 | `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 3, 6 | `aws/backend.yaml` | selection limits, also sent to the frontend |
-| `INTEREST_WEIGHT_CATEGORY` | 0.25 | `embedding-workers/template.yaml` | weight of an opened category against a selected interest |
+| `INTEREST_WEIGHT_CATEGORY` | 0.25 | `embedding-workers/template.yaml` | weight of a pick's category against the pick itself |
 | `INTEREST_WEIGHT_MINIMUM` | 0.2 | `embedding-workers/template.yaml` | lowest share of interests in the user's vector |
 | `INTEREST_DECAY_SCALE` | 10 | `embedding-workers/template.yaml` | engagement at which the share falls to about 37% |
 | `ENGAGEMENT_WINDOW_DAYS` | 30 | `embedding-workers/template.yaml` | days of interactions that count as engagement |
