@@ -14,6 +14,7 @@ logger = logging.getLogger("post-embedding")
 logger.setLevel(logging.INFO)
 
 KEY_PREFIX = "posts/"
+EMBED_INTERESTS_ACTION = "embed-interests"
 
 _model = None
 _conn: psycopg.Connection | None = None
@@ -119,7 +120,23 @@ def process_post(post_id: UUID) -> None:
     logger.info("stored embedding for post %s", post_id)
 
 
+def embed_interests(conn: psycopg.Connection) -> int:
+    rows = conn.execute(
+        "SELECT key, embedding_text FROM interests WHERE embedding_model IS DISTINCT FROM %s",
+        (settings.embedding_model,),
+    ).fetchall()
+    for key, text in rows:
+        conn.execute(
+            "UPDATE interests SET embedding = %s, embedding_model = %s WHERE key = %s",
+            (_get_model().encode(text).tolist(), settings.embedding_model, key),
+        )
+    return len(rows)
+
+
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    if event.get("action") == EMBED_INTERESTS_ACTION:
+        return {"interests": embed_interests(_get_connection())}
+
     failures = []
     for record in event.get("Records", []):
         try:

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ALL_STACKS=(auth backend embeddings waf frontend)
 WAF_REGION=us-east-1
+EMBED_INTERESTS_MAX_ATTEMPTS=3
 
 usage() {
     cat <<EOF
@@ -185,6 +186,26 @@ deploy_stack() {
     [[ "$stack" == embeddings ]] && deploy_args+=(--resolve-image-repos)
     [[ -n "$overrides" ]] && deploy_args+=(--parameter-overrides "$overrides")
     sam deploy "${deploy_args[@]}"
+
+    if [[ "$stack" == embeddings ]]; then
+        embed_interests
+    fi
+}
+
+embed_interests() {
+    local response function_error attempt
+    response="$(mktemp)"
+    echo "==> [embeddings] embed interests"
+    for ((attempt = 1; attempt <= EMBED_INTERESTS_MAX_ATTEMPTS; attempt++)); do
+        function_error="$(aws lambda invoke --function-name "coolture-$ENVIRONMENT-post-embedding" \
+            --region "$AWS_DEFAULT_REGION" --cli-binary-format raw-in-base64-out --cli-read-timeout 150 \
+            --query FunctionError --output text --payload '{"action":"embed-interests"}' "$response")" || function_error=Failed
+        cat "$response"
+        echo
+        [[ "$function_error" == None ]] && return 0
+    done
+    echo "Embedding interests failed: selections will not reach recommendations." >&2
+    return 1
 }
 
 stack_param() {
