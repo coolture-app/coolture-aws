@@ -1,5 +1,7 @@
 import logging
+import math
 from collections import defaultdict
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -46,54 +48,89 @@ def _db_credentials() -> dict[str, str]:
     return {"password": token, "sslmode": "require"}
 
 
-def compute_user_vectors(
-    interactions: list[tuple[Any, list[float], str]],
-) -> dict[Any, np.ndarray]:
-    user_data: dict[Any, list[tuple[np.ndarray, float]]] = defaultdict(list)
-    for user_id, embedding, interaction_type in interactions:
-        weight = WEIGHTS.get(interaction_type, 0.0)
-        if weight != 0.0:
-            user_data[user_id].append((np.array(embedding, dtype=np.float32), weight))
+def weighted_vectors(rows: Iterable[tuple[Any, np.ndarray, float]]) -> dict[Any, np.ndarray]:
+    totals: dict[Any, np.ndarray] = {}
+    for user_id, vector, weight in rows:
+        totals[user_id] = totals.get(user_id, 0.0) + vector * weight
 
     result: dict[Any, np.ndarray] = {}
-    for user_id, weighted_vecs in user_data.items():
-        vectors = np.array([v for v, _ in weighted_vecs])
-        weights = np.array([w for _, w in weighted_vecs])
-
-        total_weight = weights.sum()
-        if total_weight == 0:
-            continue
-
-        vector = (vectors * weights[:, np.newaxis]).sum(axis=0) / total_weight
-        norm = np.linalg.norm(vector)
+    for user_id, total in totals.items():
+        norm = np.linalg.norm(total)
         if norm > 1e-9:
-            vector /= norm
-        result[user_id] = vector
-
+            result[user_id] = total / norm
     return result
+
+
+def interest_share(engagement: float) -> float:
+    return max(settings.interest_weight_minimum, math.exp(-engagement / settings.interest_decay_scale))
+
+
+def blend_user_vectors(
+    behaviour_vectors: dict[Any, np.ndarray],
+    interest_vectors: dict[Any, np.ndarray],
+    engagement: dict[Any, float],
+) -> dict[Any, np.ndarray]:
+    blended = []
+    for user_id, interests in interest_vectors.items():
+        share = interest_share(engagement.get(user_id, 0.0))
+        blended.append((user_id, interests, share))
+        if user_id in behaviour_vectors:
+            blended.append((user_id, behaviour_vectors[user_id], 1 - share))
+    return behaviour_vectors | weighted_vectors(blended)
+
+
+def load_interactions(
+    cur: psycopg.Cursor, post_vectors: dict[Any, np.ndarray]
+) -> tuple[dict[Any, np.ndarray], dict[Any, float]]:
+    cur.execute(
+        """
+        SELECT user_id, post_id, type, created_at >= now() - make_interval(days => %s)
+        FROM (
+            SELECT user_id, post_id, type, created_at FROM post_reactions
+            UNION ALL
+            SELECT user_id, post_id, type, created_at FROM post_participations
+        ) interactions
+        """,
+        (settings.engagement_window_days,),
+    )
+    engagement: dict[Any, float] = defaultdict(float)
+    rows = []
+    for user_id, post_id, interaction_type, is_recent in cur:
+        vector = post_vectors.get(post_id)
+        weight = WEIGHTS.get(interaction_type, 0.0)
+        if vector is not None:
+            rows.append((user_id, vector, weight))
+            if is_recent:
+                engagement[user_id] += abs(weight)
+    return weighted_vectors(rows), engagement
+
+
+def load_interest_vectors(cur: psycopg.Cursor) -> dict[Any, np.ndarray]:
+    cur.execute("SELECT key, embedding::real[], parent_key IS NULL FROM interests WHERE embedding IS NOT NULL")
+    interests = {
+        key: (np.array(embedding, dtype=np.float32), settings.interest_weight_category if is_category else 1.0)
+        for key, embedding, is_category in cur
+    }
+    cur.execute("SELECT user_id, interest_key FROM user_interests")
+    return weighted_vectors((user_id, *interests[key]) for user_id, key in cur if key in interests)
 
 
 def run_once(conn: psycopg.Connection) -> int:
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT interactions.user_id, pe.embedding::real[], interactions.type
-            FROM (
-                SELECT user_id, post_id, type FROM post_reactions
-                UNION ALL
-                SELECT user_id, post_id, type FROM post_participations
-            ) interactions
-            JOIN post_embeddings pe ON pe.post_id = interactions.post_id
-            """
-        )
-        user_vectors = compute_user_vectors(cur.fetchall())
+        started_at = cur.execute("SELECT now()").fetchone()[0]
+        cur.execute("SELECT post_id, embedding::real[] FROM post_embeddings")
+        post_vectors = {post_id: np.array(embedding, dtype=np.float32) for post_id, embedding in cur}
+        behaviour_vectors, engagement = load_interactions(cur, post_vectors)
+        interest_vectors = load_interest_vectors(cur)
+
+    user_vectors = blend_user_vectors(behaviour_vectors, interest_vectors, engagement)
 
     if not user_vectors:
-        logger.info("no interactions with embeddings found, skipping")
+        logger.info("no interactions or interests with embeddings found, skipping")
         return 0
 
     rows = [
-        (str(user_id), "[" + ",".join(map(str, vector.tolist())) + "]", settings.embedding_model)
+        (str(user_id), "[" + ",".join(map(str, vector.tolist())) + "]", settings.embedding_model, started_at)
         for user_id, vector in user_vectors.items()
     ]
 
@@ -106,6 +143,7 @@ def run_once(conn: psycopg.Connection) -> int:
                 SET embedding  = EXCLUDED.embedding,
                     model      = EXCLUDED.model,
                     updated_at = now()
+                WHERE user_embeddings.updated_at < %s
             """,
             rows,
         )

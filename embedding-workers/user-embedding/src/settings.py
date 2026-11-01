@@ -20,5 +20,10 @@ class Settings(BaseSettings):
     weight_interested: float = 1.5
     weight_takes_part: float = 2.0
 
+    interest_weight_category: float = 0.25
+    interest_weight_minimum: float = 0.2
+    interest_decay_scale: float = 10.0
+    engagement_window_days: int = 30
+
 
 settings = Settings()
