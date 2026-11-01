@@ -1,3 +1,10 @@
+x-queue: &queue
+  SQS_ENDPOINT_URL: http://sqs:9324
+  SCORES_QUEUE_URL: http://sqs:9324/000000000000/coolture-recommendation-events
+  AWS_DEFAULT_REGION: eu-north-1
+  AWS_ACCESS_KEY_ID: local
+  AWS_SECRET_ACCESS_KEY: local
+
 services:
   postgres:
     build: ./db
@@ -12,13 +19,47 @@ services:
       POSTGRES_PASSWORD: admin
     volumes:
       - postgres-data:/var/lib/postgresql
-      - ./migrations:/docker-entrypoint-initdb.d:ro
-      - ./db/local-dev-seed.sql:/docker-entrypoint-initdb.d/z_local_dev_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U coolture_admin -d coolture"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Applies migrations/ with the same runner as on AWS, then db/local-dev-seed.sql. Safe to re-run.
+  migrate:
+    build:
+      context: ./aws/lambdas/migrations/src
+      dockerfile_inline: |
+        FROM python:3.13-slim
+        COPY requirements.txt /tmp/requirements.txt
+        RUN pip install --no-cache-dir -r /tmp/requirements.txt
+    image: coolture-aws-migrate:latest
+    working_dir: /runner
+    command:
+      - python
+      - -c
+      - |
+        import logging, pathlib, app
+        logging.basicConfig(level=logging.INFO)
+        app.run_migrations()
+        with app.connect() as conn:
+            conn.execute(pathlib.Path('/seed/local-dev-seed.sql').read_text(encoding='utf-8'))
+        print('applied db/local-dev-seed.sql')
+    environment:
+      MIGRATIONS_DIR: /migrations
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: coolture
+      DB_USERNAME: coolture_admin
+      DB_PASSWORD: admin
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./aws/lambdas/migrations/src:/runner:ro
+      - ./migrations:/migrations:ro
+      - ./db/local-dev-seed.sql:/seed/local-dev-seed.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   s3garage:
     image: dxflrs/garage:v2.2.0
@@ -59,7 +100,49 @@ services:
     restart: on-failure:3
     entrypoint: ["/bin/sh", "/init.sh"]
 
+  # Recommender (docker compose --profile rec): local SQS and the worker that stores graph scores.
+  sqs:
+    image: softwaremill/elasticmq-native:1.7.1
+    profiles: [rec, graph]
+    ports:
+      - "127.0.0.1:${SQS_PORT:-9324}:9324"
+    volumes:
+      - ./recommender/elasticmq.conf:/opt/elasticmq.conf:ro
+      - sqs-data:/data
+
+  worker:
+    build: ./recommender
+    image: coolture-aws-recommender:latest
+    profiles: [rec]
+    command: [python, local_runner.py, worker]
+    environment:
+      <<: *queue
+      DATABASE_URL: postgresql://coolture_admin:admin@postgres:5432/coolture
+    volumes:
+      - ./recommender:/app:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      sqs:
+        condition: service_started
+
+  # AuraDB graph gateway (docker compose --profile graph run --rm graph-gateway), credentials in recommender/.env.
+  graph-gateway:
+    build: ./recommender
+    image: coolture-aws-recommender:latest
+    profiles: [graph]
+    command: [python, local_runner.py, gateway]
+    env_file:
+      - path: recommender/.env
+        required: false
+    environment: *queue
+    volumes:
+      - ./recommender:/app:ro
+    depends_on:
+      - sqs
+
 volumes:
   postgres-data:
+  sqs-data:
   garage_data:
   garage_meta:
