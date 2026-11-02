@@ -115,15 +115,10 @@ class CommentReadServiceTest {
     }
 
     @Test
-    void list_whenMalformedCursor_startsFromFirstPage() throws Exception {
+    void list_whenMalformedCursor_throws() {
         UUID postId = UUID.randomUUID();
-        when(repository.findRootCommentsForPost(eq(postId), isNull(), isNull(), anyInt()))
-            .thenReturn(List.of());
 
-        CursorPage<CommentSummaryDto> page = service.list(postId, null, null, "not-a-cursor!!!", 20);
-
-        assertEquals(0, page.items().size());
-        verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), eq(21));
+        assertThrows(IllegalArgumentException.class, () -> service.list(postId, null, null, "not-a-cursor!!!", 20));
     }
 
     @Test
