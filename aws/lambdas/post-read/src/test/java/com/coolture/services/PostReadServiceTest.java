@@ -1,13 +1,22 @@
 package com.coolture.services;
 
+import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
+import com.coolture.common.pagination.CursorCodec;
+import com.coolture.common.pagination.CursorPage;
+import com.coolture.common.pagination.CursorPayload;
 import com.coolture.repository.PostReadRepository;
+import com.coolture.repository.PostSort;
+import com.coolture.repository.PostsCursor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -109,7 +118,7 @@ class PostReadServiceTest {
 
         service.getFeed(callerId, filters, null, limit);
 
-        verify(repository).findFeed(eq(filters), eq(callerId), isNull(), isNull(), eq(21));
+        verify(repository).findFeed(eq(filters), eq(PostSort.RECENT), eq(callerId), isNull(), eq(21));
     }
 
     @Test
@@ -125,7 +134,80 @@ class PostReadServiceTest {
 
         service.getFeed(callerId, filters, null, 500);
 
-        verify(repository).findFeed(eq(filters), eq(callerId), isNull(), isNull(), eq(101));
+        verify(repository).findFeed(eq(filters), eq(PostSort.RECENT), eq(callerId), isNull(), eq(101));
+    }
+
+    private static PostFeedFilters sortedBy(String sortBy) {
+        return new PostFeedFilters(
+            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, sortBy
+        );
+    }
+
+    private static PostCardDto card(int likes) {
+        Instant now = Instant.parse("2026-11-02T12:00:00.123456Z");
+        return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, now.plusSeconds(60), null, List.of(),
+            likes, 0, 0, 0, null, null, null, now, null, null, null, null, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"RECOMMENDED", "NONSENSE"})
+    void getFeed_whenSortIsUnknown_throws(String sortBy) {
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, sortedBy(sortBy), null, 20));
+    }
+
+    @Test
+    void getFeed_whenCursorIsUnreadable_throws() {
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, sortedBy(null), "garbage", 20));
+    }
+
+    @Test
+    void getFeed_whenCursorIsFromAnotherSort_throws() {
+        String popularCursor = PostsCursor.after(PostSort.POPULAR, card(3));
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, sortedBy("RECENT"), popularCursor, 20));
+    }
+
+    @Test
+    void getFeed_whenCursorIsTheOldFormat_throws() {
+        String old = CursorCodec.encode(new CursorPayload(UUID.randomUUID(), Instant.now()));
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, sortedBy("RECENT"), old, 20));
+    }
+
+    @ParameterizedTest
+    @EnumSource(PostSort.class)
+    void getFeed_nextCursorContinuesTheSameSortFromTheLastItem(PostSort sort) throws SQLException {
+        PostFeedFilters filters = sortedBy(sort.name());
+        List<PostCardDto> rows = List.of(card(9), card(5), card(1));
+        when(repository.findFeed(any(), eq(sort), any(), isNull(), eq(3))).thenReturn(rows);
+
+        CursorPage<PostCardDto> page = service.getFeed(null, filters, null, 2);
+
+        assertEquals(rows.subList(0, 2), page.items());
+        assertTrue(page.page().hasMore());
+
+        service.getFeed(null, filters, page.page().nextCursor(), 2);
+
+        ArgumentCaptor<PostsCursor> cursor = ArgumentCaptor.forClass(PostsCursor.class);
+        verify(repository, times(2)).findFeed(any(), eq(sort), any(), cursor.capture(), eq(3));
+        PostCardDto last = rows.get(1);
+        assertEquals(new PostsCursor(sort, last.id(),
+            sort == PostSort.RECENT ? last.createdAt() : null,
+            sort == PostSort.POPULAR ? last.positiveReactionCount() : null,
+            sort == PostSort.UPCOMING ? last.startsAt() : null), cursor.getValue());
+    }
+
+    @Test
+    void showsAllPastEvents_whenOptedInOrADateIsChosen() {
+        Instant date = Instant.parse("2026-11-02T12:00:00Z");
+        assertFalse(sortedBy(null).showsAllPastEvents());
+        assertTrue(new PostFeedFilters(null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, null, true).showsAllPastEvents());
+        assertTrue(new PostFeedFilters(null, null, null, null, null, null, date, null, null, null, null,
+            null, null, null, 20, null).showsAllPastEvents());
+        assertTrue(new PostFeedFilters(null, null, null, null, null, null, null, date, null, null, null,
+            null, null, null, 20, null).showsAllPastEvents());
     }
 
     @Test

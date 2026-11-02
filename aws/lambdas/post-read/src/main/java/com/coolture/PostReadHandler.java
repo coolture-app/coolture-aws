@@ -157,8 +157,9 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         Instant startsFrom = qp.get("startsFrom") != null ? Instant.parse(qp.get("startsFrom")) : null;
         Instant startsTo = qp.get("startsTo") != null ? Instant.parse(qp.get("startsTo")) : null;
 
-        Double lat = qp.get("latitude") != null ? Double.parseDouble(qp.get("latitude")) : null;
-        Double lng = qp.get("longitude") != null ? Double.parseDouble(qp.get("longitude")) : null;
+        Double lat = parseCoordinate(qp, "latitude", 90);
+        Double lng = parseCoordinate(qp, "longitude", 180);
+        requireFullLocation(lat, lng);
         Double radiusKm = qp.get("radiusKm") != null ? Double.parseDouble(qp.get("radiusKm")) : null;
 
         List<String> partTypes = parseList(qp.get("participationTypes"));
@@ -166,12 +167,41 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         String cursor = qp.get("cursor");
         int limit = parseLimit(qp.get("limit"), 20);
         String sortBy = qp.get("sortBy");
+        boolean includePast = parseIncludePast(qp.get("includePast"));
 
         return new PostFeedFilters(
             q, tags, authorId, status, visibility, type,
             startsFrom, startsTo, lat, lng, radiusKm,
-            partTypes, reactionType, cursor, limit, sortBy
+            partTypes, reactionType, cursor, limit, sortBy, includePast
         );
+    }
+
+    private Double parseCoordinate(Map<String, String> qp, String name, double maxAbs) {
+        String raw = qp.get(name);
+        if (raw == null) return null;
+        double value;
+        try {
+            value = Double.parseDouble(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid " + name);
+        }
+        // Written so that NaN fails too.
+        if (!(Math.abs(value) <= maxAbs)) {
+            throw new IllegalArgumentException("Invalid " + name);
+        }
+        return value;
+    }
+
+    private void requireFullLocation(Double lat, Double lng) {
+        if ((lat == null) != (lng == null)) {
+            throw new IllegalArgumentException("latitude and longitude must be sent together");
+        }
+    }
+
+    private boolean parseIncludePast(String raw) {
+        if (raw == null || raw.isBlank() || "false".equalsIgnoreCase(raw)) return false;
+        if ("true".equalsIgnoreCase(raw)) return true;
+        throw new IllegalArgumentException("Invalid includePast");
     }
 
     private MapBoundsDto parseMapBounds(Map<String, String> qp) {

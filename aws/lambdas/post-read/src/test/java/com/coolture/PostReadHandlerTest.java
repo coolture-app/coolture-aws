@@ -288,6 +288,47 @@ class PostReadHandlerTest {
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "limit, abc",
+        "includePast, maybe",
+        "latitude, 54.35",
+        "longitude, 18.65",
+    })
+    void getFeed_whenAParameterIsInvalidOrHalfALocation_thenReturns400(String name, String value) throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of(name, value));
+
+        assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "91, 18",
+        "-91, 18",
+        "54, 181",
+        "54, -181",
+        "NaN, 18",
+        "abc, 18",
+    })
+    void getFeed_whenLocationIsOutOfRange_thenReturns400(String latitude, String longitude) throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("latitude", latitude, "longitude", longitude));
+
+        assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void getFeed_whenIncludePastIsSet_thenPassesItToService() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("includePast", "true"));
+        ArgumentCaptor<PostFeedFilters> filters = ArgumentCaptor.forClass(PostFeedFilters.class);
+        when(postReadService.getFeed(any(), filters.capture(), any(), anyInt()))
+            .thenReturn(CursorPage.of(List.<PostCardDto>of(), 20, PostCardDto::id, PostCardDto::createdAt));
+
+        assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
+        org.junit.jupiter.api.Assertions.assertTrue(filters.getValue().includePast());
+    }
+
     @Test
     void handleRequest_whenHealthCheck_returns200WithUP() {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/actuator/health");

@@ -11,6 +11,8 @@ import com.coolture.common.pagination.CursorCodec;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.CursorPayload;
 import com.coolture.repository.PostReadRepository;
+import com.coolture.repository.PostSort;
+import com.coolture.repository.PostsCursor;
 
 import java.sql.SQLException;
 import java.time.Instant;
@@ -30,7 +32,7 @@ public class PostReadService {
         this(new PostReadRepository());
     }
 
-    PostReadService(PostReadRepository repository) {
+    public PostReadService(PostReadRepository repository) {
         this.repository = repository;
     }
 
@@ -53,14 +55,13 @@ public class PostReadService {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
 
-        Optional<CursorPayload> payload = CursorCodec.decode(cursor);
-        Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
-        UUID cursorId = payload.map(CursorPayload::id).orElse(null);
+        PostSort sort = PostSort.parse(filters.sortBy());
+        PostsCursor keyset = PostsCursor.decode(cursor, sort).orElse(null);
 
         int effectiveLimit = clampLimit(limit);
-        List<PostCardDto> rows = repository.findFeed(filters, callerId, cursorCreatedAt, cursorId, effectiveLimit + 1);
+        List<PostCardDto> rows = repository.findFeed(filters, sort, callerId, keyset, effectiveLimit + 1);
 
-        return CursorPage.of(rows, effectiveLimit, PostCardDto::id, PostCardDto::createdAt);
+        return CursorPage.of(rows, effectiveLimit, card -> PostsCursor.after(sort, card));
     }
 
     public PostDetailDto getById(UUID postId, UUID callerId) throws SQLException {
