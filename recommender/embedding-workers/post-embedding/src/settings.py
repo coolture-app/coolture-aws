@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     db_connect_timeout_seconds: int = 5
     aws_region: str = "eu-north-1"
 
-    embedding_model: str = "all-mpnet-base-v2"
+    embedding_model: str = "sdadas/mmlw-roberta-base"
     embedding_model_dir: str = "/opt/model"
 
 

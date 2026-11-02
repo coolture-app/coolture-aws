@@ -11,8 +11,8 @@ class PostContent(BaseModel):
 
     @property
     def text(self) -> str:
-        tags_str = " ".join(self.tags or [])
-        return f"{self.title} {self.description or ''} {tags_str}".strip()
+        tags = f"Tagi: {', '.join(self.tags)}" if self.tags else None
+        return "\n".join(part for part in (self.title, self.description, tags) if part)
 
 
 class PostEmbeddingRecord(BaseModel):

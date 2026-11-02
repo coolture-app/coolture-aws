@@ -15,6 +15,8 @@ logger.setLevel(logging.INFO)
 
 KEY_PREFIX = "posts/"
 EMBED_INTERESTS_ACTION = "embed-interests"
+# The model's marker for a query. Documents get none. Interests act as queries against post documents.
+QUERY_PREFIX = "zapytanie: "
 
 _model = None
 _conn: psycopg.Connection | None = None
@@ -28,6 +30,11 @@ def _get_model():
         logger.info("loading model %s from %s", settings.embedding_model, settings.embedding_model_dir)
         _model = SentenceTransformer(settings.embedding_model_dir, device="cpu")
     return _model
+
+
+def embed(text: str) -> list[float]:
+    # The model has no normalization layer, and user vectors average these, so length would act as a weight.
+    return _get_model().encode(text, normalize_embeddings=True).tolist()
 
 
 def _get_connection() -> psycopg.Connection:
@@ -107,7 +114,7 @@ def process_post(post_id: UUID) -> None:
         return
 
     logger.info("processing post %s: %r", post_id, post.title)
-    vector = _get_model().encode(post.text).tolist()
+    vector = embed(post.text)
     try:
         upsert_embedding(
             conn,
@@ -141,7 +148,7 @@ def embed_interests(conn: psycopg.Connection) -> int:
                     embedded_text = EXCLUDED.embedded_text,
                     updated_at    = now()
             """,
-            (key, _get_model().encode(text).tolist(), settings.embedding_model, text),
+            (key, embed(QUERY_PREFIX + text), settings.embedding_model, text),
         )
     return len(rows)
 

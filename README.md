@@ -22,7 +22,7 @@ migrations/                 # PostgreSQL schema migrations (app + recommender `r
 recommender/                # Recommender worker, AuraDB graph gateway and embedding workers (see recommender/README.md)
 └── embedding-workers/      # Independent stack: Python embedding Lambdas (own template.yaml)
     ├── template.yaml       # Imports network from mgmt-stack-networking[-<env>], queue ARN + DB endpoint from backend
-    ├── post-embedding/     # Container image: SQS → all-mpnet-base-v2 → post_embeddings
+    ├── post-embedding/     # Container image: SQS → mmlw-roberta-base → post_embeddings
     └── user-embedding/     # Zip: on schedule, blends interests and interactions → user_embeddings
 db/                         # Local Postgres image (PostGIS + pgvector) and local dev seed
 scripts/                    # Local helpers (embed-posts.sh)
@@ -72,7 +72,7 @@ post-write (create, or update that changes title/description/tags)
    └─► PutObject s3://coolture-<env>-embedding-requests-<account>/posts/<postId>   (empty object)
           └─ S3 ObjectCreated notification ─► SQS coolture-<env>-post-embedding ─► PostEmbeddingFunction
                                                  └─ after 3 failed receives ─► ...-post-embedding-dlq (14 days)
-PostEmbeddingFunction: SELECT title/description/tags FROM posts → all-mpnet-base-v2 → post_embeddings
+PostEmbeddingFunction: SELECT title/description/tags FROM posts → mmlw-roberta-base → post_embeddings
 
 user (PUT /users/{userId}/interests)
    └─► PutObject s3://coolture-<env>-embedding-requests-<account>/users/<userId>   (empty object)
@@ -84,6 +84,10 @@ EventBridge schedule ──► UserEmbeddingFunction (every user) ──► user
 Invoking `PostEmbeddingFunction` with `{"action":"embed-interests"}` embeds interests with no vector, or whose
 `embedding_text` or model changed, into `interest_embeddings`.
 `scripts/deploy.sh` does this after deploying the embeddings stack. Locally use `make embed-interests`.
+
+The model is `sdadas/mmlw-roberta-base`, pinned to a revision in `recommender/embedding-workers/post-embedding/Dockerfile`.
+Interests are embedded as queries, with the model's `zapytanie: ` prefix, and posts as documents.
+A deploy that changes the model re-embeds only the interests, so posts and users need it separately.
 
 The schedule is every 30 minutes, 08:00-15:59 Warsaw time, and stays off unless you deploy with `USER_EMBEDDING_SCHEDULE=true`.
 

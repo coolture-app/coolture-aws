@@ -8,7 +8,7 @@ import pytest
 
 import app
 
-MODEL = "all-mpnet-base-v2"
+MODEL = "sdadas/mmlw-roberta-base"
 STARTED_AT = "2026-11-01T10:00:00+00:00"
 A = [1.0, 0.0]
 B = [0.0, 1.0]
