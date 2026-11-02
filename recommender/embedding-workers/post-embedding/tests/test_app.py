@@ -200,3 +200,12 @@ def test_should_embed_only_interests_returned_when_invoked_with_embed_interests(
     assert result == {"interests": 1}
     assert model.encode.call_args_list == [call("zapytanie: Jazz: koncerty", normalize_embeddings=True)]
     assert conn.execute.call_args_list[1] == call(ANY, ("jazz", EMBEDDING, MODEL, "Jazz: koncerty"))
+
+
+def test_should_use_default_database_address_when_it_is_empty(monkeypatch):
+    monkeypatch.setenv("DB_HOST", "")
+    monkeypatch.setenv("DB_PORT", "")
+
+    settings = type(app.settings)()
+
+    assert (settings.db_host, settings.db_port) == ("host.docker.internal", 5430)

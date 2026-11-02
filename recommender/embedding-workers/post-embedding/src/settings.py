@@ -2,7 +2,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(extra="ignore")
+    # sam local passes the template's stack imports as empty strings.
+    model_config = SettingsConfigDict(extra="ignore", env_ignore_empty=True)
 
     db_host: str = "host.docker.internal"
     db_port: int = 5430

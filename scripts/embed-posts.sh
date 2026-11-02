@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export TEMPLATE="${TEMPLATE:-.aws-sam/embeddings/template.yaml}"
+TEMPLATE="${TEMPLATE:-.aws-sam/embeddings/template.yaml}"
 BATCH_SIZE="${BATCH_SIZE:-50}"
 
 psql_query() {
@@ -53,7 +53,7 @@ for ((i = 0; i < ${#post_ids[@]}; i += BATCH_SIZE)); do
         continue
     fi
 
-    result="$(scripts/invoke-embedding.sh PostEmbeddingFunction --event "$event_file")"
+    result="$(sam local invoke PostEmbeddingFunction --template-file "$TEMPLATE" --add-host host.docker.internal:host-gateway --event "$event_file")"
     echo "$result"
     if grep -q '"itemIdentifier"' <<< "$result"; then
         failed=1

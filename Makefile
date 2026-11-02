@@ -62,10 +62,10 @@ require-embeddings-build:
 	@test -f .aws-sam/embeddings/template.yaml || { echo "Missing .aws-sam/embeddings/template.yaml - run 'make build-embeddings' first."; exit 1; }
 
 embed-interests: require-embeddings-build ## Embed interests missing vectors locally
-	@echo '{"action":"embed-interests"}' | scripts/invoke-embedding.sh PostEmbeddingFunction --event -
+	@echo '{"action":"embed-interests"}' | sam local invoke PostEmbeddingFunction --template-file .aws-sam/embeddings/template.yaml --add-host host.docker.internal:host-gateway --event -
 
 embed-users: require-embeddings-build ## Recompute user embeddings locally (same as the schedule in AWS)
-	@echo '{}' | scripts/invoke-embedding.sh UserEmbeddingFunction --event -
+	@echo '{}' | sam local invoke UserEmbeddingFunction --template-file .aws-sam/embeddings/template.yaml --add-host host.docker.internal:host-gateway --event -
 
 local: build ## Start local API on localhost:3000
 	@echo "API: http://localhost:3000"
