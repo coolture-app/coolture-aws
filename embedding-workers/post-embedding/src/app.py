@@ -14,6 +14,7 @@ logger = logging.getLogger("post-embedding")
 logger.setLevel(logging.INFO)
 
 KEY_PREFIX = "posts/"
+EMBED_INTERESTS_ACTION = "embed-interests"
 
 _model = None
 _conn: psycopg.Connection | None = None
@@ -119,7 +120,36 @@ def process_post(post_id: UUID) -> None:
     logger.info("stored embedding for post %s", post_id)
 
 
+def embed_interests(conn: psycopg.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT i.key, i.embedding_text
+        FROM interests i
+        LEFT JOIN interest_embeddings ie ON ie.interest_key = i.key
+        WHERE ie.model IS DISTINCT FROM %s OR ie.embedded_text IS DISTINCT FROM i.embedding_text
+        """,
+        (settings.embedding_model,),
+    ).fetchall()
+    for key, text in rows:
+        conn.execute(
+            """
+            INSERT INTO interest_embeddings (interest_key, embedding, model, embedded_text)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (interest_key) DO UPDATE
+                SET embedding     = EXCLUDED.embedding,
+                    model         = EXCLUDED.model,
+                    embedded_text = EXCLUDED.embedded_text,
+                    updated_at    = now()
+            """,
+            (key, _get_model().encode(text).tolist(), settings.embedding_model, text),
+        )
+    return len(rows)
+
+
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    if event.get("action") == EMBED_INTERESTS_ACTION:
+        return {"interests": embed_interests(_get_connection())}
+
     failures = []
     for record in event.get("Records", []):
         try:

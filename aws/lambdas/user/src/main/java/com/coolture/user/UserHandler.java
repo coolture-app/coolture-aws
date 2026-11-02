@@ -10,10 +10,13 @@ import com.coolture.common.json.JsonUtils;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
+import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
+import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.UserRepository.UserEntity;
+import com.coolture.user.service.InterestService;
 import com.coolture.user.service.UserService;
 
 import java.util.Map;
@@ -22,13 +25,15 @@ import java.util.UUID;
 public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
 
     private final UserService service;
+    private final InterestService interestService;
 
     public UserHandler() {
-        this(new UserService());
+        this(new UserService(), new InterestService());
     }
 
-    public UserHandler(UserService service) {
+    public UserHandler(UserService service, InterestService interestService) {
         this.service = service;
+        this.interestService = interestService;
     }
 
     @Override
@@ -44,6 +49,13 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
                     return getMe(event);
                 }
                 return ApiResponse.badRequest("Unsupported method for /auth/me: " + method);
+            }
+
+            if (path.endsWith("/dicts/interests")) {
+                if ("GET".equalsIgnoreCase(method)) {
+                    return ApiResponse.ok(interestService.getCatalog());
+                }
+                return ApiResponse.badRequest("Unsupported method for interests: " + method);
             }
 
             if (path.contains("/profile-image")) {
@@ -96,6 +108,14 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
                     return getByUsername(event);
                 }
                 return ApiResponse.badRequest("Unsupported method for by-username: " + method);
+            }
+
+            if (path.endsWith("/interests")) {
+                return switch (method.toUpperCase()) {
+                    case "GET" -> getInterests(event);
+                    case "PUT" -> replaceInterests(event);
+                    default -> ApiResponse.badRequest("Unsupported method for interests: " + method);
+                };
             }
 
             if (isRootUsersPath(path)) {
@@ -186,6 +206,21 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         return ApiResponse.noContent();
     }
 
+    private APIGatewayV2HTTPResponse getInterests(APIGatewayV2HTTPEvent event) throws Exception {
+        UUID callerId = SecurityContext.getUserId(event);
+        return ApiResponse.ok(interestService.getSelection(extractUserId(event), callerId));
+    }
+
+    private APIGatewayV2HTTPResponse replaceInterests(APIGatewayV2HTTPEvent event) throws Exception {
+        UUID callerId = SecurityContext.getUserId(event);
+        UUID userId = extractUserId(event);
+        if (event.getBody() == null || event.getBody().isBlank()) {
+            return ApiResponse.badRequest("Request body is required");
+        }
+        UserInterestsDto request = JsonUtils.fromJsonAndValidate(event.getBody(), UserInterestsDto.class);
+        return ApiResponse.ok(interestService.replaceSelection(userId, callerId, request));
+    }
+
     private APIGatewayV2HTTPResponse getMe(APIGatewayV2HTTPEvent event) throws Exception {
         UUID callerId = SecurityContext.getUserId(event);
         String username = SecurityContext.getClaim(event, "preferred_username")
@@ -194,8 +229,8 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             .orElse(null);
         String firstName = SecurityContext.getClaim(event, "given_name").orElse(null);
         String lastName = SecurityContext.getClaim(event, "family_name").orElse(null);
-        UserProfileDto me = service.getMe(callerId, username, firstName, lastName);
-        return ApiResponse.ok(me);
+        UserProfileDto profile = service.getMe(callerId, username, firstName, lastName);
+        return ApiResponse.ok(new MeDto(profile, interestService.hasSelection(callerId)));
     }
 
     private APIGatewayV2HTTPResponse getFollowers(APIGatewayV2HTTPEvent event) throws Exception {

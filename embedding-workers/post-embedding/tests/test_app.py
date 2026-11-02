@@ -187,3 +187,15 @@ def test_should_sign_iam_token_and_require_ssl_when_iam_auth_is_enabled(monkeypa
         [call("rds", region_name=app.settings.aws_region)],
         [call(DBHostname="cluster.example.com", Port=5432, DBUsername="coolture_app")],
     )
+
+
+def test_should_embed_only_interests_returned_when_invoked_with_embed_interests(model, monkeypatch):
+    conn = MagicMock()
+    conn.execute.return_value.fetchall.return_value = [("jazz", "Jazz: koncerty")]
+    monkeypatch.setattr(app, "_get_connection", lambda: conn)
+
+    result = app.lambda_handler({"action": "embed-interests"}, None)
+
+    assert result == {"interests": 1}
+    assert model.encode.call_args_list == [call("Jazz: koncerty")]
+    assert conn.execute.call_args_list[1] == call(ANY, ("jazz", EMBEDDING, "all-mpnet-base-v2", "Jazz: koncerty"))

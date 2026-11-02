@@ -124,6 +124,12 @@ Resources:
       Runtime: python3.13
       MemorySize: 512
       Timeout: 300
+      Environment:
+        Variables:
+          INTEREST_WEIGHT_CATEGORY: '0.25'
+          INTEREST_WEIGHT_MINIMUM: '0.2'
+          INTEREST_DECAY_SCALE: '10'
+          ENGAGEMENT_WINDOW_DAYS: '30'
       Policies:
         - !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbConnectPolicyArn'}, !Ref AWS::NoValue]
       Events:
@@ -134,3 +140,11 @@ Resources:
             ScheduleExpression: !Ref UserEmbeddingSchedule
             ScheduleExpressionTimezone: !Ref UserEmbeddingScheduleTimezone
             State: !If [UserEmbeddingScheduleOn, ENABLED, DISABLED]
+        InterestChanges:
+          Type: SQS
+          Properties:
+            Queue: !If
+              - IsAWS
+              - !ImportValue {'Fn::Sub': '${BackendStackName}-UserEmbeddingQueueArn'}
+              - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:coolture-${Environment}-user-embedding'
+            BatchSize: 10
