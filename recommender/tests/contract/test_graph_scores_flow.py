@@ -11,15 +11,15 @@ from worker import GraphScores, apply_scores, handler
 @pytest.fixture
 def conn():
     with psycopg.connect(os.environ['DATABASE_URL']) as connection:
-        connection.execute('DELETE FROM rec.graph_scores')
+        connection.execute('DELETE FROM rec_graph_scores')
         connection.commit()
         yield connection
-        connection.execute('DELETE FROM rec.graph_scores')
+        connection.execute('DELETE FROM rec_graph_scores')
         connection.commit()
 
 
 def stored(conn) -> dict[str, float]:
-    return dict(conn.execute('SELECT node_id, score FROM rec.graph_scores').fetchall())
+    return dict(conn.execute('SELECT node_id, score FROM rec_graph_scores').fetchall())
 
 
 def test_gateway_message_reaches_the_table_through_a_queue_event(conn):

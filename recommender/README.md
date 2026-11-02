@@ -1,11 +1,12 @@
 # Recommender
 
-Python code of the recommender. It reads the app's tables in `public` directly and keeps its own tables in schema
-`rec`, created by ordinary migrations in [`../migrations/`](../migrations/) (e.g. `V9__add_rec_graph_scores.sql`).
+Python code of the recommender. It reads the app's tables in `public` directly and keeps its own tables there too,
+prefixed with `rec_` (only the recommender writes them), created by ordinary migrations in
+[`../migrations/`](../migrations/) (e.g. `V9__add_rec_graph_scores.sql`).
 
 | File | What it does |
 |---|---|
-| `worker.py` | SQS handler: stores a graph-scores snapshot in `rec.graph_scores`, ignoring repeated or late runs |
+| `worker.py` | SQS handler: stores a graph-scores snapshot in `rec_graph_scores`, ignoring repeated or late runs |
 | `graph_gateway.py` | Reads the graph from AuraDB, runs PageRank in an Aura analytics session, publishes the scores to SQS |
 | `local_runner.py` | Runs either one locally: `worker` polls the queue, `gateway` runs the gateway once |
 | `elasticmq.conf` | Local SQS queues (`coolture-recommendation-events` and its DLQ) |
@@ -33,4 +34,4 @@ docker compose --profile rec --profile graph run --rm graph-gateway
 ```
 
 The gateway publishes one scores message to the local queue; with the `rec` profile running, the worker stores it in
-`rec.graph_scores`.
+`rec_graph_scores`.
