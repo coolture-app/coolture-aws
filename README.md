@@ -22,7 +22,7 @@ embedding-workers/          # Independent stack: Python embedding Lambdas (own t
 ├── template.yaml           # Imports network from mgmt-stack-networking[-<env>], queue ARN + DB endpoint from backend
 ├── post-embedding/         # Container image: SQS → all-mpnet-base-v2 → post_embeddings
 └── user-embedding/         # Zip: on schedule, blends interests and interactions → user_embeddings
-migrations/                 # PostgreSQL schema migrations (app + recommender schema `rec`)
+migrations/                 # PostgreSQL schema migrations (app + recommender `rec_` tables)
 recommender/                # Recommender worker and AuraDB graph gateway (see recommender/README.md)
 db/                         # Local Postgres image (PostGIS + pgvector) and local dev seed
 scripts/                    # Local helpers (embed-posts.sh)
