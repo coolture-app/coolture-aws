@@ -11,6 +11,7 @@ prefixed with `rec_` (only the recommender writes them), created by ordinary mig
 | `local_runner.py` | Runs either one locally: `worker` polls the queue, `gateway` runs the gateway once |
 | `elasticmq.conf` | Local SQS queues (`coolture-recommendation-events` and its DLQ) |
 | `docs/auradb-check.md` | Measurements of the AuraDB path |
+| `embedding-workers/` | Lambdas that embed posts and interests and compute user vectors, a separate stack (see the [root README](../README.md)) |
 
 All commands below run from the repository root.
 

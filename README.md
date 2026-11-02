@@ -18,12 +18,12 @@ aws/
 │   ├── comment-read/       # Handles comment read operations (GET)
 │   ├── user/               # User profiles, avatar, relations (follow/block)
 │   └── ssr/                # Angular SSR Lambda
-embedding-workers/          # Independent stack: Python embedding Lambdas (own template.yaml)
-├── template.yaml           # Imports network from mgmt-stack-networking[-<env>], queue ARN + DB endpoint from backend
-├── post-embedding/         # Container image: SQS → all-mpnet-base-v2 → post_embeddings
-└── user-embedding/         # Zip: on schedule, blends interests and interactions → user_embeddings
 migrations/                 # PostgreSQL schema migrations (app + recommender `rec_` tables)
-recommender/                # Recommender worker and AuraDB graph gateway (see recommender/README.md)
+recommender/                # Recommender worker, AuraDB graph gateway and embedding workers (see recommender/README.md)
+└── embedding-workers/      # Independent stack: Python embedding Lambdas (own template.yaml)
+    ├── template.yaml       # Imports network from mgmt-stack-networking[-<env>], queue ARN + DB endpoint from backend
+    ├── post-embedding/     # Container image: SQS → all-mpnet-base-v2 → post_embeddings
+    └── user-embedding/     # Zip: on schedule, blends interests and interactions → user_embeddings
 db/                         # Local Postgres image (PostGIS + pgvector) and local dev seed
 scripts/                    # Local helpers (embed-posts.sh)
 samconfig.toml              # SAM deployment configuration
@@ -48,7 +48,7 @@ Delete in reverse order.
 |---|---|---|
 | `coolture-auth-<env>` | `aws/auth.yaml` | - |
 | `coolture-backend-<env>` | `aws/backend.yaml` | mgmt-stack-networking[-<env>] (VPC, subnets), auth (authorizers, Cognito) |
-| `coolture-embeddings-<env>` | `embedding-workers/template.yaml` | mgmt-stack-networking[-<env>], backend (queue ARN, DB endpoint/port, security group) |
+| `coolture-embeddings-<env>` | `recommender/embedding-workers/template.yaml` | mgmt-stack-networking[-<env>], backend (queue ARN, DB endpoint/port, security group) |
 | `coolture-waf-<env>` (us-east-1) | `aws/waf.yaml` | - |
 | `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API domain), waf (web ACL ARN, passed by deploy.sh) |
 
@@ -88,7 +88,7 @@ Invoking `PostEmbeddingFunction` with `{"action":"embed-interests"}` embeds inte
 The schedule is every 30 minutes, 08:00-15:59 Warsaw time, and stays off unless you deploy with `USER_EMBEDDING_SCHEDULE=true`.
 
 - Split: queues, DLQs and requests bucket live in `backend.yaml`, the publisher in `common`; the two Python
-  workers are the separate `embedding-workers/` stack and can be deployed, rebuilt or removed on their own.
+  workers are the separate `recommender/embedding-workers/` stack and can be deployed, rebuilt or removed on their own.
 - Why S3 in the middle: VPC Lambdas have no internet. Reaching SQS would need a paid interface endpoint
   (~$9/month) or NAT; the S3 **gateway** endpoint is free and S3 → SQS notifications are free.
   The gateway endpoint and its route on the private route table belong to the base stack.
@@ -114,7 +114,7 @@ make embed-users                     # what the schedule does in AWS
 `embed-posts` (`scripts/embed-posts.sh`) builds the same SQS-wrapped S3 events AWS delivers and runs
 `sam local invoke PostEmbeddingFunction`, 50 posts per invocation (`BATCH_SIZE=`), and exits non-zero if any post fails.
 
-Unit tests: `pip install -r embedding-workers/<worker>/requirements-dev.txt` then `make test-python`.
+Unit tests: `pip install -r recommender/embedding-workers/<worker>/requirements-dev.txt` then `make test-python`.
 
 ## Interest onboarding
 
@@ -128,12 +128,12 @@ Locally there are no S3 notifications: run `make embed-users` after picking inte
 | Setting | Default | Where | Meaning |
 |---|---|---|---|
 | `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 3, 6 | `aws/backend.yaml` | selection limits, also sent to the frontend |
-| `INTEREST_WEIGHT_CATEGORY` | 0.25 | `embedding-workers/template.yaml` | weight of a pick's category against the pick itself |
-| `INTEREST_WEIGHT_MINIMUM` | 0.2 | `embedding-workers/template.yaml` | lowest share of interests in the user's vector |
-| `INTEREST_DECAY_SCALE` | 10 | `embedding-workers/template.yaml` | engagement at which the share falls to about 37% |
-| `ENGAGEMENT_WINDOW_DAYS` | 30 | `embedding-workers/template.yaml` | days of interactions that count as engagement |
+| `INTEREST_WEIGHT_CATEGORY` | 0.25 | `recommender/embedding-workers/template.yaml` | weight of a pick's category against the pick itself |
+| `INTEREST_WEIGHT_MINIMUM` | 0.2 | `recommender/embedding-workers/template.yaml` | lowest share of interests in the user's vector |
+| `INTEREST_DECAY_SCALE` | 10 | `recommender/embedding-workers/template.yaml` | engagement at which the share falls to about 37% |
+| `ENGAGEMENT_WINDOW_DAYS` | 30 | `recommender/embedding-workers/template.yaml` | days of interactions that count as engagement |
 
-To use another decay formula, change `interest_share` in `embedding-workers/user-embedding/src/app.py`.
+To use another decay formula, change `interest_share` in `recommender/embedding-workers/user-embedding/src/app.py`.
 
 ## Shared Common Module (`com.coolture:common:1.0.0`)
 

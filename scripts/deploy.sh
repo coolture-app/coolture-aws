@@ -53,7 +53,7 @@ template_for() {
     case "$1" in
         auth) echo aws/auth.yaml ;;
         backend) echo aws/backend.yaml ;;
-        embeddings) echo embedding-workers/template.yaml ;;
+        embeddings) echo recommender/embedding-workers/template.yaml ;;
         waf) echo aws/waf.yaml ;;
         frontend) echo aws/frontend.yaml ;;
     esac

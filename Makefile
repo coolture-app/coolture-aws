@@ -48,7 +48,7 @@ build: build-common ## Build backend lambdas
 	@sam build --template-file aws/backend.yaml --parallel --cached
 
 test-python: ## Run Python Lambda unit tests (needs requirements-dev.txt installed)
-	@for dir in embedding-workers/post-embedding embedding-workers/user-embedding; do \
+	@for dir in recommender/embedding-workers/post-embedding recommender/embedding-workers/user-embedding; do \
 		(cd $$dir && python3 -m pytest -q tests) || exit 1; \
 	done
 
@@ -77,7 +77,7 @@ validate: ## Validate SAM templates
 	@sam validate --template-file aws/backend.yaml
 	@sam validate --template-file aws/frontend.yaml
 	@sam validate --template-file aws/auth.yaml
-	@sam validate --template-file embedding-workers/template.yaml
+	@sam validate --template-file recommender/embedding-workers/template.yaml
 
 deploy-backend: ## Deploy backend to AWS (dev, arm64) - needs mgmt-stack-networking (management stack) + auth deployed
 	@scripts/deploy.sh dev backend
@@ -89,7 +89,7 @@ deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
 	@scripts/deploy.sh dev auth
 
 build-embeddings: ## Build embedding workers for local runs (x86_64; post-embedding image needs Docker)
-	@sam build --template-file embedding-workers/template.yaml --build-dir .aws-sam/embeddings
+	@sam build --template-file recommender/embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
 deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs mgmt-stack-networking + backend deployed
 	@scripts/deploy.sh dev embeddings
