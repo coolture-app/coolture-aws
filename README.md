@@ -337,7 +337,7 @@ Feed with cursor pagination:
 curl "http://localhost:3000/posts?cursor=<nextCursor>&limit=20"
 ```
 
-Events that ended over 12 hours ago are hidden unless `includePast=true` or a date filter is set. Rules are in [`contracts/`](contracts/README.md).
+Events that ended over 12 hours ago are hidden unless `includePast=true` or a date filter is set. Rules are in [`contracts/`](aws/lambdas/post-read/contracts/README.md).
 
 #### 2. Get Post Details
 
@@ -353,7 +353,7 @@ curl "http://localhost:3000/posts/map?leftUpper.latitude=52.3&leftUpper.longitud
 
 #### 4. Get Home Feed
 
-Ranked for the viewer, also for guests. The location is optional, and only sent on the first page. See [`contracts/`](contracts/README.md).
+Ranked for the viewer, also for guests. The location is optional, and only sent on the first page. See [`contracts/`](aws/lambdas/post-read/contracts/README.md).
 
 ```bash
 curl "http://localhost:3000/feed?limit=20&latitude=54.35&longitude=18.65"

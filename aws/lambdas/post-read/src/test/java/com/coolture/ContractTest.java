@@ -28,12 +28,9 @@ import com.coolture.feed.FeedMode;
 import com.coolture.feed.FeedPage;
 import com.coolture.feed.FeedService;
 import com.coolture.services.PostReadService;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIf;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -50,25 +47,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /** Sends handler responses through contracts/feed-api.yaml, which also fails on undocumented fields. */
-@EnabledIf("insideTheRepository")
 class ContractTest {
 
-    private static OpenApiInteractionValidator VALIDATOR;
-
-    /**
-     * sam build runs the tests in a copy of this module, where contracts/ can't be reached.
-     * This checks for the template and not the contract, so that a contract missing from the repository still fails.
-     */
-    static boolean insideTheRepository() {
-        return Files.exists(Path.of("..", "..", "backend.yaml"));
-    }
-
-    @BeforeAll
-    static void loadContract() {
-        VALIDATOR = OpenApiInteractionValidator
-            .createForSpecificationUrl(Path.of("..", "..", "..", "contracts", "feed-api.yaml").toUri().toString())
-            .build();
-    }
+    private static final OpenApiInteractionValidator VALIDATOR = OpenApiInteractionValidator
+        .createForSpecificationUrl(Path.of("contracts", "feed-api.yaml").toUri().toString())
+        .build();
 
     private final PostReadService posts = mock(PostReadService.class);
     private final FeedService feed = mock(FeedService.class);

@@ -9,6 +9,8 @@ How the frontend and backend agree on the home feed and the post lists.
 
 Read both. To view the YAML, paste it into [editor.swagger.io](https://editor.swagger.io) or use an OpenAPI extension in VS Code.
 
+This folder is inside `post-read` because that Lambda serves everything described here, and because `sam build` runs the tests on a copy of this module alone. `ContractTest` can read the file there too, and the file doesn't reach the Lambda package.
+
 ## Two ways to read posts
 
 | | `GET /feed` | `GET /posts` |
