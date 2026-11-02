@@ -53,7 +53,7 @@ for ((i = 0; i < ${#post_ids[@]}; i += BATCH_SIZE)); do
         continue
     fi
 
-    result="$(sam local invoke PostEmbeddingFunction --template-file "$TEMPLATE" --event "$event_file")"
+    result="$(sam local invoke PostEmbeddingFunction --template-file "$TEMPLATE" --add-host host.docker.internal:host-gateway --event "$event_file")"
     echo "$result"
     if grep -q '"itemIdentifier"' <<< "$result"; then
         failed=1

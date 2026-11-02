@@ -13,6 +13,7 @@ POST_ID = "11111111-1111-1111-1111-111111111111"
 POST_KEY = f"posts/{POST_ID}"
 POST_ROW = ("Jazz night", "Live jazz", ["music", "jazz"])
 EMBEDDING = [0.5, 0.25, 1.0]
+MODEL = "sdadas/mmlw-roberta-base"
 NO_FAILURES = {"batchItemFailures": []}
 
 
@@ -62,10 +63,10 @@ def test_should_store_embedding_of_current_post_content_when_post_exists(model, 
 
     # then
     assert result == NO_FAILURES
-    assert model.encode.call_args_list == [call("Jazz night Live jazz music jazz")]
+    assert model.encode.call_args_list == [call("Jazz night Live jazz music jazz", normalize_embeddings=True)]
     assert conn.execute.call_args_list == [
         call(ANY, (POST_ID,)),
-        call(ANY, (POST_ID, EMBEDDING, "all-mpnet-base-v2")),
+        call(ANY, (POST_ID, EMBEDDING, MODEL)),
     ]
 
 
@@ -78,7 +79,7 @@ def test_should_embed_title_only_when_description_and_tags_are_null(model, conn)
     app.lambda_handler(event, None)
 
     # then
-    assert model.encode.call_args_list == [call("Jazz night")]
+    assert model.encode.call_args_list == [call("Jazz night", normalize_embeddings=True)]
 
 
 def test_should_skip_post_when_post_is_missing_or_deleted(model, conn):
@@ -197,5 +198,14 @@ def test_should_embed_only_interests_returned_when_invoked_with_embed_interests(
     result = app.lambda_handler({"action": "embed-interests"}, None)
 
     assert result == {"interests": 1}
-    assert model.encode.call_args_list == [call("Jazz: koncerty")]
-    assert conn.execute.call_args_list[1] == call(ANY, ("jazz", EMBEDDING, "all-mpnet-base-v2", "Jazz: koncerty"))
+    assert model.encode.call_args_list == [call("Jazz: koncerty", normalize_embeddings=True)]
+    assert conn.execute.call_args_list[1] == call(ANY, ("jazz", EMBEDDING, MODEL, "Jazz: koncerty"))
+
+
+def test_should_use_default_database_address_when_it_is_empty(monkeypatch):
+    monkeypatch.setenv("DB_HOST", "")
+    monkeypatch.setenv("DB_PORT", "")
+
+    settings = type(app.settings)()
+
+    assert (settings.db_host, settings.db_port) == ("host.docker.internal", 5430)

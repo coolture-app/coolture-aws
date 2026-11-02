@@ -8,7 +8,7 @@ import pytest
 
 import app
 
-MODEL = "all-mpnet-base-v2"
+MODEL = "sdadas/mmlw-roberta-base"
 STARTED_AT = "2026-11-01T10:00:00+00:00"
 A = [1.0, 0.0]
 B = [0.0, 1.0]
@@ -261,3 +261,12 @@ def test_should_not_fall_below_minimum_interest_share():
     assert app.interest_share(0.0) == 1.0
     assert app.interest_share(10.0) == pytest.approx(0.3679, rel=1e-3)
     assert app.interest_share(1000.0) == 0.2
+
+
+def test_should_use_default_database_address_when_it_is_empty(monkeypatch):
+    monkeypatch.setenv("DB_HOST", "")
+    monkeypatch.setenv("DB_PORT", "")
+
+    settings = type(app.settings)()
+
+    assert (settings.db_host, settings.db_port) == ("host.docker.internal", 5430)

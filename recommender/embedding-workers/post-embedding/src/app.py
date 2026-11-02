@@ -107,7 +107,8 @@ def process_post(post_id: UUID) -> None:
         return
 
     logger.info("processing post %s: %r", post_id, post.title)
-    vector = _get_model().encode(post.text).tolist()
+    # The model has no normalization layer, and user vectors average these, so length would act as a weight.
+    vector = _get_model().encode(post.text, normalize_embeddings=True).tolist()
     try:
         upsert_embedding(
             conn,
@@ -141,7 +142,7 @@ def embed_interests(conn: psycopg.Connection) -> int:
                     embedded_text = EXCLUDED.embedded_text,
                     updated_at    = now()
             """,
-            (key, _get_model().encode(text).tolist(), settings.embedding_model, text),
+            (key, _get_model().encode(text, normalize_embeddings=True).tolist(), settings.embedding_model, text),
         )
     return len(rows)
 
