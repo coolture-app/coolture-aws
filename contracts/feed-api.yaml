@@ -1,0 +1,291 @@
+openapi: 3.0.3
+info:
+  title: Coolture feed and post lists
+  version: 1.0.0
+  description: >
+    Shapes of the home feed and the post lists. Behaviour that a schema can't express (feed rules, paging, past events,
+    errors) is in README.md next to this file. Read both. Change this file first, in its own pull request.
+servers:
+  - url: http://localhost:3000
+    description: Local stack. On AWS, the same paths are behind /api.
+security:
+  - {}
+  - bearerAuth: []
+tags:
+  - name: Lists
+paths:
+  /feed:
+    get:
+      tags: [Lists]
+      operationId: getFeed
+      summary: Home feed for guests and signed-in users
+      description: >
+        The first request starts a session and may send a location. Every later request sends only cursor and limit.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Latitude'
+        - $ref: '#/components/parameters/Longitude'
+      responses:
+        '200':
+          description: One page. A short or empty page doesn't mean the end. Only hasMore false does.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedPage'
+              examples:
+                ranked:
+                  summary: Ranked page with more to come
+                  value:
+                    mode: RANKED
+                    items: []
+                    page: {limit: 20, hasMore: true, nextCursor: eyJ2IjoxLCJrIjoiUiJ9}
+                fallback:
+                  summary: Ranking failed, upcoming order, last page
+                  value:
+                    mode: UPCOMING
+                    items: []
+                    page: {limit: 20, hasMore: false}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /posts:
+    get:
+      tags: [Lists]
+      operationId: getPosts
+      summary: Search, filters and sorted lists
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [RECENT, POPULAR, UPCOMING]
+            default: RECENT
+        - $ref: '#/components/parameters/IncludePast'
+        - {name: q, in: query, schema: {type: string}}
+        - {name: tags, in: query, description: Comma-separated or repeated., schema: {type: array, items: {type: string}}, style: form, explode: true}
+        - {name: authorId, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/PostStatus'}}
+        - {name: visibility, in: query, schema: {$ref: '#/components/schemas/PostVisibility'}}
+        - {name: type, in: query, schema: {$ref: '#/components/schemas/PostType'}}
+        - {name: startsFrom, in: query, description: Setting this turns the past-events window off., schema: {type: string, format: date-time}}
+        - {name: startsTo, in: query, description: Setting this turns the past-events window off., schema: {type: string, format: date-time}}
+        - $ref: '#/components/parameters/Latitude'
+        - $ref: '#/components/parameters/Longitude'
+        - {name: radiusKm, in: query, schema: {type: number}}
+        - {name: participationTypes, in: query, description: Signed-in only., schema: {type: array, items: {$ref: '#/components/schemas/ParticipationType'}}, style: form, explode: true}
+        - {name: reactionType, in: query, description: Signed-in only., schema: {$ref: '#/components/schemas/ReactionType'}}
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /posts/map:
+    get:
+      tags: [Lists]
+      operationId: getPostMarks
+      summary: Map markers. Takes the same filters as /posts, plus the map bounds. Only includePast is listed here because it is new.
+      parameters:
+        - $ref: '#/components/parameters/IncludePast'
+      responses:
+        '200':
+          description: All markers inside the bounds, without paging.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PostMark'}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: The Cognito id token. No token means guest. A rejected token gets 401 or 403 from the gateway, never the guest view.
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: The nextCursor of the previous page, unchanged. Opaque, don't parse it. Unreadable values return 400.
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      description: Page size. Values above 100 are capped. Non-numeric values return 400.
+      schema: {type: integer, minimum: 1, default: 20}
+    Latitude:
+      name: latitude
+      in: query
+      description: Send together with longitude, rounded to 2 decimals. On /feed, only on the first page.
+      schema: {type: number, format: double, minimum: -90, maximum: 90}
+    Longitude:
+      name: longitude
+      in: query
+      description: Send together with latitude, rounded to 2 decimals. On /feed, only on the first page.
+      schema: {type: number, format: double, minimum: -180, maximum: 180}
+    IncludePast:
+      name: includePast
+      in: query
+      description: When false, events that ended over 12 hours ago are hidden. UPCOMING always hides ended events.
+      schema: {type: boolean, default: false}
+  responses:
+    BadRequest:
+      description: Invalid input, including an unreadable cursor. The frontend restarts the list once.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    ServerError:
+      description: The database or the Lambda failed. The frontend keeps what is shown and offers a retry.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    FeedMode:
+      type: string
+      description: >
+        How this page was ordered. RANKED is the scorer, also for guests and new users. UPCOMING is the fallback when
+        ranking failed. The UI must work the same for both. New values may be added, so treat unknown ones like RANKED.
+      enum: [RANKED, UPCOMING]
+    FeedPage:
+      type: object
+      additionalProperties: false
+      required: [mode, items, page]
+      properties:
+        mode: {$ref: '#/components/schemas/FeedMode'}
+        items: {type: array, items: {$ref: '#/components/schemas/PostCard'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    PostPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/PostCard'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    PageInfo:
+      type: object
+      additionalProperties: false
+      required: [limit, hasMore]
+      properties:
+        limit: {type: integer}
+        hasMore: {type: boolean, description: The only signal for the end of a list.}
+        nextCursor: {type: string, description: Present only when hasMore is true.}
+    PostCard:
+      type: object
+      additionalProperties: false
+      description: Fields without a value are left out of the JSON, not sent as null.
+      required:
+        - id
+        - author
+        - title
+        - startsAt
+        - tags
+        - positiveReactionCount
+        - negativeReactionCount
+        - participantCount
+        - commentsCount
+        - type
+        - status
+        - visibility
+        - createdAt
+      properties:
+        id: {type: string, format: uuid}
+        author: {$ref: '#/components/schemas/UserSummary'}
+        location: {$ref: '#/components/schemas/EventLocation'}
+        title: {type: string}
+        description: {type: string}
+        eventUrl: {type: string}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        tags: {type: array, items: {type: string}}
+        positiveReactionCount: {type: integer}
+        negativeReactionCount: {type: integer}
+        participantCount: {type: integer}
+        commentsCount: {type: integer}
+        type: {$ref: '#/components/schemas/PostType'}
+        status: {$ref: '#/components/schemas/PostStatus'}
+        visibility: {$ref: '#/components/schemas/PostVisibility'}
+        createdAt: {type: string, format: date-time}
+        lastModifiedAt: {type: string, format: date-time}
+        deletedAt: {type: string, format: date-time}
+        coverMedia: {$ref: '#/components/schemas/MediaResource'}
+        myReaction: {$ref: '#/components/schemas/ReactionType'}
+        myParticipation: {$ref: '#/components/schemas/ParticipationType'}
+    PostMark:
+      type: object
+      additionalProperties: false
+      required: [id, title, positiveReactionCount, coordinates]
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        description: {type: string}
+        coverMediaUrl: {type: string}
+        positiveReactionCount: {type: integer}
+        coordinates: {$ref: '#/components/schemas/GeoPoint'}
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required: [id, username, followersCount, followingCount]
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        avatar: {$ref: '#/components/schemas/MediaResource'}
+        createdAt: {type: string, format: date-time}
+        followersCount: {type: integer}
+        followingCount: {type: integer}
+    EventLocation:
+      type: object
+      additionalProperties: false
+      required: [id, coordinates]
+      properties:
+        id: {type: string, format: uuid}
+        countryCode: {type: string}
+        venueName: {type: string}
+        buildingNum: {type: string}
+        street: {type: string}
+        postalCode: {type: string}
+        city: {type: string}
+        coordinates: {$ref: '#/components/schemas/GeoPoint'}
+        createdAt: {type: string, format: date-time}
+    GeoPoint:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude: {type: number, format: double}
+        longitude: {type: number, format: double}
+    MediaResource:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: {type: string, format: uuid}
+        purpose: {type: string, enum: [PROFILE_IMAGE, PROFILE_IMAGE_THUMBNAIL, EVENT_COVER, EVENT_MEDIA]}
+        mimeType: {type: string}
+        sizeBytes: {type: integer, format: int64}
+        status: {type: string, enum: [PENDING, UPLOADED, ATTACHED, DELETED]}
+        url: {type: string}
+        createdAt: {type: string, format: date-time}
+        deletedAt: {type: string, format: date-time}
+    PostType: {type: string, enum: [ONLINE, OFFLINE]}
+    PostStatus: {type: string, enum: [ACTIVE, EDITED, DELETED]}
+    PostVisibility: {type: string, enum: [PUBLIC, PRIVATE, FRIENDS]}
+    ReactionType: {type: string, enum: [LIKE, DISLIKE]}
+    ParticipationType: {type: string, enum: [INTERESTED, TAKES_PART]}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}
