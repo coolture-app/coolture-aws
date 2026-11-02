@@ -334,8 +334,10 @@ curl "http://localhost:3000/posts?latitude=52.2297&longitude=21.0122&radiusKm=25
 Feed with cursor pagination:
 
 ```bash
-curl "http://localhost:3000/posts?cursor=eyJpZCI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMCIsImNyZWF0ZWRBdCI6IjIwMjYtMDgtMjRUMTI6MDA6MDBaIn0&limit=20"
+curl "http://localhost:3000/posts?cursor=<nextCursor>&limit=20"
 ```
+
+Events that ended over 12 hours ago are hidden unless `includePast=true` or a date filter is set. Rules are in [`contracts/`](aws/lambdas/post-read/contracts/README.md).
 
 #### 2. Get Post Details
 
@@ -349,11 +351,14 @@ curl "http://localhost:3000/posts/11111111-1111-1111-1111-111111111111"
 curl "http://localhost:3000/posts/map?leftUpper.latitude=52.3&leftUpper.longitude=20.9&rightBottom.latitude=52.1&rightBottom.longitude=21.2"
 ```
 
-#### 4. Get Recommendations (Requires Cognito JWT)
+#### 4. Get Home Feed
+
+Ranked for the viewer, also for guests. The location is optional, and only sent on the first page. See [`contracts/`](aws/lambdas/post-read/contracts/README.md).
 
 ```bash
-curl "http://localhost:3000/posts/recommendations?limit=10" \
-  -H "Authorization: Bearer <COGNITO_JWT_TOKEN>"
+curl "http://localhost:3000/feed?limit=20&latitude=54.35&longitude=18.65"
+curl "http://localhost:3000/feed?limit=20&cursor=<nextCursor>"
+curl "http://localhost:3000/feed" -H "X-Anonymous: true"
 ```
 
 #### 5. List Event Locations

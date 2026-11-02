@@ -515,6 +515,7 @@ Resources:
       Environment:
         Variables:
           DB_USERNAME: !If [IsAWS, !Ref DbReadUsername, !Ref DbUsername]
+          FEED_WEIGHTS: default
       Policies:
         - !If [IsAWS, !Ref DbReadConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:
@@ -522,7 +523,7 @@ Resources:
       Events:
         HealthCheck: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /actuator/health, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetCountryCodes: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/country-codes, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
-        GetRecommendations: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts/recommendations, Method: GET}}
+        GetHomeFeed: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /feed, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetMapMarks: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts/map, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetPostById: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{id}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetFeed: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}

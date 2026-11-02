@@ -16,6 +16,7 @@ import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
+import com.coolture.feed.FeedService;
 import com.coolture.services.PostReadService;
 
 import java.time.Instant;
@@ -28,13 +29,15 @@ import java.util.UUID;
 public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
 
     private final PostReadService service;
+    private final FeedService feedService;
 
     public PostReadHandler() {
-        this(new PostReadService());
+        this(new PostReadService(), new FeedService());
     }
 
-    PostReadHandler(PostReadService service) {
+    PostReadHandler(PostReadService service, FeedService feedService) {
         this.service = service;
+        this.feedService = feedService;
     }
 
     @Override
@@ -58,12 +61,12 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
                 return ApiResponse.ok(service.listCountryCodes());
             } else if (path.contains("/event-locations")) {
                 return getEventLocations(event);
-            } else if (path.endsWith("/posts/recommendations") || path.endsWith("/recommendations")) {
-                return getRecommendations(event, callerId);
             } else if (path.endsWith("/posts/map") || path.endsWith("/map")) {
                 return getMapMarks(event, callerId);
             } else if (isPostDetailRequest(event)) {
                 return getPostById(event, callerId);
+            } else if (path.endsWith("/feed")) {
+                return getHomeFeed(event, callerId);
             } else {
                 return getFeed(event, callerId);
             }
@@ -94,13 +97,15 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         return ApiResponse.ok(page);
     }
 
-    private APIGatewayV2HTTPResponse getRecommendations(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
+    private APIGatewayV2HTTPResponse getHomeFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
         Map<String, String> qp = getQueryParams(event);
         String cursor = qp.get("cursor");
         int limit = parseLimit(qp.get("limit"), 20);
+        Double lat = parseCoordinate(qp, "latitude", 90);
+        Double lng = parseCoordinate(qp, "longitude", 180);
+        requireFullLocation(lat, lng);
 
-        CursorPage<PostCardDto> page = service.getRecommendations(callerId, cursor, limit);
-        return ApiResponse.ok(page);
+        return ApiResponse.ok(feedService.getFeed(callerId, cursor, limit, lat, lng));
     }
 
     private APIGatewayV2HTTPResponse getFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
@@ -157,8 +162,9 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         Instant startsFrom = qp.get("startsFrom") != null ? Instant.parse(qp.get("startsFrom")) : null;
         Instant startsTo = qp.get("startsTo") != null ? Instant.parse(qp.get("startsTo")) : null;
 
-        Double lat = qp.get("latitude") != null ? Double.parseDouble(qp.get("latitude")) : null;
-        Double lng = qp.get("longitude") != null ? Double.parseDouble(qp.get("longitude")) : null;
+        Double lat = parseCoordinate(qp, "latitude", 90);
+        Double lng = parseCoordinate(qp, "longitude", 180);
+        requireFullLocation(lat, lng);
         Double radiusKm = qp.get("radiusKm") != null ? Double.parseDouble(qp.get("radiusKm")) : null;
 
         List<String> partTypes = parseList(qp.get("participationTypes"));
@@ -166,12 +172,41 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         String cursor = qp.get("cursor");
         int limit = parseLimit(qp.get("limit"), 20);
         String sortBy = qp.get("sortBy");
+        boolean includePast = parseIncludePast(qp.get("includePast"));
 
         return new PostFeedFilters(
             q, tags, authorId, status, visibility, type,
             startsFrom, startsTo, lat, lng, radiusKm,
-            partTypes, reactionType, cursor, limit, sortBy
+            partTypes, reactionType, cursor, limit, sortBy, includePast
         );
+    }
+
+    private Double parseCoordinate(Map<String, String> qp, String name, double maxAbs) {
+        String raw = qp.get(name);
+        if (raw == null) return null;
+        double value;
+        try {
+            value = Double.parseDouble(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid " + name);
+        }
+        // Written so that NaN fails too.
+        if (!(Math.abs(value) <= maxAbs)) {
+            throw new IllegalArgumentException("Invalid " + name);
+        }
+        return value;
+    }
+
+    private void requireFullLocation(Double lat, Double lng) {
+        if ((lat == null) != (lng == null)) {
+            throw new IllegalArgumentException("latitude and longitude must be sent together");
+        }
+    }
+
+    private boolean parseIncludePast(String raw) {
+        if (raw == null || raw.isBlank() || "false".equalsIgnoreCase(raw)) return false;
+        if ("true".equalsIgnoreCase(raw)) return true;
+        throw new IllegalArgumentException("Invalid includePast");
     }
 
     private MapBoundsDto parseMapBounds(Map<String, String> qp) {
@@ -209,7 +244,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         try {
             return Integer.parseInt(raw);
         } catch (NumberFormatException e) {
-            return defaultLimit;
+            throw new IllegalArgumentException("Invalid limit");
         }
     }
 }

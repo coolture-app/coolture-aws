@@ -52,6 +52,9 @@ test-python: ## Run Python Lambda unit tests (needs requirements-dev.txt install
 		(cd $$dir && python3 -m pytest -q tests) || exit 1; \
 	done
 
+test-post-read-db: build-common ## Run the post-read database tests against `make up`
+	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-read/pom.xml -Dtest=PostReadDbTest
+
 embed-posts: ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
 	@scripts/embed-posts.sh
 
