@@ -86,7 +86,6 @@ Invoking `PostEmbeddingFunction` with `{"action":"embed-interests"}` embeds inte
 `scripts/deploy.sh` does this after deploying the embeddings stack. Locally use `make embed-interests`.
 
 The model is `sdadas/mmlw-roberta-base`, pinned to a revision in `recommender/embedding-workers/post-embedding/Dockerfile`.
-Interests are embedded as queries, with the model's `zapytanie: ` prefix, and posts as documents.
 A deploy that changes the model re-embeds only the interests, so posts and users need it separately.
 
 The schedule is every 30 minutes, 08:00-15:59 Warsaw time, and stays off unless you deploy with `USER_EMBEDDING_SCHEDULE=true`.

@@ -15,8 +15,6 @@ logger.setLevel(logging.INFO)
 
 KEY_PREFIX = "posts/"
 EMBED_INTERESTS_ACTION = "embed-interests"
-# The model's marker for a query. Documents get none. Interests act as queries against post documents.
-QUERY_PREFIX = "zapytanie: "
 
 _model = None
 _conn: psycopg.Connection | None = None
@@ -144,12 +142,7 @@ def embed_interests(conn: psycopg.Connection) -> int:
                     embedded_text = EXCLUDED.embedded_text,
                     updated_at    = now()
             """,
-            (
-                key,
-                _get_model().encode(QUERY_PREFIX + text, normalize_embeddings=True).tolist(),
-                settings.embedding_model,
-                text,
-            ),
+            (key, _get_model().encode(text, normalize_embeddings=True).tolist(), settings.embedding_model, text),
         )
     return len(rows)
 

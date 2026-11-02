@@ -198,7 +198,7 @@ def test_should_embed_only_interests_returned_when_invoked_with_embed_interests(
     result = app.lambda_handler({"action": "embed-interests"}, None)
 
     assert result == {"interests": 1}
-    assert model.encode.call_args_list == [call("zapytanie: Jazz: koncerty", normalize_embeddings=True)]
+    assert model.encode.call_args_list == [call("Jazz: koncerty", normalize_embeddings=True)]
     assert conn.execute.call_args_list[1] == call(ANY, ("jazz", EMBEDDING, MODEL, "Jazz: koncerty"))
 
 
