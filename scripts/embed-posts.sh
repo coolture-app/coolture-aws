@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TEMPLATE="${TEMPLATE:-.aws-sam/embeddings/template.yaml}"
+export TEMPLATE="${TEMPLATE:-.aws-sam/embeddings/template.yaml}"
 BATCH_SIZE="${BATCH_SIZE:-50}"
 
 psql_query() {
@@ -53,7 +53,7 @@ for ((i = 0; i < ${#post_ids[@]}; i += BATCH_SIZE)); do
         continue
     fi
 
-    result="$(sam local invoke PostEmbeddingFunction --template-file "$TEMPLATE" --event "$event_file")"
+    result="$(scripts/invoke-embedding.sh PostEmbeddingFunction --event "$event_file")"
     echo "$result"
     if grep -q '"itemIdentifier"' <<< "$result"; then
         failed=1
