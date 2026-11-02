@@ -209,7 +209,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         try {
             return Integer.parseInt(raw);
         } catch (NumberFormatException e) {
-            return defaultLimit;
+            throw new IllegalArgumentException("Invalid limit");
         }
     }
 }

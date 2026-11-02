@@ -3,6 +3,7 @@ package com.coolture.common.pagination;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,14 +40,50 @@ class CursorCodecTest {
     }
 
     @Test
-    void decode_whenInvalidBase64_returnsEmpty() {
-        assertTrue(CursorCodec.decode("!not-valid-base64!").isEmpty());
+    void decode_whenInvalidBase64_throws() {
+        assertThrows(IllegalArgumentException.class, () -> CursorCodec.decode("!not-valid-base64!"));
     }
 
     @Test
-    void decode_whenCorruptedJson_returnsEmpty() {
-        String base64Corrupted = java.util.Base64.getUrlEncoder().withoutPadding()
-            .encodeToString("{not-json}".getBytes());
-        assertTrue(CursorCodec.decode(base64Corrupted).isEmpty());
+    void decode_whenCorruptedJson_throws() {
+        assertThrows(IllegalArgumentException.class, () -> CursorCodec.decode(encoded("{not-json}")));
+    }
+
+    @Test
+    void decode_whenJsonIsNull_throws() {
+        assertThrows(IllegalArgumentException.class, () -> CursorCodec.decode(encoded("null")));
+    }
+
+    @Test
+    void decode_whenPayloadMissesAField_throws() {
+        assertThrows(IllegalArgumentException.class,
+            () -> CursorCodec.decode(encoded("{\"id\":\"" + UUID.randomUUID() + "\"}")));
+        assertThrows(IllegalArgumentException.class,
+            () -> CursorCodec.decode(encoded("{\"createdAt\":\"2026-10-19T12:00:00Z\"}")));
+    }
+
+    @Test
+    void decodeWithType_roundTripsAndKeepsBlankAsEmpty() {
+        record Payload(String sort, int likes) {}
+
+        assertEquals(new Payload("POPULAR", 7), CursorCodec.decode(CursorCodec.encode(new Payload("POPULAR", 7)), Payload.class).orElseThrow());
+        assertTrue(CursorCodec.decode(" ", Payload.class).isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> CursorCodec.decode("garbage", Payload.class));
+    }
+
+    @Test
+    void cursorPageWithCursorFunction_setsCursorOnlyWhenThereIsMore() {
+        CursorPage<String> more = CursorPage.of(List.of("a", "b", "c"), 2, s -> "after-" + s);
+        assertEquals(List.of("a", "b"), more.items());
+        assertTrue(more.page().hasMore());
+        assertEquals("after-b", more.page().nextCursor());
+
+        CursorPage<String> last = CursorPage.of(List.of("a", "b"), 2, s -> "after-" + s);
+        assertFalse(last.page().hasMore());
+        assertNull(last.page().nextCursor());
+    }
+
+    private static String encoded(String json) {
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(json.getBytes());
     }
 }

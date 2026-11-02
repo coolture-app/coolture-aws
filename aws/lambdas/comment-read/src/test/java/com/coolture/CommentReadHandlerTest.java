@@ -88,6 +88,17 @@ class CommentReadHandlerTest {
     }
 
     @Test
+    void handleRequest_whenLimitIsNotANumber_returns400() {
+        UUID postId = UUID.randomUUID();
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(
+            "/posts/" + postId + "/comments",
+            Map.of("limit", "abc"),
+            Map.of("postId", postId.toString()));
+
+        assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+    }
+
+    @Test
     void handleRequest_whenPostNotFound_returns404() throws Exception {
         UUID postId = UUID.randomUUID();
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(

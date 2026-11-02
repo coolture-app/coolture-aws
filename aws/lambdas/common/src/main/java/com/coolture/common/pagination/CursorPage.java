@@ -25,4 +25,13 @@ public record CursorPage<T>(List<T> items, PaginationMeta page) {
         PaginationMeta meta = new PaginationMeta(limit, hasMore, nextCursor);
         return new CursorPage<>(items, meta);
     }
+
+    public static <T> CursorPage<T> of(List<T> rows, int limit, Function<T, String> cursorOf) {
+        boolean hasMore = rows.size() > limit;
+        List<T> items = hasMore ? rows.subList(0, limit) : rows;
+
+        String nextCursor = hasMore && !items.isEmpty() ? cursorOf.apply(items.getLast()) : null;
+
+        return new CursorPage<>(items, new PaginationMeta(limit, hasMore, nextCursor));
+    }
 }
