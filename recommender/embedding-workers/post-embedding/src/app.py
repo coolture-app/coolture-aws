@@ -32,11 +32,6 @@ def _get_model():
     return _model
 
 
-def embed(text: str) -> list[float]:
-    # The model has no normalization layer, and user vectors average these, so length would act as a weight.
-    return _get_model().encode(text, normalize_embeddings=True).tolist()
-
-
 def _get_connection() -> psycopg.Connection:
     global _conn
     if _conn is None or _conn.closed:
@@ -114,7 +109,8 @@ def process_post(post_id: UUID) -> None:
         return
 
     logger.info("processing post %s: %r", post_id, post.title)
-    vector = embed(post.text)
+    # The model has no normalization layer, and user vectors average these, so length would act as a weight.
+    vector = _get_model().encode(post.text, normalize_embeddings=True).tolist()
     try:
         upsert_embedding(
             conn,
@@ -148,7 +144,12 @@ def embed_interests(conn: psycopg.Connection) -> int:
                     embedded_text = EXCLUDED.embedded_text,
                     updated_at    = now()
             """,
-            (key, embed(QUERY_PREFIX + text), settings.embedding_model, text),
+            (
+                key,
+                _get_model().encode(QUERY_PREFIX + text, normalize_embeddings=True).tolist(),
+                settings.embedding_model,
+                text,
+            ),
         )
     return len(rows)
 

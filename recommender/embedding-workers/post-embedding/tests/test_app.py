@@ -63,7 +63,7 @@ def test_should_store_embedding_of_current_post_content_when_post_exists(model, 
 
     # then
     assert result == NO_FAILURES
-    assert model.encode.call_args_list == [call("Jazz night\nLive jazz\nTagi: music, jazz", normalize_embeddings=True)]
+    assert model.encode.call_args_list == [call("Jazz night Live jazz music jazz", normalize_embeddings=True)]
     assert conn.execute.call_args_list == [
         call(ANY, (POST_ID,)),
         call(ANY, (POST_ID, EMBEDDING, MODEL)),
