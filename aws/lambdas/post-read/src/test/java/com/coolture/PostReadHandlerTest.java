@@ -7,7 +7,14 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.pagination.CursorPage;
+import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.common.security.SecurityContext;
+import com.coolture.feed.FeedMode;
+import com.coolture.feed.FeedPage;
+import com.coolture.feed.FeedRepository;
+import com.coolture.feed.FeedConfig;
+import com.coolture.feed.FeedService;
+import com.coolture.repository.PostReadRepository;
 import com.coolture.services.PostReadService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -40,7 +47,8 @@ class PostReadHandlerTest {
 
     private final PostReadService postReadService = mock(PostReadService.class);
     private final Context lambdaContext = mock(Context.class);
-    private final PostReadHandler handler = new PostReadHandler(postReadService);
+    private final FeedService feedService = mock(FeedService.class);
+    private final PostReadHandler handler = new PostReadHandler(postReadService, feedService);
 
     @BeforeEach
     void stubLambdaLogger() {
@@ -106,43 +114,6 @@ class PostReadHandlerTest {
 
         assertEquals("jazz", filters.q());
         assertEquals(List.of("music", "outdoor"), filters.tags());
-    }
-
-    @Test
-    void getRecommendations_whenRequestMatchesRecommendationsPath_thenCallsRecommendationsAndNotFeed()
-        throws Exception {
-
-        UUID callerId = UUID.randomUUID();
-
-        APIGatewayV2HTTPEvent event =
-            ApiGatewayEvents.get("/posts/recommendations");
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security
-                .when(() -> SecurityContext.getUserIdOptional(event))
-                .thenReturn(Optional.of(callerId));
-
-            when(postReadService.getRecommendations(
-                eq(callerId),
-                isNull(),
-                eq(20)
-            )).thenReturn(
-                CursorPage.of(
-                    List.of(),
-                    20,
-                    PostCardDto::id,
-                    PostCardDto::createdAt
-                )
-            );
-
-            handler.handleRequest(event, lambdaContext);
-
-            verify(postReadService)
-                .getRecommendations(callerId, null, 20);
-
-            verify(postReadService, never())
-                .getFeed(any(), any(), any(), anyInt());
-        }
     }
 
     @Test
@@ -232,20 +203,21 @@ class PostReadHandlerTest {
         throws Exception {
 
         APIGatewayV2HTTPEvent event =
-            ApiGatewayEvents.get("/posts/recommendations");
+            ApiGatewayEvents.get("/posts");
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security
                 .when(() -> SecurityContext.getUserIdOptional(event))
                 .thenReturn(Optional.empty());
 
-            when(postReadService.getRecommendations(
+            when(postReadService.getFeed(
                 isNull(),
+                any(),
                 isNull(),
                 anyInt()
             )).thenThrow(
                 new SecurityException(
-                    "Authentication is required for recommendations"
+                    "Authentication is required to filter by reaction type"
                 )
             );
 
@@ -327,6 +299,81 @@ class PostReadHandlerTest {
 
         assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
         org.junit.jupiter.api.Assertions.assertTrue(filters.getValue().includePast());
+    }
+
+    @Test
+    void getHomeFeed_whenRequested_thenCallsFeedServiceAndNotPosts() throws Exception {
+        UUID callerId = UUID.randomUUID();
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed",
+            Map.of("limit", "10", "cursor", "abc", "latitude", "54.35", "longitude", "18.65"));
+        when(feedService.getFeed(callerId, "abc", 10, 54.35, 18.65))
+            .thenReturn(new FeedPage(FeedMode.RANKED, List.of(), new PaginationMeta(10, false, null)));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.of(callerId));
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            org.junit.jupiter.api.Assertions.assertTrue(response.getBody().contains("\"mode\":\"RANKED\""));
+        }
+        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void getHomeFeed_whenNoIdentity_thenCallsFeedServiceAsGuest() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed");
+        when(feedService.getFeed(isNull(), isNull(), eq(20), isNull(), isNull()))
+            .thenReturn(new FeedPage(FeedMode.RANKED, List.of(), new PaginationMeta(20, false, null)));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
+
+            assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "limit, abc",
+        "cursor, garbage",
+        "latitude, 54.35",
+        "longitude, 18.65",
+    })
+    void getHomeFeed_whenAParameterIsInvalid_thenReturns400(String name, String value) {
+        PostReadHandler realServices = new PostReadHandler(postReadService,
+            new FeedService(mock(FeedRepository.class), FeedConfig.DEFAULTS, java.time.Clock.systemUTC(), () -> 1L));
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed", Map.of(name, value));
+
+        assertEquals(400, realServices.handleRequest(event, lambdaContext).getStatusCode());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "91, 18",
+        "54, 181",
+        "abc, 18",
+    })
+    void getHomeFeed_whenLocationIsOutOfRange_thenReturns400(String latitude, String longitude) {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed", Map.of("latitude", latitude, "longitude", longitude));
+
+        assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+        verifyNoInteractions(feedService);
+    }
+
+    @Test
+    void getFeed_whenSortByIsRecommended_thenReturns400() {
+        PostReadHandler realServices = new PostReadHandler(new PostReadService(mock(PostReadRepository.class)), feedService);
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("sortBy", "RECOMMENDED"));
+
+        assertEquals(400, realServices.handleRequest(event, lambdaContext).getStatusCode());
+    }
+
+    @Test
+    void postsRecommendations_isGoneAndNoLongerAPostId() {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/recommendations", null, Map.of("id", "recommendations"));
+
+        assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
     }
 
     @Test

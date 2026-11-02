@@ -16,6 +16,7 @@ import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
+import com.coolture.feed.FeedService;
 import com.coolture.services.PostReadService;
 
 import java.time.Instant;
@@ -28,13 +29,15 @@ import java.util.UUID;
 public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
 
     private final PostReadService service;
+    private final FeedService feedService;
 
     public PostReadHandler() {
-        this(new PostReadService());
+        this(new PostReadService(), new FeedService());
     }
 
-    PostReadHandler(PostReadService service) {
+    PostReadHandler(PostReadService service, FeedService feedService) {
         this.service = service;
+        this.feedService = feedService;
     }
 
     @Override
@@ -58,12 +61,12 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
                 return ApiResponse.ok(service.listCountryCodes());
             } else if (path.contains("/event-locations")) {
                 return getEventLocations(event);
-            } else if (path.endsWith("/posts/recommendations") || path.endsWith("/recommendations")) {
-                return getRecommendations(event, callerId);
             } else if (path.endsWith("/posts/map") || path.endsWith("/map")) {
                 return getMapMarks(event, callerId);
             } else if (isPostDetailRequest(event)) {
                 return getPostById(event, callerId);
+            } else if (path.endsWith("/feed")) {
+                return getHomeFeed(event, callerId);
             } else {
                 return getFeed(event, callerId);
             }
@@ -94,13 +97,15 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         return ApiResponse.ok(page);
     }
 
-    private APIGatewayV2HTTPResponse getRecommendations(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
+    private APIGatewayV2HTTPResponse getHomeFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
         Map<String, String> qp = getQueryParams(event);
         String cursor = qp.get("cursor");
         int limit = parseLimit(qp.get("limit"), 20);
+        Double lat = parseCoordinate(qp, "latitude", 90);
+        Double lng = parseCoordinate(qp, "longitude", 180);
+        requireFullLocation(lat, lng);
 
-        CursorPage<PostCardDto> page = service.getRecommendations(callerId, cursor, limit);
-        return ApiResponse.ok(page);
+        return ApiResponse.ok(feedService.getFeed(callerId, cursor, limit, lat, lng));
     }
 
     private APIGatewayV2HTTPResponse getFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {

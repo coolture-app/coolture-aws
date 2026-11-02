@@ -36,21 +36,6 @@ public class PostReadService {
         this.repository = repository;
     }
 
-    public CursorPage<PostCardDto> getRecommendations(UUID callerId, String cursor, int limit) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("Authentication is required for recommendations");
-        }
-
-        Optional<CursorPayload> payload = CursorCodec.decode(cursor);
-        Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
-        UUID cursorId = payload.map(CursorPayload::id).orElse(null);
-
-        int effectiveLimit = clampLimit(limit);
-        List<PostCardDto> rows = repository.findRecommendations(callerId, cursorCreatedAt, cursorId, effectiveLimit + 1);
-
-        return CursorPage.of(rows, effectiveLimit, PostCardDto::id, PostCardDto::createdAt);
-    }
-
     public CursorPage<PostCardDto> getFeed(UUID callerId, PostFeedFilters filters, String cursor, int limit) throws SQLException {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);

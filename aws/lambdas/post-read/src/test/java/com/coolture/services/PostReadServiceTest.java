@@ -36,24 +36,6 @@ class PostReadServiceTest {
     }
 
     @Test
-    void getRecommendations_whenCallerIdNull_throwsSecurityException() {
-        assertThrows(SecurityException.class, () -> service.getRecommendations(null, null, 20));
-    }
-
-    @Test
-    void getRecommendations_whenValid_callsRepository() throws SQLException {
-        UUID callerId = UUID.randomUUID();
-        when(repository.findRecommendations(eq(callerId), isNull(), isNull(), eq(21)))
-            .thenReturn(List.of());
-
-        var result = service.getRecommendations(callerId, null, 20);
-
-        assertNotNull(result);
-        assertTrue(result.items().isEmpty());
-        verify(repository).findRecommendations(eq(callerId), isNull(), isNull(), eq(21));
-    }
-
-    @Test
     void getFeed_whenParticipationFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null, null,
