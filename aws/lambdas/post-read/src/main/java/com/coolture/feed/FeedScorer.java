@@ -14,7 +14,7 @@ public final class FeedScorer {
     private static final double MILLIS_PER_DAY = Duration.ofDays(1).toMillis();
     private static final double POPULARITY_SCALE = StrictMath.log(1.0 + FeedConfig.POPULARITY_CAP);
 
-    /** Null similarity means no vector for the viewer or the post. Null meters means no location or an online post. */
+    /** Null similarity means no vector for the viewer or the post, or vectors of different models. Null meters means no location or an online post. */
     public record Facts(UUID id, Instant startsAt, int engagement, Double similarity, Double meters) {}
 
     /** The parts before weighting, kept so that explanations can be added later, and the weighted total. */

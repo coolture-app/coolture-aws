@@ -69,7 +69,7 @@ Commenting doesn't hide a post. A post liked during a session stays where it is,
 
 | Situation | Result |
 |---|---|
-| User or post has no vector | `RANKED`, similarity is neutral |
+| User or post has no vector, or their vectors come from different embedding models | `RANKED`, similarity is neutral |
 | No location, or an online post | `RANKED`, distance is neutral |
 | Guest | `RANKED`, on time, popularity and location |
 | Ranking query fails or takes over 5 seconds, or scoring throws | `200` with `mode: UPCOMING`, and a server log line with the reason |
