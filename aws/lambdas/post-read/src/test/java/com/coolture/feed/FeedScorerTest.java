@@ -40,7 +40,7 @@ class FeedScorerTest {
 
     @Test
     void score_computesEachPartFromTheFormula() {
-        FeedScorer.Facts post = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(14)), 100, 0.5, 20_000.0);
+        FeedScorer.Facts post = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(14)), 100, 0.906, 20_000.0);
 
         FeedScorer.Score score = DEFAULT.score(post, AS_OF, 7);
 
@@ -68,6 +68,33 @@ class FeedScorerTest {
 
         assertEquals(0.5, score.affinity());
         assertFalse(Double.isNaN(score.total()));
+    }
+
+    @Test
+    void affinity_spreadsTheModelsCosineRangeOverZeroToOne() {
+        assertEquals(0.0, affinityOf(FeedConfig.AFFINITY_LOW), 1e-12);
+        assertEquals(1.0, affinityOf(FeedConfig.AFFINITY_HIGH), 1e-12);
+        assertEquals(FeedConfig.NEUTRAL, affinityOf((FeedConfig.AFFINITY_LOW + FeedConfig.AFFINITY_HIGH) / 2), 1e-12);
+    }
+
+    @Test
+    void affinity_outsideTheModelsCosineRange_staysBetweenZeroAndOne() {
+        assertEquals(0.0, affinityOf(-1.0));
+        assertEquals(1.0, affinityOf(1.0));
+    }
+
+    @Test
+    void aGoodMatch_cantBeOvertakenByJitterAlone() {
+        // One user's 95th and 5th percentile cosines, measured for a new user.
+        FeedScorer scorer = new FeedScorer(FeedConfig.parse("proximity=0,time=0,popularity=0,jitter=0"));
+        double good = scorer.score(facts(UUID.randomUUID(), AS_OF, 0, 0.854, null), AS_OF, 7).total();
+        double poor = scorer.score(facts(UUID.randomUUID(), AS_OF, 0, 0.789, null), AS_OF, 7).total();
+
+        assertTrue(good - poor > FeedConfig.DEFAULTS.jitter());
+    }
+
+    private static double affinityOf(double similarity) {
+        return DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 0, similarity, null), AS_OF, 7).affinity();
     }
 
     @Test

@@ -125,8 +125,12 @@ Unit tests: `pip install -r recommender/embedding-workers/<worker>/requirements-
 
 Set the model in the `Dockerfile` and in both workers' `settings.py`, and keep it 768-dimensional or add a migration for the vector
 columns. Then re-embed in this order, because user vectors are built from the other two: interests, posts, users. Until that's done,
-nothing fails, and vectors of the same model are still compared. A post and a user on different models get affinity `0.5`, which is
-below almost every real pair with this model, so those posts sit lower in the feed until they're re-embedded.
+nothing fails, and vectors of the same model are still compared. A post and a user on different models get affinity `0.5`, the same as
+a post with no vector.
+
+The feed's affinity scale belongs to the model too. `AFFINITY_LOW` and `AFFINITY_HIGH` in `FeedConfig` cover the cosines this model gives
+between user vectors and events, with their midpoint at the median. Measure them again for a new model, or if interests start using
+a prefix, and keep in mind that a user's cosines rise as they like more posts.
 
 A new name is what marks a vector as old. A new revision, or a change to how text is encoded, isn't visible this way. Locally, use
 `make embed-posts ALL=1` for that and clear `interest_embeddings` first. There's no equivalent on AWS yet.

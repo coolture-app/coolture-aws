@@ -11,8 +11,14 @@ public record FeedConfig(double affinity, double proximity, double time, double 
 
     public static final FeedConfig DEFAULTS = new FeedConfig(0.40, 0.20, 0.25, 0.15, 0.10);
 
-    /** Used for a signal that is missing. It's the same for every post, so it can't change the order. */
+    /** Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it can't change the order. */
     public static final double NEUTRAL = 0.5;
+    /**
+     * sdadas/mmlw-roberta-base puts user and event cosines in a narrow band, so this is the part of it that affinity spreads over 0 to 1.
+     * The midpoint is the median cosine, which keeps NEUTRAL close to a typical post. Measure these again if the model changes.
+     */
+    public static final double AFFINITY_LOW = 0.786;
+    public static final double AFFINITY_HIGH = 0.946;
     public static final double PROXIMITY_SCALE_METERS = 20_000;
     public static final double TIME_SCALE_DAYS = 14;
     public static final int POPULARITY_CAP = 100;

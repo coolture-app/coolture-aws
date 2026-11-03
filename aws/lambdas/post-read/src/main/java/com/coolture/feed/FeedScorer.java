@@ -49,7 +49,8 @@ public final class FeedScorer {
         if (similarity == null || similarity.isNaN()) {
             return FeedConfig.NEUTRAL;
         }
-        return (similarity + 1) / 2;
+        double scaled = (similarity - FeedConfig.AFFINITY_LOW) / (FeedConfig.AFFINITY_HIGH - FeedConfig.AFFINITY_LOW);
+        return StrictMath.max(0, StrictMath.min(scaled, 1));
     }
 
     private static double time(Instant startsAt, Instant asOf) {
