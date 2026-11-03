@@ -84,6 +84,7 @@ def blend_user_vectors(
     return behaviour_vectors | weighted_vectors(blended)
 
 
+# Vectors of different models mean nothing together, and the result is labelled with the current model, so only its vectors are read.
 def load_interactions(
     cur: psycopg.Cursor, user_ids: list[UUID] | None
 ) -> tuple[dict[Any, np.ndarray], dict[Any, float]]:
@@ -96,10 +97,10 @@ def load_interactions(
             UNION ALL
             SELECT user_id, post_id, type, created_at FROM post_participations
         ) interactions
-        JOIN post_embeddings pe ON pe.post_id = interactions.post_id
+        JOIN post_embeddings pe ON pe.post_id = interactions.post_id AND pe.model = %(model)s
         WHERE %(users)s::uuid[] IS NULL OR interactions.user_id = ANY(%(users)s)
         """,
-        {"days": settings.engagement_window_days, "users": user_ids},
+        {"days": settings.engagement_window_days, "users": user_ids, "model": settings.embedding_model},
     )
     engagement: dict[Any, float] = defaultdict(float)
     rows = []
@@ -116,8 +117,9 @@ def load_interest_vectors(cur: psycopg.Cursor, user_ids: list[UUID] | None) -> d
         """
         SELECT i.key, i.category_key, ie.embedding::real[]
         FROM interests i
-        JOIN interest_embeddings ie ON ie.interest_key = i.key
-        """
+        JOIN interest_embeddings ie ON ie.interest_key = i.key AND ie.model = %(model)s
+        """,
+        {"model": settings.embedding_model},
     )
     interests = {key: (category_key, np.array(embedding, dtype=np.float32)) for key, category_key, embedding in cur}
     categories = weighted_vectors((category_key, vector, 1.0) for category_key, vector in interests.values())
