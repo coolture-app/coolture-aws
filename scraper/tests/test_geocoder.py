@@ -1,0 +1,159 @@
+import requests
+
+from geocoder import Geocoder
+
+
+class FakeResponse:
+    def __init__(self, hits, status=200):
+        self._hits = hits
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(str(self.status_code))
+
+    def json(self):
+        return self._hits
+
+
+class FakeSession:
+
+    def __init__(self, answers=None, error=None):
+        self.answers = answers or {}
+        self.error = error
+        self.reverse = {'address': {'postcode': '80-001'}}
+        self.queries = []
+
+    def get(self, url, params, timeout):
+        self.queries.append(params)
+        if self.error:
+            raise self.error
+        if url.endswith('/reverse'):
+            return FakeResponse(self.reverse)
+        asked = params.get('street') or params.get('q') or params['city']
+        return FakeResponse([self.answers[asked]] if asked in self.answers else [])
+
+
+def hit(lat='54.5', lon='18.5', postcode='81-350'):
+    return {'lat': lat, 'lon': lon, 'address': {'postcode': postcode}}
+
+
+def geocoder(session):
+    return Geocoder(session, 'http://nominatim.test/', sleep=lambda _: None)
+
+
+def test_street_address_wins_and_is_exact():
+    session = FakeSession({'9 Portowa': hit()})
+
+    place = geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+
+    assert (place.latitude, place.longitude, place.exact) == (54.5, 18.5, True)
+    assert len(session.queries) == 1
+
+
+def test_venue_is_tried_when_the_street_misses():
+    session = FakeSession({'Klub, Gdynia': hit()})
+
+    place = geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+
+    assert place.exact is True
+    assert session.queries[1]['q'] == 'Klub, Gdynia'
+
+
+def test_city_centre_is_the_last_resort_and_not_exact():
+    session = FakeSession({'Gdynia': hit()})
+
+    place = geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+
+    assert place.exact is False
+
+
+def test_a_hit_with_no_postal_code_takes_the_one_at_its_point():
+    session = FakeSession({'Gdynia': hit(postcode=None)})
+
+    place = geocoder(session).locate(None, None, None, 'Gdynia')
+
+    assert place.postal_code == '80-001'
+    assert session.queries[-1]['lat'] == '54.5'
+
+
+def test_a_hit_with_a_postal_code_needs_no_reverse_lookup():
+    session = FakeSession({'Gdynia': hit()})
+
+    geocoder(session).locate(None, None, None, 'Gdynia')
+
+    assert len(session.queries) == 1
+
+
+def test_no_postal_code_at_the_point_either():
+    session = FakeSession({'Gdynia': hit(postcode=None)})
+    session.reverse = {'error': 'Unable to geocode'}
+
+    assert geocoder(session).locate(None, None, None, 'Gdynia').postal_code is None
+
+
+def test_a_place_named_twice_falls_back_to_the_first_name():
+    session = FakeSession({'Sopot': hit()})
+
+    place = geocoder(session).locate(None, None, None, 'Sopot Brodwino')
+
+    assert (place.exact, session.queries[-1]['city']) == (False, 'Sopot')
+
+
+def test_nothing_found():
+    assert geocoder(FakeSession()).locate('Klub', 'Portowa', '9', 'Gdynia') is None
+
+
+def test_no_city_is_not_looked_up():
+    session = FakeSession()
+
+    assert geocoder(session).locate('Klub', 'Portowa', '9', None) is None
+    assert session.queries == []
+
+
+def test_each_address_is_asked_once():
+    session = FakeSession({'9 Portowa': hit()})
+    subject = geocoder(session)
+
+    subject.locate('Klub', 'Portowa', '9', 'Gdynia')
+    subject.locate('Klub', 'Portowa', '9', 'Gdynia')
+
+    assert len(session.queries) == 1
+
+
+def test_a_miss_is_remembered_too():
+    session = FakeSession()
+    subject = geocoder(session)
+
+    subject.locate(None, 'Portowa', '9', 'Gdynia')
+    asked = len(session.queries)
+    subject.locate(None, 'Portowa', '9', 'Gdynia')
+
+    assert len(session.queries) == asked
+
+
+def test_search_is_held_to_the_region():
+    session = FakeSession({'9 Portowa': hit()})
+
+    geocoder(session).locate(None, 'Portowa', '9', 'Gdynia')
+
+    assert session.queries[0]['countrycodes'] == 'pl'
+    assert session.queries[0]['bounded'] == 1
+    assert session.queries[0]['viewbox']
+    assert session.queries[0]['format'] == 'jsonv2'
+
+
+def test_every_request_waits_its_turn():
+    pauses = []
+    session = FakeSession()
+    subject = Geocoder(session, 'http://nominatim.test', pause_s=1.0, sleep=pauses.append)
+
+    subject.locate('Klub', 'Portowa', '9', 'Gdynia')
+
+    assert pauses == [1.0, 1.0, 1.0]
+
+
+def test_a_service_failure_finds_nothing_instead_of_stopping_the_run():
+    session = FakeSession(error=requests.ConnectionError('down'))
+
+    assert geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia') is None

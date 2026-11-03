@@ -48,9 +48,15 @@ build: build-common ## Build backend lambdas
 	@sam build --template-file aws/backend.yaml --parallel --cached
 
 test-python: ## Run Python Lambda unit tests (needs requirements-dev.txt installed)
-	@for dir in recommender/embedding-workers/post-embedding recommender/embedding-workers/user-embedding; do \
+	@for dir in recommender/embedding-workers/post-embedding recommender/embedding-workers/user-embedding scraper; do \
 		(cd $$dir && python3 -m pytest -q tests) || exit 1; \
 	done
+
+test-scraper: ## Run the scraper's unit tests (needs scraper/requirements-dev.txt installed)
+	@cd scraper && python3 -m pytest -q tests
+
+scrape: ## Import trojmiasto.pl events through the local API, needs `make local` (ARGS="--limit 20")
+	@SCRAPER_USER_ID=$${SCRAPER_USER_ID:-00000000-0000-0000-0000-00000000b07a} python3 scraper/scrape.py $(ARGS)
 
 test-post-read-db: build-common ## Run the post-read database tests against `make up`
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-read/pom.xml -Dtest=PostReadDbTest
