@@ -17,12 +17,14 @@ else
     [[ -n "$model" ]] || { echo "No EMBEDDING_MODEL in $DOCKERFILE." >&2; exit 1; }
     stale_filter="AND (pe.model IS DISTINCT FROM '$model' OR p.last_modified_at > pe.updated_at)"
     [[ -n "${ALL:-}" ]] && stale_filter=""
-    mapfile -t post_ids < <(psql_query "
+    # Assigned first, because set -e can't see a command that fails inside <(...).
+    stale_posts="$(psql_query "
         SELECT p.id
         FROM posts p
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
         WHERE p.status <> 'DELETED' AND p.deleted_at IS NULL $stale_filter
-        ORDER BY p.created_at")
+        ORDER BY p.created_at")"
+    mapfile -t post_ids < <(printf '%s' "$stale_posts")
 fi
 
 if [[ ${#post_ids[@]} -eq 0 ]]; then
