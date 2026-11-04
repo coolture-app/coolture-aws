@@ -1,7 +1,9 @@
 import json
 from datetime import date, time
 
-from trojmiasto import clean_description, parse_event_page, parse_listing
+import requests
+
+from trojmiasto import Site, clean_description, parse_event_page, parse_listing
 
 
 def listing_item(title='Koncert testowy', href='/imprezy/Koncert-imp1.html', hour='Godz.19:30', city='Gdańsk,',
@@ -187,3 +189,50 @@ def test_unglueing_leaves_initials_and_short_brand_names():
 
 def test_block_description_decodes_entities():
     assert clean_description('Rock &amp; roll') == 'Rock & roll'
+
+
+def listing_html(*numbers):
+    return ''.join(f'<div class="event__item"><a class="event__item__title" href="/{n}">E{n}</a></div>'
+                   for n in numbers)
+
+
+class FakeSessionResponse:
+    def __init__(self, text):
+        self.text = text
+
+    def raise_for_status(self):
+        pass
+
+
+class FakeListingSession:
+
+    def __init__(self, pages):
+        self.pages = pages
+        self.requested = []
+
+    def get(self, url, params, timeout):
+        self.requested.append(params['strona'])
+        return FakeSessionResponse(self.pages[min(params['strona'], len(self.pages) - 1)])
+
+
+def test_listing_stops_when_a_page_adds_nothing():
+    session = FakeListingSession([listing_html(1, 2), listing_html(2, 3)])
+
+    urls = [i.url for i in Site(session, sleep=lambda _: None).listing_items()]
+
+    assert [u.rsplit('/', 1)[1] for u in urls] == ['1', '2', '3']
+    assert session.requested == [0, 1, 2]
+
+
+def test_empty_listing_ends_at_once():
+    session = FakeListingSession([''])
+
+    assert list(Site(session, sleep=lambda _: None).listing_items()) == []
+
+
+def test_event_page_failure_gives_nothing():
+    class Failing:
+        def get(self, url, params, timeout):
+            raise requests.ConnectionError('down')
+
+    assert Site(Failing(), sleep=lambda _: None).event_page('https://site.test/1') is None

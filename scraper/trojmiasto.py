@@ -1,15 +1,22 @@
 import html
 import json
+import logging
 import re
+import time as clock
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from urllib.parse import urljoin
 
+import requests
 from bs4 import BeautifulSoup
+
+log = logging.getLogger(__name__)
 
 SITE_URL = 'https://www.trojmiasto.pl'
 LISTING_URL = f'{SITE_URL}/imprezy/dni,30dni.html'
 LISTING_PAGE_PARAMETER = 'strona'
+SITE_PAUSE_S = 1.0
 
 HOUR = re.compile(r'godz\.\s*(\d{1,2})[:.](\d{2})', re.IGNORECASE)
 BUILDING_NUMBER = re.compile(r'^(?P<street>.*\S)\s+(?P<number>\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)?)$')
@@ -176,3 +183,37 @@ def parse_event_page(page_html: str) -> EventPage | None:
         # startDate is always midnight, and the name holds the hour.
         hour=parse_hour(block.get('name') if isinstance(block.get('name'), str) else None),
     )
+
+
+class Site:
+
+    def __init__(self, session: requests.Session, sleep: Callable[[float], None] = clock.sleep) -> None:
+        self._session = session
+        self._sleep = sleep
+
+    def _get(self, url: str, params: dict | None = None) -> str:
+        self._sleep(SITE_PAUSE_S)
+        response = self._session.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        return response.text
+
+    def listing_items(self) -> Iterator[ListingItem]:
+        """Walks the listing until a page adds nothing, because the site repeats its last page past the end."""
+        seen: set[str] = set()
+        page_number = 0
+        while True:
+            page_html = self._get(LISTING_URL, {LISTING_PAGE_PARAMETER: page_number})
+            items = [i for i in parse_listing(page_html) if i.url not in seen]
+            if not items:
+                return
+            for item in items:
+                seen.add(item.url)
+                yield item
+            page_number += 1
+
+    def event_page(self, url: str) -> EventPage | None:
+        try:
+            return parse_event_page(self._get(url))
+        except requests.RequestException as error:
+            log.warning('Event page unread url=%s error=%s', url, error)
+            return None

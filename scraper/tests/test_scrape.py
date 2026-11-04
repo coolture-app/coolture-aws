@@ -1,10 +1,8 @@
 import json
 from datetime import date, datetime, time, timezone
 
-import requests
-
 from geocoder import Place
-from scrape import Site, run
+from scrape import run
 from trojmiasto import EventPage, ListingItem
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -170,50 +168,3 @@ def test_dry_run_prints_posts_and_needs_no_api(capsys):
 
     assert stats['created'] == 1
     assert json.loads(capsys.readouterr().out)['title'] == 'Wydarzenie 1'
-
-
-def listing_html(*numbers):
-    return ''.join(f'<div class="event__item"><a class="event__item__title" href="/{n}">E{n}</a></div>'
-                   for n in numbers)
-
-
-class FakeSessionResponse:
-    def __init__(self, text):
-        self.text = text
-
-    def raise_for_status(self):
-        pass
-
-
-class FakeListingSession:
-
-    def __init__(self, pages):
-        self.pages = pages
-        self.requested = []
-
-    def get(self, url, params, timeout):
-        self.requested.append(params['strona'])
-        return FakeSessionResponse(self.pages[min(params['strona'], len(self.pages) - 1)])
-
-
-def test_listing_stops_when_a_page_adds_nothing():
-    session = FakeListingSession([listing_html(1, 2), listing_html(2, 3)])
-
-    urls = [i.url for i in Site(session, sleep=lambda _: None).listing_items()]
-
-    assert [u.rsplit('/', 1)[1] for u in urls] == ['1', '2', '3']
-    assert session.requested == [0, 1, 2]
-
-
-def test_empty_listing_ends_at_once():
-    session = FakeListingSession([''])
-
-    assert list(Site(session, sleep=lambda _: None).listing_items()) == []
-
-
-def test_event_page_failure_gives_nothing():
-    class Failing:
-        def get(self, url, params, timeout):
-            raise requests.ConnectionError('down')
-
-    assert Site(Failing(), sleep=lambda _: None).event_page('https://site.test/1') is None

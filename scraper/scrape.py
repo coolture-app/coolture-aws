@@ -3,57 +3,20 @@ import json
 import logging
 import os
 import sys
-import time
 from collections import Counter
-from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 
 import requests
 
-import trojmiasto
 from api import ApiError, CooltureApi
 from geocoder import DEFAULT_URL, Geocoder
 from posts import build_post, starts_at
+from trojmiasto import Site
 
 log = logging.getLogger('scraper')
 
 USER_AGENT = 'coolture-scraper/1.0 (+https://github.com/coolture-app/coolture-aws)'
-SITE_PAUSE_S = 1.0
 DEFAULT_API_URL = 'http://localhost:3000'
-
-
-class Site:
-
-    def __init__(self, session: requests.Session, sleep: Callable[[float], None] = time.sleep) -> None:
-        self._session = session
-        self._sleep = sleep
-
-    def _get(self, url: str, params: dict | None = None) -> str:
-        self._sleep(SITE_PAUSE_S)
-        response = self._session.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        return response.text
-
-    def listing_items(self) -> Iterator[trojmiasto.ListingItem]:
-        """Walks the listing until a page adds nothing, because the site repeats its last page past the end."""
-        seen: set[str] = set()
-        page_number = 0
-        while True:
-            page_html = self._get(trojmiasto.LISTING_URL, {trojmiasto.LISTING_PAGE_PARAMETER: page_number})
-            items = [i for i in trojmiasto.parse_listing(page_html) if i.url not in seen]
-            if not items:
-                return
-            for item in items:
-                seen.add(item.url)
-                yield item
-            page_number += 1
-
-    def event_page(self, url: str) -> trojmiasto.EventPage | None:
-        try:
-            return trojmiasto.parse_event_page(self._get(url))
-        except requests.RequestException as error:
-            log.warning('Event page unread url=%s error=%s', url, error)
-            return None
 
 
 def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, now: datetime, limit: int | None) -> Counter:

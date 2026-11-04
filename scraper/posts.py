@@ -3,7 +3,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from geocoder import Place
-from trojmiasto import LOWER, EventPage, ListingItem
+from trojmiasto import EventPage, ListingItem
 
 WARSAW = ZoneInfo('Europe/Warsaw')
 NO_HOUR = time(12, 0)
@@ -16,7 +16,7 @@ VENUE_MAX = 64
 BUILDING_NUMBER_MAX = 16
 ADDRESS_MAX = 128
 POSTAL_CODE_MAX = 16
-SENTENCE_END = re.compile(rf'[{LOWER}]{{3}}[.!?]\s')
+SENTENCE_END = re.compile(r'[a-ząćęłńóśźż]{3}[.!?]\s')
 
 
 def cut(text: str, limit: int) -> str:
