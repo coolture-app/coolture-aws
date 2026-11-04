@@ -49,6 +49,10 @@ def utc_now() -> datetime:
 class DryRun:
     """Takes the place of the API, and prints the posts instead of sending them."""
 
+    def __init__(self) -> None:
+        # A Windows pipe defaults to a code page, which can't hold an emoji in a title.
+        sys.stdout.reconfigure(encoding='utf-8')
+
     def existing_event_urls(self) -> set[str]:
         return set()
 

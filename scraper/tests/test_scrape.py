@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import sys
@@ -232,6 +233,16 @@ def test_dry_run_prints_posts_and_needs_no_api(capsys):
 
     assert stats['created'] == 1
     assert json.loads(capsys.readouterr().out)['title'] == 'Wydarzenie 1'
+
+
+def test_dry_run_prints_an_emoji_through_a_code_page_pipe(monkeypatch):
+    pipe = io.TextIOWrapper(io.BytesIO(), encoding='cp1250')
+    monkeypatch.setattr(sys, 'stdout', pipe)
+
+    DryRun().create_post({'title': 'Koncert 😀'})
+
+    pipe.flush()
+    assert json.loads(pipe.buffer.getvalue().decode('utf-8'))['title'] == 'Koncert 😀'
 
 
 def test_a_geocoder_failure_keeps_the_totals_and_creates_nothing_more():
