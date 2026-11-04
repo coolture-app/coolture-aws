@@ -1,7 +1,10 @@
+from datetime import datetime, timezone
+
 import pytest
 import requests
 
-from geocoder import Geocoder, GeocoderUnavailable
+from geocoder import Geocoder, GeocoderUnavailable, Place
+from trojmiasto import Event
 
 
 class FakeResponse:
@@ -43,10 +46,16 @@ def geocoder(session):
     return Geocoder(session, 'http://nominatim.test/', sleep=lambda _: None)
 
 
+def event(venue, street, building_number, city):
+    return Event(url='https://site.test/1', title='Koncert', category=None, city=city, venue=venue, street=street,
+                 building_number=building_number, postal_code=None, online=False, description='Opis.',
+                 start=datetime(2026, 11, 5, tzinfo=timezone.utc), end=None)
+
+
 def test_street_address_wins_and_is_exact():
     session = FakeSession({'9 Portowa': hit()})
 
-    place = geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+    place = geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
     assert (place.latitude, place.longitude, place.exact) == (54.5, 18.5, True)
     assert len(session.queries) == 1
@@ -55,7 +64,7 @@ def test_street_address_wins_and_is_exact():
 def test_venue_is_tried_when_the_street_misses():
     session = FakeSession({'Klub, Gdynia': hit()})
 
-    place = geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+    place = geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
     assert place.exact is True
     assert session.queries[1]['q'] == 'Klub, Gdynia'
@@ -64,51 +73,65 @@ def test_venue_is_tried_when_the_street_misses():
 def test_city_centre_is_the_last_resort_and_not_exact():
     session = FakeSession({'Gdynia': hit()})
 
-    place = geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+    place = geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
     assert place.exact is False
 
 
-def test_a_hit_with_no_postal_code_takes_the_one_at_its_point():
-    session = FakeSession({'Gdynia': hit(postcode=None)})
-
-    place = geocoder(session).locate(None, None, None, 'Gdynia')
-
-    assert place.postal_code == '80-001'
-    assert session.queries[-1]['lat'] == '54.5'
-
-
-def test_a_hit_with_a_postal_code_needs_no_reverse_lookup():
+def test_a_hit_keeps_its_own_postal_code_and_asks_nothing_more():
     session = FakeSession({'Gdynia': hit()})
 
-    geocoder(session).locate(None, None, None, 'Gdynia')
+    assert geocoder(session).locate(event(None, None, None, 'Gdynia')).postal_code == '81-350'
+    assert len(session.queries) == 1
+
+
+def test_a_hit_with_no_postal_code_asks_nothing_more_by_itself():
+    session = FakeSession({'Gdynia': hit(postcode=None)})
+
+    assert geocoder(session).locate(event(None, None, None, 'Gdynia')).postal_code is None
+    assert len(session.queries) == 1
+
+
+def test_postcode_at_asks_at_the_point_of_the_place():
+    session = FakeSession()
+
+    assert geocoder(session).postcode_at(Place(54.5, 18.5, None, exact=False)) == '80-001'
+    assert (session.queries[0]['lat'], session.queries[0]['lon']) == (54.5, 18.5)
+
+
+def test_postcode_at_asks_once_for_a_place():
+    session = FakeSession()
+    subject = geocoder(session)
+
+    subject.postcode_at(Place(54.5, 18.5, None, exact=False))
+    subject.postcode_at(Place(54.5, 18.5, None, exact=False))
 
     assert len(session.queries) == 1
 
 
 def test_no_postal_code_at_the_point_either():
-    session = FakeSession({'Gdynia': hit(postcode=None)})
+    session = FakeSession()
     session.reverse = {'error': 'Unable to geocode'}
 
-    assert geocoder(session).locate(None, None, None, 'Gdynia').postal_code is None
+    assert geocoder(session).postcode_at(Place(54.5, 18.5, None, exact=False)) is None
 
 
 def test_a_place_named_twice_falls_back_to_the_first_name():
     session = FakeSession({'Sopot': hit()})
 
-    place = geocoder(session).locate(None, None, None, 'Sopot Brodwino')
+    place = geocoder(session).locate(event(None, None, None, 'Sopot Brodwino'))
 
     assert (place.exact, session.queries[-1]['city']) == (False, 'Sopot')
 
 
 def test_nothing_found():
-    assert geocoder(FakeSession()).locate('Klub', 'Portowa', '9', 'Gdynia') is None
+    assert geocoder(FakeSession()).locate(event('Klub', 'Portowa', '9', 'Gdynia')) is None
 
 
 def test_no_city_is_not_looked_up():
     session = FakeSession()
 
-    assert geocoder(session).locate('Klub', 'Portowa', '9', None) is None
+    assert geocoder(session).locate(event('Klub', 'Portowa', '9', None)) is None
     assert session.queries == []
 
 
@@ -116,8 +139,8 @@ def test_each_address_is_asked_once():
     session = FakeSession({'9 Portowa': hit()})
     subject = geocoder(session)
 
-    subject.locate('Klub', 'Portowa', '9', 'Gdynia')
-    subject.locate('Klub', 'Portowa', '9', 'Gdynia')
+    subject.locate(event('Klub', 'Portowa', '9', 'Gdynia'))
+    subject.locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
     assert len(session.queries) == 1
 
@@ -126,9 +149,9 @@ def test_a_miss_is_remembered_too():
     session = FakeSession()
     subject = geocoder(session)
 
-    subject.locate(None, 'Portowa', '9', 'Gdynia')
+    subject.locate(event(None, 'Portowa', '9', 'Gdynia'))
     asked = len(session.queries)
-    subject.locate(None, 'Portowa', '9', 'Gdynia')
+    subject.locate(event(None, 'Portowa', '9', 'Gdynia'))
 
     assert len(session.queries) == asked
 
@@ -136,7 +159,7 @@ def test_a_miss_is_remembered_too():
 def test_search_is_held_to_the_region():
     session = FakeSession({'9 Portowa': hit()})
 
-    geocoder(session).locate(None, 'Portowa', '9', 'Gdynia')
+    geocoder(session).locate(event(None, 'Portowa', '9', 'Gdynia'))
 
     assert session.queries[0]['countrycodes'] == 'pl'
     assert session.queries[0]['bounded'] == 1
@@ -149,7 +172,7 @@ def test_every_request_waits_its_turn():
     session = FakeSession()
     subject = Geocoder(session, 'http://nominatim.test', pause_s=1.0, sleep=pauses.append)
 
-    subject.locate('Klub', 'Portowa', '9', 'Gdynia')
+    subject.locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
     assert pauses == [1.0, 1.0, 1.0]
 
@@ -158,7 +181,7 @@ def test_a_service_failure_stops_the_run_instead_of_finding_nothing():
     session = FakeSession(error=requests.ConnectionError('down'))
 
     with pytest.raises(GeocoderUnavailable):
-        geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+        geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
 
 def test_a_throttle_on_a_street_does_not_fall_back_to_the_city_centre():
@@ -166,7 +189,7 @@ def test_a_throttle_on_a_street_does_not_fall_back_to_the_city_centre():
     session.get = lambda url, params, timeout: FakeResponse([], status=429)
 
     with pytest.raises(GeocoderUnavailable):
-        geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+        geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
 
 def test_a_failed_request_is_not_remembered():
@@ -174,25 +197,17 @@ def test_a_failed_request_is_not_remembered():
     subject = geocoder(session)
 
     with pytest.raises(GeocoderUnavailable):
-        subject.locate(None, 'Portowa', '9', 'Gdynia')
+        subject.locate(event(None, 'Portowa', '9', 'Gdynia'))
     session.error = None
 
-    assert subject.locate(None, 'Portowa', '9', 'Gdynia').exact is True
+    assert subject.locate(event(None, 'Portowa', '9', 'Gdynia')).exact is True
 
 
 def test_a_failure_of_the_reverse_lookup_stops_the_run_too():
-    session = FakeSession({'Gdynia': hit(postcode=None)})
-    real_get = session.get
-
-    def fail_on_reverse(url, params, timeout):
-        if url.endswith('/reverse'):
-            raise requests.Timeout('slow')
-        return real_get(url, params, timeout)
-
-    session.get = fail_on_reverse
+    session = FakeSession(error=requests.Timeout('slow'))
 
     with pytest.raises(GeocoderUnavailable):
-        geocoder(session).locate(None, None, None, 'Gdynia')
+        geocoder(session).postcode_at(Place(54.5, 18.5, None, exact=False))
 
 
 def test_a_body_that_is_not_json_means_the_service_could_not_be_asked():
@@ -204,7 +219,7 @@ def test_a_body_that_is_not_json_means_the_service_could_not_be_asked():
     session.get = lambda url, params, timeout: NotJson([])
 
     with pytest.raises(GeocoderUnavailable):
-        geocoder(session).locate(None, 'Portowa', '9', 'Gdynia')
+        geocoder(session).locate(event(None, 'Portowa', '9', 'Gdynia'))
 
 
 def test_an_answer_of_the_wrong_shape_means_the_service_could_not_be_asked():
@@ -212,4 +227,4 @@ def test_an_answer_of_the_wrong_shape_means_the_service_could_not_be_asked():
     session.get = lambda url, params, timeout: FakeResponse({'error': 'Bad request'})
 
     with pytest.raises(GeocoderUnavailable):
-        geocoder(session).locate(None, 'Portowa', '9', 'Gdynia')
+        geocoder(session).locate(event(None, 'Portowa', '9', 'Gdynia'))

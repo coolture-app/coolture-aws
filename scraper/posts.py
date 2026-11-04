@@ -1,12 +1,9 @@
 import re
-from datetime import datetime, time, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 from geocoder import Place
-from trojmiasto import EventPage, ListingItem
+from trojmiasto import Event
 
-WARSAW = ZoneInfo('Europe/Warsaw')
-NO_HOUR = time(12, 0)
 COUNTRY = 'POL'
 
 TITLE_MAX = 128
@@ -33,69 +30,38 @@ def cut_description(text: str) -> str:
     return head[:end] if end >= DESCRIPTION_MAX // 2 else cut(text, DESCRIPTION_MAX)
 
 
-def starts_at(item: ListingItem, page: EventPage) -> datetime | None:
-    # The listing has the date of this showing, and a page can cover several.
-    day = item.start_date or page.start_date
-    return datetime.combine(day, item.hour or page.hour or NO_HOUR, tzinfo=WARSAW) if day else None
-
-
-def _ends_at(page: EventPage, start: datetime) -> datetime | None:
-    if page.end is None:
-        return None
-    end = page.end if page.end.tzinfo else page.end.replace(tzinfo=WARSAW)
-    # A multi-day event gives only its last day, as midnight, so it runs until that day ends.
-    if end.timetz().replace(tzinfo=None) == time(0, 0):
-        end = end + timedelta(days=1) - timedelta(minutes=1)
-    return end if end > start else None
-
-
-def _description(item: ListingItem, page: EventPage) -> str:
-    if page.description:
-        return cut_description(page.description)
-    facts = ', '.join(part for part in (item.title, page.venue or item.venue, item.city) if part)
-    return cut_description(f'{item.category.capitalize()}: {facts}.' if item.category else f'{facts}.')
-
-
 def _iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
-def _location(item: ListingItem, page: EventPage, place: Place, postal_code: str) -> dict:
+def _location(event: Event, place: Place, postal_code: str) -> dict:
     location = {
         'countryCode': COUNTRY,
-        'city': cut(item.city, ADDRESS_MAX),
+        'city': cut(event.city, ADDRESS_MAX),
         'postalCode': postal_code[:POSTAL_CODE_MAX],
         'coordinates': {'latitude': place.latitude, 'longitude': place.longitude},
     }
-    if page.venue or item.venue:
-        location['venueName'] = cut(page.venue or item.venue, VENUE_MAX)
-    if page.street:
-        location['street'] = cut(page.street, ADDRESS_MAX)
-    if page.building_number:
-        location['buildingNum'] = page.building_number[:BUILDING_NUMBER_MAX]
+    if event.venue:
+        location['venueName'] = cut(event.venue, VENUE_MAX)
+    if event.street:
+        location['street'] = cut(event.street, ADDRESS_MAX)
+    if event.building_number:
+        location['buildingNum'] = event.building_number[:BUILDING_NUMBER_MAX]
     return location
 
 
-def build_post(item: ListingItem, page: EventPage, place: Place | None) -> dict | None:
-    # An event held in a place is left out rather than sent as ONLINE, which would hide it from the proximity signal.
-    start = starts_at(item, page)
+def to_post(event: Event, place: Place | None, postal_code: str | None) -> dict:
     post = {
-        'title': cut(item.title, TITLE_MAX),
-        'description': _description(item, page),
-        'eventUrl': item.url,
-        'startsAt': _iso(start),
-        'tags': [cut(tag, TAG_MAX) for tag in item.category.split(', ')] if item.category else [],
-        'type': 'ONLINE' if page.online else 'OFFLINE',
+        'title': cut(event.title, TITLE_MAX),
+        'description': cut_description(event.description),
+        'eventUrl': event.url,
+        'startsAt': _iso(event.start),
+        'tags': [cut(tag, TAG_MAX) for tag in event.category.split(', ')] if event.category else [],
+        'type': 'ONLINE' if event.online else 'OFFLINE',
         'visibility': 'PUBLIC',
     }
-
-    end = _ends_at(page, start)
-    if end is not None:
-        post['endsAt'] = _iso(end)
-
-    if not page.online:
-        postal_code = page.postal_code or (place.postal_code if place else None)
-        if place is None or postal_code is None or not item.city:
-            return None
-        post['location'] = _location(item, page, place, postal_code)
+    if event.end is not None:
+        post['endsAt'] = _iso(event.end)
+    if place is not None and postal_code:
+        post['location'] = _location(event, place, postal_code)
     return post

@@ -1,10 +1,10 @@
 import json
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 
 import pytest
 import requests
 
-from trojmiasto import Site, clean_description, parse_event_page, parse_listing
+from trojmiasto import EventPage, ListingItem, Site, clean_description, merge, parse_event_page, parse_listing
 
 
 def listing_item(title='Koncert testowy', href='/imprezy/Koncert-imp1.html', hour='Godz.19:30', city='Gdańsk,',
@@ -257,9 +257,95 @@ def test_empty_listing_ends_at_once():
     assert list(Site(session, sleep=lambda _: None).listing_items()) == []
 
 
-def test_event_page_failure_gives_nothing():
+def listed(**overrides):
+    fields = dict(url='https://www.trojmiasto.pl/imprezy/x-imp1.html', title='Koncert', category='koncerty',
+                  city='Gdańsk', venue=None, start_date=None, hour=time(19, 0))
+    return ListingItem(**{**fields, **overrides})
+
+
+def read_page(**overrides):
+    fields = dict(start_date=date(2026, 11, 5), end=None, online=False, description='Opis wydarzenia.',
+                  venue='Klub', street='Portowa', building_number='9', postal_code='81-350', hour=None)
+    return EventPage(**{**fields, **overrides})
+
+
+def test_merge_takes_the_address_from_the_page_and_the_rest_from_the_listing():
+    event = merge(listed(), read_page())
+
+    assert (event.url, event.title, event.category, event.city) \
+        == ('https://www.trojmiasto.pl/imprezy/x-imp1.html', 'Koncert', 'koncerty', 'Gdańsk')
+    assert (event.venue, event.street, event.building_number, event.postal_code) == ('Klub', 'Portowa', '9', '81-350')
+    assert event.description == 'Opis wydarzenia.'
+    assert event.online is False
+
+
+def test_start_is_warsaw_time():
+    assert merge(listed(), read_page()).start.astimezone(timezone.utc).hour == 18
+
+
+def test_hour_falls_back_to_the_page_then_to_noon():
+    assert merge(listed(hour=None), read_page(hour=time(20, 15))).start.hour == 20
+    assert merge(listed(hour=None), read_page()).start.hour == 12
+
+
+def test_listing_date_wins_because_a_page_can_cover_several_showings():
+    assert merge(listed(start_date=date(2026, 11, 20)), read_page()).start.day == 20
+
+
+def test_date_from_the_listing_alone():
+    assert merge(listed(start_date=date(2026, 11, 20)), read_page(start_date=None)).start.day == 20
+
+
+def test_no_date_anywhere_gives_no_event():
+    assert merge(listed(), read_page(start_date=None)) is None
+
+
+def test_theatre_event_takes_its_venue_from_the_listing():
+    theatre = read_page(start_date=None, venue=None, street=None, building_number=None, postal_code=None)
+
+    assert merge(listed(venue='Teatr', start_date=date(2026, 11, 20)), theatre).venue == 'Teatr'
+
+
+def test_page_venue_wins_over_the_listing():
+    assert merge(listed(venue='Teatr'), read_page()).venue == 'Klub'
+
+
+def test_multi_day_event_runs_to_the_end_of_its_last_day():
+    end = datetime.fromisoformat('2026-11-08T00:00:00+01:00')
+
+    assert merge(listed(), read_page(end=end)).end.astimezone(timezone.utc) \
+        == datetime(2026, 11, 8, 22, 59, tzinfo=timezone.utc)
+
+
+def test_end_before_the_start_is_dropped():
+    end = datetime.fromisoformat('2026-11-05T10:00:00+01:00')
+
+    assert merge(listed(), read_page(end=end)).end is None
+
+
+def test_empty_description_is_built_from_the_facts():
+    assert merge(listed(), read_page(description='')).description == 'Koncerty: Koncert, Klub, Gdańsk.'
+
+
+def test_page_failure_gives_no_event():
     class Failing:
         def get(self, url, params, timeout):
             raise requests.ConnectionError('down')
 
-    assert Site(Failing(), sleep=lambda _: None).event_page('https://site.test/1') is None
+    assert Site(Failing(), sleep=lambda _: None).event(listed()) is None
+
+
+def test_page_with_nothing_on_it_gives_no_event():
+    session = FakeListingSession([])
+    session.get = lambda url, params, timeout: FakeSessionResponse('<html></html>')
+
+    assert Site(session, sleep=lambda _: None).event(listed()) is None
+
+
+def test_a_read_page_gives_the_merged_event():
+    session = FakeListingSession([])
+    session.get = lambda url, params, timeout: FakeSessionResponse(event_page())
+
+    event = Site(session, sleep=lambda _: None).event(listed())
+
+    assert (event.street, event.start.day, event.start.hour) == ('Portowa', 5, 19)

@@ -1,28 +1,23 @@
-from datetime import date, datetime, time, timezone
+from datetime import datetime, timezone
 
 import pytest
 
 from geocoder import Place
-from posts import DESCRIPTION_MAX, VENUE_MAX, build_post, cut, cut_description, starts_at
-from trojmiasto import EventPage, ListingItem
+from posts import DESCRIPTION_MAX, VENUE_MAX, cut, cut_description, to_post
+from trojmiasto import WARSAW, Event
 
 PLACE = Place(54.35, 18.65, '80-001', exact=True)
 
 
-def item(**overrides):
+def event(**overrides):
     fields = dict(url='https://www.trojmiasto.pl/imprezy/x-imp1.html', title='Koncert', category='koncerty',
-                  city='Gdańsk', venue=None, start_date=None, hour=time(19, 0))
-    return ListingItem(**{**fields, **overrides})
-
-
-def page(**overrides):
-    fields = dict(start_date=date(2026, 11, 5), end=None, online=False, description='Opis wydarzenia.',
-                  venue='Klub', street='Portowa', building_number='9', postal_code='81-350', hour=None)
-    return EventPage(**{**fields, **overrides})
+                  city='Gdańsk', venue='Klub', street='Portowa', building_number='9', postal_code='81-350',
+                  online=False, description='Opis wydarzenia.', start=datetime(2026, 11, 5, 19, 0, tzinfo=WARSAW), end=None)
+    return Event(**{**fields, **overrides})
 
 
 def test_offline_post_matches_create_post_request():
-    assert build_post(item(), page(), PLACE) == {
+    assert to_post(event(), PLACE, '81-350') == {
         'title': 'Koncert',
         'description': 'Opis wydarzenia.',
         'eventUrl': 'https://www.trojmiasto.pl/imprezy/x-imp1.html',
@@ -43,86 +38,47 @@ def test_offline_post_matches_create_post_request():
 
 
 def test_start_is_warsaw_time_in_summer_too():
-    assert build_post(item(), page(start_date=date(2027, 7, 1)), PLACE)['startsAt'] == '2027-07-01T17:00:00Z'
+    summer = event(start=datetime(2027, 7, 1, 19, 0, tzinfo=WARSAW))
+
+    assert to_post(summer, PLACE, '81-350')['startsAt'] == '2027-07-01T17:00:00Z'
 
 
-def test_hour_falls_back_to_the_page_then_to_noon():
-    assert starts_at(item(hour=None), page(hour=time(20, 15))).hour == 20
-    assert starts_at(item(hour=None), page()).hour == 12
+def test_end_is_sent_in_utc():
+    post = to_post(event(end=datetime(2026, 11, 5, 21, 0, tzinfo=WARSAW)), PLACE, '81-350')
+
+    assert post['endsAt'] == '2026-11-05T20:00:00Z'
 
 
-def test_listing_date_wins_because_a_page_can_cover_several_showings():
-    assert starts_at(item(start_date=date(2026, 11, 20)), page()).day == 20
-
-
-def test_date_from_the_listing_alone():
-    assert starts_at(item(start_date=date(2026, 11, 20)), page(start_date=None)).day == 20
-
-
-def test_no_date_anywhere():
-    assert starts_at(item(), page(start_date=None)) is None
-
-
-def test_theatre_event_takes_its_venue_from_the_listing():
-    theatre = page(start_date=None, venue=None, street=None, building_number=None, postal_code=None)
-
-    post = build_post(item(venue='Teatr', start_date=date(2026, 11, 20)), theatre, PLACE)
-
-    assert post['location']['venueName'] == 'Teatr'
-    assert post['location']['postalCode'] == '80-001'
+def test_no_end_is_not_sent():
+    assert 'endsAt' not in to_post(event(), PLACE, '81-350')
 
 
 def test_online_post_has_no_location():
-    post = build_post(item(), page(online=True), None)
+    post = to_post(event(online=True), None, None)
 
     assert post['type'] == 'ONLINE'
     assert 'location' not in post
 
 
-def test_offline_event_with_no_place_is_left_out_not_sent_as_online():
-    assert build_post(item(), page(), None) is None
+def test_values_a_venue_has_not_given_are_left_out_of_the_location():
+    post = to_post(event(venue=None, street=None, building_number=None), PLACE, '81-350')
 
-
-def test_postal_code_falls_back_to_the_geocoder():
-    post = build_post(item(), page(postal_code=None), PLACE)
-
-    assert post['location']['postalCode'] == '80-001'
-
-
-def test_no_postal_code_anywhere_is_left_out():
-    assert build_post(item(), page(postal_code=None), Place(54.3, 18.6, None, exact=True)) is None
-
-
-def test_multi_day_event_runs_to_the_end_of_its_last_day():
-    end = datetime.fromisoformat('2026-11-08T00:00:00+01:00')
-
-    assert build_post(item(), page(end=end), PLACE)['endsAt'] == '2026-11-08T22:59:00Z'
-
-
-def test_end_before_the_start_is_dropped():
-    end = datetime.fromisoformat('2026-11-05T10:00:00+01:00')
-
-    assert 'endsAt' not in build_post(item(), page(end=end), PLACE)
-
-
-def test_empty_description_is_built_from_the_facts():
-    assert build_post(item(), page(description=''), PLACE)['description'] == 'Koncerty: Koncert, Klub, Gdańsk.'
+    assert set(post['location']) == {'countryCode', 'city', 'postalCode', 'coordinates'}
 
 
 def test_no_tag_when_there_is_no_category():
-    assert build_post(item(category=None), page(), PLACE)['tags'] == []
+    assert to_post(event(category=None), PLACE, '81-350')['tags'] == []
 
 
 def test_category_with_a_comma_gives_separate_tags():
-    assert build_post(item(category='sport, rekreacja'), page(), PLACE)['tags'] == ['sport', 'rekreacja']
+    assert to_post(event(category='sport, rekreacja'), PLACE, '81-350')['tags'] == ['sport', 'rekreacja']
 
 
 def test_long_values_stay_within_the_api_limits():
-    long_item = item(title='słowo ' * 60, category='kategoria ' * 10, city='miasto ' * 40)
-    long_page = page(venue='nazwa ' * 30, street='ulica ' * 40, building_number='1' * 30,
-                     postal_code='8' * 30, description='zdanie ' * 400)
+    long_event = event(title='słowo ' * 60, category='kategoria ' * 10, city='miasto ' * 40, venue='nazwa ' * 30,
+                       street='ulica ' * 40, building_number='1' * 30, description='zdanie ' * 400)
 
-    post = build_post(long_item, long_page, PLACE)
+    post = to_post(long_event, PLACE, '8' * 30)
 
     assert len(post['title']) <= 128
     assert len(post['description']) <= DESCRIPTION_MAX
@@ -168,5 +124,6 @@ def test_description_with_no_sentence_end_is_cut_at_a_word():
     assert len(result) <= DESCRIPTION_MAX
 
 
-def test_starts_at_is_timezone_aware():
-    assert starts_at(item(), page()).astimezone(timezone.utc).hour == 18
+def test_start_keeps_its_time_zone_through_the_post():
+    assert to_post(event(), PLACE, '81-350')['startsAt'].endswith('Z')
+    assert event().start.astimezone(timezone.utc).hour == 18

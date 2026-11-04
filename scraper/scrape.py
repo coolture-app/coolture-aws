@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from collections import Counter
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 import requests
@@ -12,7 +13,7 @@ from urllib3.util.retry import Retry
 
 from api import ApiError, CooltureApi
 from geocoder import DEFAULT_URL, Geocoder, GeocoderUnavailable
-from posts import build_post, starts_at
+from posts import to_post
 from trojmiasto import Site
 
 log = logging.getLogger('scraper')
@@ -41,7 +42,12 @@ def http_session() -> requests.Session:
     return session
 
 
-def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, stats: Counter, now: datetime, limit: int | None) -> None:
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, stats: Counter, limit: int | None,
+        clock: Callable[[], datetime] = utc_now) -> None:
     existing = api.existing_event_urls(api.me()) if api else set()
 
     for item in site.listing_items():
@@ -52,26 +58,27 @@ def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, stats: Counter,
         if limit is not None and stats['created'] >= limit:
             break
 
-        page = site.event_page(item.url)
-        start = starts_at(item, page) if page else None
-        if start is None:
+        event = site.event(item)
+        if event is None:
             stats['unreadable'] += 1
             log.warning('Left out, no details or date url=%s', item.url)
             continue
-        if start <= now:
+        if event.start <= clock():
             stats['already_started'] += 1
             continue
 
-        place = None
-        if not page.online:
-            place = geocoder.locate(page.venue or item.venue, page.street, page.building_number, item.city)
-        post = build_post(item, page, place)
-        if post is None:
-            stats['no_location'] += 1
-            log.warning('Left out, no location url=%s address=%s', item.url, (page.venue or item.venue, page.street, item.city))
-            continue
+        place, postal_code = None, None
+        if not event.online:
+            place = geocoder.locate(event)
+            postal_code = place and (event.postal_code or place.postal_code or geocoder.postcode_at(place))
+            if not postal_code:
+                # Left out rather than sent as ONLINE, which would hide it from the proximity signal.
+                stats['no_location'] += 1
+                log.warning('Left out, no location url=%s address=%s', item.url, (event.venue, event.street, event.city))
+                continue
 
-        stats['online' if page.online else 'exact_location' if place.exact else 'city_location'] += 1
+        post = to_post(event, place, postal_code)
+        stats['online' if event.online else 'exact_location' if place.exact else 'city_location'] += 1
         if api is None:
             print(json.dumps(post, ensure_ascii=False))
             stats['created'] += 1
@@ -99,7 +106,7 @@ def main() -> int:
         if not args.dry_run:
             api = CooltureApi(http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
                               token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
-        run(Site(http_session()), geocoder, api, stats, datetime.now(timezone.utc), args.limit)
+        run(Site(http_session()), geocoder, api, stats, args.limit)
     except (ApiError, GeocoderUnavailable, requests.RequestException) as error:
         # Everything imported so far stays, and the next run goes on from there.
         log.error('Run stopped: %s', error)

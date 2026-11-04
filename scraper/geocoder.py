@@ -4,11 +4,14 @@ from dataclasses import dataclass
 
 import requests
 
+from trojmiasto import Event
+
 DEFAULT_URL = 'https://nominatim.openstreetmap.org'
 # The public service allows one request per second.
 PAUSE_S = 1.0
 # Pomerania, as west, north, east, south. A name matched outside it is another place with the same name.
 REGION = '16.5,55.0,20.0,53.3'
+WRONG_SHAPE = (KeyError, AttributeError, TypeError, ValueError)
 
 
 class GeocoderUnavailable(RuntimeError):
@@ -31,18 +34,19 @@ class Geocoder:
         self._base_url = base_url.rstrip('/')
         self._pause_s = pause_s
         self._sleep = sleep
-        self._answers: dict[tuple, Place | None] = {}
+        self._answers: dict[tuple, Place | str | None] = {}
 
-    def locate(self, venue: str | None, street: str | None, building_number: str | None, city: str | None) -> Place | None:
+    def locate(self, event: Event) -> Place | None:
+        city = event.city
         if not city:
             return None
 
         queries = []
-        if street:
-            address = f'{building_number} {street}' if building_number else street
+        if event.street:
+            address = f'{event.building_number} {event.street}' if event.building_number else event.street
             queries.append({'street': address, 'city': city, 'country': 'Polska'})
-        if venue:
-            queries.append({'q': f'{venue}, {city}'})
+        if event.venue:
+            queries.append({'q': f'{event.venue}, {city}'})
 
         for query in queries:
             place = self._search(query, exact=True)
@@ -54,10 +58,18 @@ class Geocoder:
             place = self._search({'city': city.split()[0], 'country': 'Polska'}, exact=False)
         return place
 
+    def postcode_at(self, place: Place) -> str | None:
+        # A city has no postal code of its own, so this takes the one at its centre.
+        key = ('reverse', place.latitude, place.longitude)
+        return self._remembered(key, lambda: self._reverse(place))
+
     def _search(self, query: dict, exact: bool) -> Place | None:
-        key = tuple(sorted(query.items()))
+        key = ('search', *sorted(query.items()))
+        return self._remembered(key, lambda: self._request(query, exact))
+
+    def _remembered(self, key: tuple, ask: Callable[[], Place | str | None]) -> Place | str | None:
         if key not in self._answers:
-            self._answers[key] = self._request(query, exact)
+            self._answers[key] = ask()
         return self._answers[key]
 
     def _request(self, query: dict, exact: bool) -> Place | None:
@@ -66,14 +78,12 @@ class Geocoder:
             return None
         try:
             hit = hits[0]
-            # A city has no postal code of its own, so this takes the one at its centre.
-            postcode = hit.get('address', {}).get('postcode') or self._postcode_at(hit['lat'], hit['lon'])
-            return Place(float(hit['lat']), float(hit['lon']), postcode, exact)
-        except (KeyError, AttributeError, TypeError, ValueError) as error:
+            return Place(float(hit['lat']), float(hit['lon']), hit.get('address', {}).get('postcode'), exact)
+        except WRONG_SHAPE as error:
             raise GeocoderUnavailable(f'Nominatim gave an unexpected answer query={query} error={error!r}') from error
 
-    def _postcode_at(self, latitude: str, longitude: str) -> str | None:
-        found = self._get('reverse', {'lat': latitude, 'lon': longitude})
+    def _reverse(self, place: Place) -> str | None:
+        found = self._get('reverse', {'lat': place.latitude, 'lon': place.longitude})
         return found.get('address', {}).get('postcode') if isinstance(found, dict) else None
 
     def _get(self, path: str, params: dict) -> list | dict:

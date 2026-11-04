@@ -2,7 +2,7 @@ import json
 import logging
 import sys
 from collections import Counter
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 import requests
@@ -10,7 +10,7 @@ import requests
 from api import ApiError
 from geocoder import Geocoder, GeocoderUnavailable, Place
 from scrape import main, run
-from trojmiasto import EventPage, ListingItem
+from trojmiasto import EventPage, ListingItem, merge
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
 PLACE = Place(54.35, 18.65, None, exact=True)
@@ -35,21 +35,27 @@ class FakeSite:
     def listing_items(self):
         return iter(self.items)
 
-    def event_page(self, url):
-        self.opened.append(url)
-        return self.pages.get(url, page())
+    def event(self, listed):
+        self.opened.append(listed.url)
+        return merge(listed, self.pages.get(listed.url, page()))
 
 
 class FakeGeocoder:
-    def __init__(self, place=PLACE):
+    def __init__(self, place=PLACE, postcode='80-001'):
         self.place = place
+        self.postcode = postcode
         self.calls = 0
         self.venues = []
+        self.reverse_calls = 0
 
-    def locate(self, venue, *_):
+    def locate(self, event):
         self.calls += 1
-        self.venues.append(venue)
+        self.venues.append(event.venue)
         return self.place
+
+    def postcode_at(self, place):
+        self.reverse_calls += 1
+        return self.postcode
 
 
 class FakeApi:
@@ -71,16 +77,16 @@ class FakeApi:
         return self.failure
 
 
-def run_import(site, geocoder, api, now, limit):
+def run_import(site, geocoder, api, limit=None, clock=lambda: NOW):
     stats = Counter()
-    run(site, geocoder, api, stats, now, limit)
+    run(site, geocoder, api, stats, limit, clock)
     return stats
 
 
 def test_new_event_is_created_with_coordinates():
     api = FakeApi()
 
-    stats = run_import(FakeSite([item(1)]), FakeGeocoder(), api, NOW, None)
+    stats = run_import(FakeSite([item(1)]), FakeGeocoder(), api)
 
     assert stats['created'] == 1
     assert stats['exact_location'] == 1
@@ -92,7 +98,7 @@ def test_imported_event_is_not_opened_or_sent_again():
     site = FakeSite([item(1), item(2)])
     api = FakeApi(existing={item(1).url})
 
-    stats = run_import(site, FakeGeocoder(), api, NOW, None)
+    stats = run_import(site, FakeGeocoder(), api)
 
     assert stats['already_imported'] == 1
     assert site.opened == [item(2).url]
@@ -103,7 +109,7 @@ def test_started_event_is_skipped_without_a_geocoder_request():
     geocoder = FakeGeocoder()
     site = FakeSite([item(1)], {item(1).url: page(start_date=date(2026, 11, 1))})
 
-    stats = run_import(site, geocoder, FakeApi(), NOW, None)
+    stats = run_import(site, geocoder, FakeApi())
 
     assert stats['already_started'] == 1
     assert geocoder.calls == 0
@@ -112,14 +118,14 @@ def test_started_event_is_skipped_without_a_geocoder_request():
 def test_event_with_no_location_is_left_out():
     api = FakeApi()
 
-    stats = run_import(FakeSite([item(1)]), FakeGeocoder(place=None), api, NOW, None)
+    stats = run_import(FakeSite([item(1)]), FakeGeocoder(place=None), api)
 
     assert stats['no_location'] == 1
     assert api.created == []
 
 
 def test_city_level_location_is_counted_apart():
-    stats = run_import(FakeSite([item(1)]), FakeGeocoder(Place(54.3, 18.6, None, exact=False)), FakeApi(), NOW, None)
+    stats = run_import(FakeSite([item(1)]), FakeGeocoder(Place(54.3, 18.6, None, exact=False)), FakeApi())
 
     assert stats['city_location'] == 1
 
@@ -128,7 +134,7 @@ def test_online_event_needs_no_geocoder():
     geocoder = FakeGeocoder()
     site = FakeSite([item(1)], {item(1).url: page(online=True)})
 
-    stats = run_import(site, geocoder, FakeApi(), NOW, None)
+    stats = run_import(site, geocoder, FakeApi())
 
     assert stats['online'] == 1
     assert geocoder.calls == 0
@@ -137,32 +143,83 @@ def test_online_event_needs_no_geocoder():
 def test_event_with_no_date_is_left_out():
     site = FakeSite([item(1)], {item(1).url: page(start_date=None)})
 
-    assert run_import(site, FakeGeocoder(), FakeApi(), NOW, None)['unreadable'] == 1
+    assert run_import(site, FakeGeocoder(), FakeApi())['unreadable'] == 1
 
 
 def test_listing_venue_reaches_the_geocoder():
     geocoder = FakeGeocoder()
     site = FakeSite([item(1)], {item(1).url: page(venue=None)})
 
-    run_import(site, geocoder, FakeApi(), NOW, None)
+    run_import(site, geocoder, FakeApi())
 
     assert geocoder.venues == ['Klub']
 
 
 def test_unreadable_page_is_skipped():
     class Unreadable(FakeSite):
-        def event_page(self, url):
+        def event(self, listed):
             return None
 
-    stats = run_import(Unreadable([item(1)]), FakeGeocoder(), FakeApi(), NOW, None)
+    stats = run_import(Unreadable([item(1)]), FakeGeocoder(), FakeApi())
 
     assert stats['unreadable'] == 1
+
+
+def test_no_postal_code_anywhere_is_left_out():
+    site = FakeSite([item(1)], {item(1).url: page(postal_code=None)})
+    api = FakeApi()
+
+    stats = run_import(site, FakeGeocoder(postcode=None), api)
+
+    assert stats['no_location'] == 1
+    assert api.created == []
+
+
+def test_postal_code_of_the_page_needs_no_reverse_lookup():
+    geocoder = FakeGeocoder(Place(54.3, 18.6, None, exact=True))
+    api = FakeApi()
+
+    run_import(FakeSite([item(1)]), geocoder, api)
+
+    assert geocoder.reverse_calls == 0
+    assert api.created[0]['location']['postalCode'] == '81-350'
+
+
+def test_postal_code_of_the_hit_needs_no_reverse_lookup():
+    geocoder = FakeGeocoder(Place(54.3, 18.6, '80-002', exact=True))
+    api = FakeApi()
+
+    run_import(FakeSite([item(1)], {item(1).url: page(postal_code=None)}), geocoder, api)
+
+    assert geocoder.reverse_calls == 0
+    assert api.created[0]['location']['postalCode'] == '80-002'
+
+
+def test_reverse_lookup_runs_when_neither_has_a_postal_code():
+    geocoder = FakeGeocoder(Place(54.3, 18.6, None, exact=False))
+    api = FakeApi()
+
+    run_import(FakeSite([item(1)], {item(1).url: page(postal_code=None)}), geocoder, api)
+
+    assert geocoder.reverse_calls == 1
+    assert api.created[0]['location']['postalCode'] == '80-001'
+
+
+def test_an_event_that_starts_during_the_run_is_not_sent():
+    start = datetime(2026, 11, 5, 18, 0, tzinfo=timezone.utc)
+    moments = iter([start - timedelta(minutes=5), start + timedelta(minutes=1)])
+    api = FakeApi()
+
+    stats = run_import(FakeSite([item(1), item(2)]), FakeGeocoder(), api, clock=lambda: next(moments))
+
+    assert stats['created'] == 1
+    assert stats['already_started'] == 1
 
 
 def test_rejected_post_is_counted_and_the_run_goes_on():
     api = FakeApi(failure='400: nope')
 
-    stats = run_import(FakeSite([item(1), item(2)]), FakeGeocoder(), api, NOW, None)
+    stats = run_import(FakeSite([item(1), item(2)]), FakeGeocoder(), api)
 
     assert stats['rejected'] == 2
     assert stats['created'] == 0
@@ -171,13 +228,13 @@ def test_rejected_post_is_counted_and_the_run_goes_on():
 def test_limit_stops_after_that_many_new_posts():
     api = FakeApi()
 
-    run_import(FakeSite([item(1), item(2), item(3)]), FakeGeocoder(), api, NOW, 2)
+    run_import(FakeSite([item(1), item(2), item(3)]), FakeGeocoder(), api, limit=2)
 
     assert len(api.created) == 2
 
 
 def test_dry_run_prints_posts_and_needs_no_api(capsys):
-    stats = run_import(FakeSite([item(1)]), FakeGeocoder(), None, NOW, None)
+    stats = run_import(FakeSite([item(1)]), FakeGeocoder(), None)
 
     assert stats['created'] == 1
     assert json.loads(capsys.readouterr().out)['title'] == 'Wydarzenie 1'
@@ -194,7 +251,7 @@ def test_a_geocoder_failure_keeps_the_totals_and_creates_nothing_more():
     geocoder = Geocoder(Throttled(), 'http://nominatim.test', sleep=lambda _: None)
 
     with pytest.raises(GeocoderUnavailable):
-        run(FakeSite([item(1), item(2)]), geocoder, api, stats, NOW, None)
+        run(FakeSite([item(1), item(2)]), geocoder, api, stats, None, lambda: NOW)
 
     assert stats['listed'] == 1
     assert stats['no_location'] == 0
@@ -217,7 +274,7 @@ def scraper_args(monkeypatch, caplog):
     requests.exceptions.JSONDecodeError('Expecting value', '<html>', 0),
 ])
 def test_a_failed_run_logs_one_error_and_the_totals_and_exits_1(monkeypatch, caplog, scraper_args, error):
-    def fail(site, geocoder, api, stats, now, limit):
+    def fail(site, geocoder, api, stats, limit):
         stats['listed'] = 3
         raise error
 

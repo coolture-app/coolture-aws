@@ -5,8 +5,9 @@ import re
 import time as clock
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
@@ -17,6 +18,8 @@ SITE_URL = 'https://www.trojmiasto.pl'
 LISTING_URL = f'{SITE_URL}/imprezy/dni,30dni.html'
 LISTING_PAGE_PARAMETER = 'strona'
 SITE_PAUSE_S = 1.0
+WARSAW = ZoneInfo('Europe/Warsaw')
+NO_HOUR = time(12, 0)
 
 HOUR = re.compile(r'godz\.\s*(\d{1,2})[:.](\d{2})', re.IGNORECASE)
 BUILDING_NUMBER = re.compile(r'^(?P<street>.*\S)\s+(?P<number>\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)?)$')
@@ -51,6 +54,22 @@ class EventPage:
     building_number: str | None
     postal_code: str | None
     hour: time | None
+
+
+@dataclass(frozen=True)
+class Event:
+    url: str
+    title: str
+    category: str | None
+    city: str | None
+    venue: str | None
+    street: str | None
+    building_number: str | None
+    postal_code: str | None
+    online: bool
+    description: str
+    start: datetime
+    end: datetime | None
 
 
 def clean_text(value: str | None) -> str:
@@ -187,6 +206,45 @@ def parse_event_page(page_html: str) -> EventPage | None:
     )
 
 
+def _ends_at(end: datetime | None, start: datetime) -> datetime | None:
+    if end is None:
+        return None
+    end = end if end.tzinfo else end.replace(tzinfo=WARSAW)
+    # A multi-day event gives only its last day, as midnight, so it runs until that day ends.
+    if end.timetz().replace(tzinfo=None) == time(0, 0):
+        end = end + timedelta(days=1) - timedelta(minutes=1)
+    return end if end > start else None
+
+
+def _facts(item: ListingItem, venue: str | None) -> str:
+    facts = ', '.join(part for part in (item.title, venue, item.city) if part)
+    return f'{item.category.capitalize()}: {facts}.' if item.category else f'{facts}.'
+
+
+def merge(item: ListingItem, page: EventPage) -> Event | None:
+    """Decides, once, which of the listing and the page each value comes from."""
+    # The listing has the date of this showing, and a page can cover several.
+    day = item.start_date or page.start_date
+    if day is None:
+        return None
+    start = datetime.combine(day, item.hour or page.hour or NO_HOUR, tzinfo=WARSAW)
+    venue = page.venue or item.venue
+    return Event(
+        url=item.url,
+        title=item.title,
+        category=item.category,
+        city=item.city,
+        venue=venue,
+        street=page.street,
+        building_number=page.building_number,
+        postal_code=page.postal_code,
+        online=page.online,
+        description=page.description or _facts(item, venue),
+        start=start,
+        end=_ends_at(page.end, start),
+    )
+
+
 class Site:
 
     def __init__(self, session: requests.Session, sleep: Callable[[float], None] = clock.sleep) -> None:
@@ -213,9 +271,10 @@ class Site:
                 yield item
             page_number += 1
 
-    def event_page(self, url: str) -> EventPage | None:
+    def event(self, item: ListingItem) -> Event | None:
         try:
-            return parse_event_page(self._get(url))
+            page = parse_event_page(self._get(item.url))
         except requests.RequestException as error:
-            log.warning('Event page unread url=%s error=%s', url, error)
+            log.warning('Event page unread url=%s error=%s', item.url, error)
             return None
+        return merge(item, page) if page else None
