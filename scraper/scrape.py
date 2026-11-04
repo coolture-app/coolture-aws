@@ -46,9 +46,19 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, stats: Counter, limit: int | None,
+class DryRun:
+    """Takes the place of the API, and prints the posts instead of sending them."""
+
+    def existing_event_urls(self) -> set[str]:
+        return set()
+
+    def create_post(self, post: dict) -> None:
+        print(json.dumps(post, ensure_ascii=False))
+
+
+def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Counter, limit: int | None,
         clock: Callable[[], datetime] = utc_now) -> None:
-    existing = api.existing_event_urls(api.me()) if api else set()
+    existing = sink.existing_event_urls()
 
     for item in site.listing_items():
         stats['listed'] += 1
@@ -79,12 +89,7 @@ def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, stats: Counter,
 
         post = to_post(event, place, postal_code)
         stats['online' if event.online else 'exact_location' if place.exact else 'city_location'] += 1
-        if api is None:
-            print(json.dumps(post, ensure_ascii=False))
-            stats['created'] += 1
-            continue
-
-        failure = api.create_post(post)
+        failure = sink.create_post(post)
         if failure:
             stats['rejected'] += 1
             log.warning('Rejected url=%s reason=%s', item.url, failure)
@@ -102,11 +107,10 @@ def main() -> int:
     stats: Counter = Counter()
     try:
         geocoder = Geocoder(http_session(), os.getenv('SCRAPER_NOMINATIM_URL', DEFAULT_URL))
-        api = None
-        if not args.dry_run:
-            api = CooltureApi(http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
-                              token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
-        run(Site(http_session()), geocoder, api, stats, args.limit)
+        sink = DryRun() if args.dry_run else CooltureApi(
+            http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
+            token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
+        run(Site(http_session()), geocoder, sink, stats, args.limit)
     except (ApiError, GeocoderUnavailable, requests.RequestException) as error:
         # Everything imported so far stays, and the next run goes on from there.
         log.error('Run stopped: %s', error)

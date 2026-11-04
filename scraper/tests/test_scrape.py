@@ -9,7 +9,7 @@ import requests
 
 from api import ApiError
 from geocoder import Geocoder, GeocoderUnavailable, Place
-from scrape import main, run
+from scrape import DryRun, main, run
 from trojmiasto import EventPage, ListingItem, merge
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -63,13 +63,8 @@ class FakeApi:
         self.existing = set(existing)
         self.failure = failure
         self.created = []
-        self.asked_for = None
 
-    def me(self):
-        return 'bot-id'
-
-    def existing_event_urls(self, author_id):
-        self.asked_for = author_id
+    def existing_event_urls(self):
         return self.existing
 
     def create_post(self, post):
@@ -91,7 +86,6 @@ def test_new_event_is_created_with_coordinates():
     assert stats['created'] == 1
     assert stats['exact_location'] == 1
     assert api.created[0]['location']['coordinates'] == {'latitude': 54.35, 'longitude': 18.65}
-    assert api.asked_for == 'bot-id'
 
 
 def test_imported_event_is_not_opened_or_sent_again():
@@ -234,7 +228,7 @@ def test_limit_stops_after_that_many_new_posts():
 
 
 def test_dry_run_prints_posts_and_needs_no_api(capsys):
-    stats = run_import(FakeSite([item(1)]), FakeGeocoder(), None)
+    stats = run_import(FakeSite([item(1)]), FakeGeocoder(), DryRun())
 
     assert stats['created'] == 1
     assert json.loads(capsys.readouterr().out)['title'] == 'Wydarzenie 1'

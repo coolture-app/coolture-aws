@@ -40,6 +40,9 @@ def api(session):
     return CooltureApi(session, 'http://api.test/', user_id='bot')
 
 
+ME = FakeResponse(200, {'id': 'bot-id'})
+
+
 def page(urls, next_cursor=None):
     items = [{'eventUrl': url} for url in urls]
     return FakeResponse(200, {'items': items, 'page': {'limit': 100, 'hasMore': next_cursor is not None,
@@ -59,49 +62,44 @@ def test_token_is_sent_as_a_bearer():
     assert session.headers['Authorization'] == 'Bearer abc'
 
 
-def test_me_returns_the_id():
-    session = FakeSession([FakeResponse(200, {'id': 'bot-id'})])
+def test_existing_urls_ask_who_the_bot_is_and_walk_until_has_more_is_false():
+    session = FakeSession([ME, page(['a', 'b'], 'next'), page([], 'later'), page(['c'])])
 
-    assert api(session).me() == 'bot-id'
+    assert api(session).existing_event_urls() == {'a', 'b', 'c'}
+
     assert session.calls[0][1] == 'http://api.test/auth/me'
-
-
-def test_existing_urls_walk_until_has_more_is_false():
-    session = FakeSession([page(['a', 'b'], 'next'), page([], 'later'), page(['c'])])
-
-    assert api(session).existing_event_urls('bot-id') == {'a', 'b', 'c'}
-
-    params = [call[2]['params'] for call in session.calls]
+    params = [call[2]['params'] for call in session.calls[1:]]
     assert params[0]['authorId'] == 'bot-id'
     assert params[0]['includePast'] == 'true'
-    assert len(session.calls) == 3
+    assert len(params) == 3
 
 
 def test_cursor_of_a_page_is_sent_with_the_next_request():
-    responses = [page(['a'], 'cursor-1'), page(['b'])]
+    responses = [ME, page(['a'], 'cursor-1'), page(['b'])]
     seen = []
 
     class Recording(FakeSession):
         def get(self, url, timeout, **kwargs):
-            seen.append(kwargs['params'].get('cursor'))
+            if 'params' in kwargs:
+                seen.append(kwargs['params'].get('cursor'))
             return super().get(url, timeout, **kwargs)
 
-    api(Recording(responses)).existing_event_urls('bot-id')
+    api(Recording(responses)).existing_event_urls()
 
     assert seen == [None, 'cursor-1']
 
 
 def test_posts_with_no_link_are_ignored():
-    session = FakeSession([FakeResponse(200, {'items': [{'title': 'bez linku'}], 'page': {'hasMore': False}})])
+    session = FakeSession([ME, FakeResponse(200, {'items': [{'title': 'bez linku'}], 'page': {'hasMore': False}})])
 
-    assert api(session).existing_event_urls('bot-id') == set()
+    assert api(session).existing_event_urls() == set()
 
 
 def test_a_rejected_cursor_stops_the_run_instead_of_posting_duplicates():
-    session = FakeSession([FakeResponse(400, {'error': 'Invalid cursor'})])
+    session = FakeSession([ME, FakeResponse(400, {'error': 'Invalid cursor'})])
 
     with pytest.raises(ApiError):
-        api(session).existing_event_urls('bot-id')
+        api(session).existing_event_urls()
 
 
 def test_create_returns_nothing_on_success():
@@ -151,7 +149,7 @@ class NotJson(FakeResponse):
 ])
 def test_a_200_with_the_wrong_body_is_an_api_error_on_me(response):
     with pytest.raises(ApiError):
-        api(FakeSession([response])).me()
+        api(FakeSession([response])).existing_event_urls()
 
 
 @pytest.mark.parametrize('response', [
@@ -163,4 +161,4 @@ def test_a_200_with_the_wrong_body_is_an_api_error_on_me(response):
 ])
 def test_a_200_with_the_wrong_body_is_an_api_error_on_the_list(response):
     with pytest.raises(ApiError):
-        api(FakeSession([response])).existing_event_urls('bot-id')
+        api(FakeSession([ME, response])).existing_event_urls()

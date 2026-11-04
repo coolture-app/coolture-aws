@@ -32,7 +32,7 @@ class CooltureApi:
         else:
             raise ApiError('Set SCRAPER_API_TOKEN, or SCRAPER_USER_ID on the local stack')
 
-    def me(self) -> str:
+    def _me(self) -> str:
         # Also creates the bot's user on first use, which a post's author must be.
         response = self._session.get(f'{self._base_url}/auth/me', timeout=TIMEOUT_S)
         if response.status_code != 200:
@@ -42,9 +42,9 @@ class CooltureApi:
         except WRONG_SHAPE as error:
             raise ApiError(f'GET /auth/me gave an unexpected body: {_answer(response)}') from error
 
-    def existing_event_urls(self, author_id: str) -> set[str]:
+    def existing_event_urls(self) -> set[str]:
         urls: set[str] = set()
-        params: dict = {'authorId': author_id, 'includePast': 'true', 'limit': PAGE_LIMIT}
+        params: dict = {'authorId': self._me(), 'includePast': 'true', 'limit': PAGE_LIMIT}
         while True:
             response = self._session.get(f'{self._base_url}/posts', params=params, timeout=TIMEOUT_S)
             if response.status_code != 200:
