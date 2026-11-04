@@ -152,10 +152,10 @@ def _page_text(body) -> str:
 
 
 def _description(page: BeautifulSoup, block: dict) -> str:
-    # The block's text stops at the first quotation mark.
+    # The block's text stops at the first quotation mark, so it's longer only when the page has lost its text.
     body = page.select_one('.text-contents')
     text = _page_text(body) if body else ''
-    return text or clean_description(_text(block, 'description'))
+    return max(text, clean_description(_text(block, 'description')), key=len)
 
 
 def parse_event_page(page_html: str) -> EventPage | None:

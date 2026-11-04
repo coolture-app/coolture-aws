@@ -163,6 +163,12 @@ def test_description_prefers_the_page_text_and_keeps_paragraphs_apart():
     assert parse_event_page(event_page(body)).description == 'Pierwszy akapit\nDrugi akapit.'
 
 
+def test_a_short_page_text_does_not_replace_a_longer_block():
+    body = '<div class="text-contents"><a href="/x">Zobacz</a></div>'
+
+    assert parse_event_page(event_page(body, description='Długi opis z bloku.')).description == 'Długi opis z bloku.'
+
+
 def test_description_keeps_lines_and_inline_punctuation():
     body = '<div class="text-contents">Jeden<br/><br/><strong>Dwa</strong>, trzy<ul><li>Cztery</li></ul></div>'
 
