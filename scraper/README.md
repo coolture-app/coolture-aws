@@ -10,10 +10,11 @@ in a place is sent as `OFFLINE`. If it can't be located it's left out, because a
 ## Running it
 
 ```bash
-python3 -m venv scraper/.venv && scraper/.venv/bin/pip install -r scraper/requirements-dev.txt
-source scraper/.venv/bin/activate
+python3 -m venv scraper/.venv                         # python on Windows
+source scraper/.venv/bin/activate                     # source scraper/.venv/Scripts/activate on Windows
+python -m pip install -r scraper/requirements-dev.txt
 
-python3 scraper/scrape.py --dry-run --limit 20        # prints the posts as JSON lines, writes nothing
+python scraper/scrape.py --dry-run --limit 20         # prints the posts as JSON lines, writes nothing
 
 make local                                            # in another terminal
 make scrape                                           # imports as the local bot user
@@ -21,16 +22,19 @@ make scrape ARGS='--limit 20'
 make test-scraper
 ```
 
-A whole import of about 400 events takes about 25 minutes, because the site and Nominatim each get at most one request a second. Later runs skip the
-events already imported, without opening their pages. Each post then reaches `post-embedding` as usual. Locally that needs
-`make embed-posts`, because there are no S3 events.
+We estimate a whole import of about 400 events at about 40 minutes locally: the site and Nominatim each get at most one request a second, and a
+local write took a median of 3.3 s. Later runs skip the events already imported, without opening their pages. Each post then reaches
+`post-embedding` as usual. Locally that needs `make embed-posts`, because there are no S3 events.
+
+A failure to reach the site's listing, the API or Nominatim ends the run with one error, the totals and exit 1. What's already imported stays, and
+the next run goes on from there. A post that timed out counts as `rejected`, because it may have been saved, and the next run's list settles it.
 
 ## Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SCRAPER_API_URL` | `http://localhost:3000` | The API. On AWS it ends in `/api` |
-| `SCRAPER_USER_ID` | set by `make scrape` | Bot identity on the local stack, sent as `X-User-Id` |
+| `SCRAPER_USER_ID` | set by `make scrape` | Bot identity on the local stack, sent as `X-User-Id` with `X-User-Name: coolture_bot`. A bot user created earlier keeps its old name until `make reset-db` |
 | `SCRAPER_API_TOKEN` | | Bot identity on AWS: a Cognito id token, which lasts an hour |
 | `SCRAPER_NOMINATIM_URL` | `https://nominatim.openstreetmap.org` | Geocoder |
 
@@ -38,11 +42,11 @@ events already imported, without opening their pages. Each post then reaches `po
 
 | Value | Source |
 |---|---|
-| Title, category, city, venue, date, hour | The listing item |
-| Description | The page's `.text-contents` with one line per paragraph, without the site's links and footer, else the schema.org `Event` block, whose text stops at the first quotation mark |
+| Title, category, city, venue, date, hours | The listing item. A combined city such as `Gdańsk Sopot` keeps its first Tricity name |
+| Description | The longer of the page's `.text-contents`, with one line per paragraph and without the site's links and footer, and the schema.org `Event` block, whose text stops at the first quotation mark |
 | Street, postal code, online or not | The schema.org `Event` block. Theatre pages on `/kultura/` have none, so only the venue is known |
 | Coordinates | Nominatim: the street address, then the venue, then the city centre, limited to Pomerania |
-| Missing postal code | Nominatim's reverse lookup at those coordinates |
+| Missing postal code | Nominatim's reverse lookup at those coordinates, only when neither the page nor the search has one |
 
 Run totals are logged at the end. `exact_location` and `city_location` show how many posts have a precise point, and `no_location`
 how many were left out.
@@ -53,4 +57,8 @@ how many were left out.
   that opened earlier.
 - **Imported posts aren't updated.** A later change on the site isn't picked up.
 - **An event with no hour starts at 12:00.**
-- **Tests use invented text.** Don't commit real scraped text until we've checked the site's terms.
+- **A deleted post stays out only on the machine that saw it.** `GET /posts` never returns a deleted post, so the scraper keeps the URLs it has seen
+  in `scraper/.imported-<api host>.txt`, which git ignores. That covers one operator per environment: a post deleted before this machine ever saw it
+  can't be known. A database with none of the bot's posts counts as a new one, so the file starts over after `make reset-db`.
+- **Tests use invented text, and imports stay local.** The site's terms don't settle whether its text can be reused, so don't commit scraped text, or
+  import it anywhere people outside the team can see it, until we have the site's permission.
