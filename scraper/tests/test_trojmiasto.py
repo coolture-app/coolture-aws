@@ -1,6 +1,7 @@
 import json
 from datetime import date, time
 
+import pytest
 import requests
 
 from trojmiasto import Site, clean_description, parse_event_page, parse_listing
@@ -106,6 +107,26 @@ def test_location_given_as_text_gives_an_event_with_no_address():
     page = parse_event_page(event_page(location='Do ustalenia'))
 
     assert (page.venue, page.street, page.postal_code) == (None, None, None)
+
+
+def test_address_given_as_text_gives_an_event_with_no_address():
+    page = parse_event_page(event_page(location={'name': 'Klub', 'address': 'Trójmiasto'}))
+
+    assert (page.venue, page.street, page.postal_code) == ('Klub', None, None)
+
+
+def test_a_postal_code_that_is_not_text_is_ignored():
+    address = {'streetAddress': 'Klub, Gdynia, Portowa 9', 'postalCode': 81350}
+
+    page = parse_event_page(event_page(location={'name': 'Klub', 'address': address}))
+
+    assert (page.street, page.postal_code) == ('Portowa', None)
+
+
+@pytest.mark.parametrize('field', ['name', 'description', 'startDate', 'endDate', 'eventAttendanceMode', 'location'])
+@pytest.mark.parametrize('value', [12, None, ['a'], {'a': 1}, True])
+def test_a_field_of_any_other_type_does_not_stop_the_parser(field, value):
+    assert parse_event_page(event_page(**{field: value})) is not None
 
 
 def test_online_event():

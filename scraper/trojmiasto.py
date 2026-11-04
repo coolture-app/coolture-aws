@@ -105,6 +105,12 @@ def parse_listing(page_html: str) -> list[ListingItem]:
     return items
 
 
+def _text(mapping: object, key: str) -> str:
+    # The block is untrusted JSON, and any of its fields can be missing or hold another type.
+    value = mapping.get(key) if isinstance(mapping, dict) else None
+    return clean_text(value) if isinstance(value, str) else ''
+
+
 def _event_block(page: BeautifulSoup) -> dict | None:
     for script in page.select('script[type="application/ld+json"]'):
         try:
@@ -128,11 +134,9 @@ def _split_street(street_address: str) -> tuple[str | None, str | None]:
     return match['street'], match['number']
 
 
-def _parse_moment(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
+def _parse_moment(value: str) -> datetime | None:
     try:
-        return datetime.fromisoformat(value.strip())
+        return datetime.fromisoformat(value)
     except ValueError:
         return None
 
@@ -151,8 +155,7 @@ def _description(page: BeautifulSoup, block: dict) -> str:
     # The block's text stops at the first quotation mark.
     body = page.select_one('.text-contents')
     text = _page_text(body) if body else ''
-    fallback = block.get('description') if isinstance(block.get('description'), str) else None
-    return text or clean_description(fallback)
+    return text or clean_description(_text(block, 'description'))
 
 
 def parse_event_page(page_html: str) -> EventPage | None:
@@ -163,25 +166,24 @@ def parse_event_page(page_html: str) -> EventPage | None:
     if not block and not description:
         return None
 
-    start = _parse_moment(block.get('startDate'))
+    start = _parse_moment(_text(block, 'startDate'))
     location = block.get('location')
-    if isinstance(location, list):
-        location = location[0] if location else None
-    place = location if isinstance(location, dict) else {}
-    address = place.get('address') if isinstance(place.get('address'), dict) else {}
-    street, building_number = _split_street(clean_text(address.get('streetAddress')))
+    place = location[0] if isinstance(location, list) and location else location
+    # An address can also be plain text, such as "Trójmiasto", which _text reads as no fields.
+    address = place.get('address') if isinstance(place, dict) else None
+    street, building_number = _split_street(_text(address, 'streetAddress'))
 
     return EventPage(
         start_date=start.date() if start else None,
-        end=_parse_moment(block.get('endDate')),
-        online='online' in str(block.get('eventAttendanceMode', '')).lower(),
+        end=_parse_moment(_text(block, 'endDate')),
+        online='online' in _text(block, 'eventAttendanceMode').lower(),
         description=description,
-        venue=_real_venue(clean_text(place.get('name'))),
+        venue=_real_venue(_text(place, 'name')),
         street=street,
         building_number=building_number,
-        postal_code=clean_text(address.get('postalCode')) or None,
+        postal_code=_text(address, 'postalCode') or None,
         # startDate is always midnight, and the name holds the hour.
-        hour=parse_hour(block.get('name') if isinstance(block.get('name'), str) else None),
+        hour=parse_hour(_text(block, 'name')),
     )
 
 
