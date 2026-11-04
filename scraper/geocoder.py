@@ -1,17 +1,18 @@
-import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import requests
 
-log = logging.getLogger(__name__)
-
 DEFAULT_URL = 'https://nominatim.openstreetmap.org'
 # The public service allows one request per second.
 PAUSE_S = 1.0
 # Pomerania, as west, north, east, south. A name matched outside it is another place with the same name.
 REGION = '16.5,55.0,20.0,53.3'
+
+
+class GeocoderUnavailable(RuntimeError):
+    """The service couldn't be asked, which is different from it finding nothing and is never remembered."""
 
 
 @dataclass(frozen=True)
@@ -63,22 +64,24 @@ class Geocoder:
         hits = self._get('search', {**query, 'limit': 1, 'countrycodes': 'pl', 'viewbox': REGION, 'bounded': 1})
         if not hits:
             return None
-        hit = hits[0]
-        # A city has no postal code of its own, so this takes the one at its centre.
-        postcode = hit.get('address', {}).get('postcode') or self._postcode_at(hit['lat'], hit['lon'])
-        return Place(float(hit['lat']), float(hit['lon']), postcode, exact)
+        try:
+            hit = hits[0]
+            # A city has no postal code of its own, so this takes the one at its centre.
+            postcode = hit.get('address', {}).get('postcode') or self._postcode_at(hit['lat'], hit['lon'])
+            return Place(float(hit['lat']), float(hit['lon']), postcode, exact)
+        except (KeyError, AttributeError, TypeError, ValueError) as error:
+            raise GeocoderUnavailable(f'Nominatim gave an unexpected answer query={query} error={error!r}') from error
 
     def _postcode_at(self, latitude: str, longitude: str) -> str | None:
         found = self._get('reverse', {'lat': latitude, 'lon': longitude})
-        return found.get('address', {}).get('postcode') if found else None
+        return found.get('address', {}).get('postcode') if isinstance(found, dict) else None
 
-    def _get(self, path: str, params: dict) -> list | dict | None:
+    def _get(self, path: str, params: dict) -> list | dict:
         self._sleep(self._pause_s)
         try:
             response = self._session.get(f'{self._base_url}/{path}', timeout=20,
                                          params={**params, 'format': 'jsonv2', 'addressdetails': 1})
             response.raise_for_status()
             return response.json()
-        except (requests.RequestException, ValueError) as error:
-            log.warning('Nominatim request failed path=%s params=%s error=%s', path, params, error)
-            return None
+        except requests.RequestException as error:
+            raise GeocoderUnavailable(f'Nominatim request failed path={path} params={params} error={error}') from error

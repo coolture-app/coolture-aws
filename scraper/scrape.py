@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from api import ApiError, CooltureApi
-from geocoder import DEFAULT_URL, Geocoder
+from geocoder import DEFAULT_URL, Geocoder, GeocoderUnavailable
 from posts import build_post, starts_at
 from trojmiasto import Site
 
@@ -103,7 +103,7 @@ def main() -> int:
 
     try:
         stats = run(Site(http_session()), geocoder, api, datetime.now(timezone.utc), args.limit)
-    except ApiError as error:
+    except (ApiError, GeocoderUnavailable) as error:
         log.error('%s', error)
         return 1
 

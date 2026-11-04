@@ -1,6 +1,7 @@
+import pytest
 import requests
 
-from geocoder import Geocoder
+from geocoder import Geocoder, GeocoderUnavailable
 
 
 class FakeResponse:
@@ -153,7 +154,62 @@ def test_every_request_waits_its_turn():
     assert pauses == [1.0, 1.0, 1.0]
 
 
-def test_a_service_failure_finds_nothing_instead_of_stopping_the_run():
+def test_a_service_failure_stops_the_run_instead_of_finding_nothing():
     session = FakeSession(error=requests.ConnectionError('down'))
 
-    assert geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia') is None
+    with pytest.raises(GeocoderUnavailable):
+        geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+
+
+def test_a_throttle_on_a_street_does_not_fall_back_to_the_city_centre():
+    session = FakeSession({'Gdynia': hit()})
+    session.get = lambda url, params, timeout: FakeResponse([], status=429)
+
+    with pytest.raises(GeocoderUnavailable):
+        geocoder(session).locate('Klub', 'Portowa', '9', 'Gdynia')
+
+
+def test_a_failed_request_is_not_remembered():
+    session = FakeSession({'9 Portowa': hit()}, error=requests.ConnectionError('down'))
+    subject = geocoder(session)
+
+    with pytest.raises(GeocoderUnavailable):
+        subject.locate(None, 'Portowa', '9', 'Gdynia')
+    session.error = None
+
+    assert subject.locate(None, 'Portowa', '9', 'Gdynia').exact is True
+
+
+def test_a_failure_of_the_reverse_lookup_stops_the_run_too():
+    session = FakeSession({'Gdynia': hit(postcode=None)})
+    real_get = session.get
+
+    def fail_on_reverse(url, params, timeout):
+        if url.endswith('/reverse'):
+            raise requests.Timeout('slow')
+        return real_get(url, params, timeout)
+
+    session.get = fail_on_reverse
+
+    with pytest.raises(GeocoderUnavailable):
+        geocoder(session).locate(None, None, None, 'Gdynia')
+
+
+def test_a_body_that_is_not_json_means_the_service_could_not_be_asked():
+    class NotJson(FakeResponse):
+        def json(self):
+            raise requests.exceptions.JSONDecodeError('Expecting value', '<html>', 0)
+
+    session = FakeSession()
+    session.get = lambda url, params, timeout: NotJson([])
+
+    with pytest.raises(GeocoderUnavailable):
+        geocoder(session).locate(None, 'Portowa', '9', 'Gdynia')
+
+
+def test_an_answer_of_the_wrong_shape_means_the_service_could_not_be_asked():
+    session = FakeSession()
+    session.get = lambda url, params, timeout: FakeResponse({'error': 'Bad request'})
+
+    with pytest.raises(GeocoderUnavailable):
+        geocoder(session).locate(None, 'Portowa', '9', 'Gdynia')
