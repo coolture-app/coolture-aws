@@ -59,7 +59,15 @@ def test_token_is_sent_as_a_bearer():
 
     CooltureApi(session, 'http://api.test', token='abc')
 
-    assert session.headers['Authorization'] == 'Bearer abc'
+    assert session.headers == {'Authorization': 'Bearer abc'}
+
+
+def test_local_identity_names_the_bot():
+    session = FakeSession([])
+
+    CooltureApi(session, 'http://api.test', user_id='bot')
+
+    assert session.headers == {'X-User-Id': 'bot', 'X-User-Name': 'coolture_bot'}
 
 
 def test_existing_urls_ask_who_the_bot_is_and_walk_until_has_more_is_false():

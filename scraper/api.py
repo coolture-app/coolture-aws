@@ -8,6 +8,8 @@ log = logging.getLogger(__name__)
 PAGE_LIMIT = 100
 TIMEOUT_S = 40
 WRITE_PAUSE_S = 0.1
+# Without it the local user takes the dev default, which the seed already owns. The API would turn a hyphen into this underscore.
+LOCAL_USER_NAME = 'coolture_bot'
 # A 200 can still hold the wrong thing, such as CloudFront's HTML when the URL lacks /api. Not JSON is a ValueError too.
 WRONG_SHAPE = (KeyError, TypeError, AttributeError, ValueError)
 
@@ -29,6 +31,7 @@ class CooltureApi:
             session.headers['Authorization'] = f'Bearer {token}'
         elif user_id:
             session.headers['X-User-Id'] = user_id
+            session.headers['X-User-Name'] = LOCAL_USER_NAME
         else:
             raise ApiError('Set SCRAPER_API_TOKEN, or SCRAPER_USER_ID on the local stack')
 
