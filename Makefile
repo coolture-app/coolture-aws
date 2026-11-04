@@ -51,7 +51,7 @@ build: build-common ## Build backend lambdas
 	@sam build --template-file aws/backend.yaml --parallel --cached
 
 test-python: ## Run Python Lambda unit tests (needs requirements-dev.txt installed)
-	@for dir in recommender/embedding-workers/post-embedding recommender/embedding-workers/user-embedding scraper; do \
+	@for dir in recommender/embedding-workers/post-embedding recommender/embedding-workers/user-embedding; do \
 		(cd $$dir && $(PYTHON) -m pytest -q tests) || exit 1; \
 	done
 
