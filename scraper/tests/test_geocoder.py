@@ -116,14 +116,6 @@ def test_no_postal_code_at_the_point_either():
     assert geocoder(session).postcode_at(Place(54.5, 18.5, None, exact=False)) is None
 
 
-def test_a_place_named_twice_falls_back_to_the_first_name():
-    session = FakeSession({'Sopot': hit()})
-
-    place = geocoder(session).locate(event(None, None, None, 'Sopot Brodwino'))
-
-    assert (place.exact, session.queries[-1]['city']) == (False, 'Sopot')
-
-
 def test_nothing_found():
     assert geocoder(FakeSession()).locate(event('Klub', 'Portowa', '9', 'Gdynia')) is None
 

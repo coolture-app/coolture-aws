@@ -31,6 +31,7 @@ UPPER = 'A-ZĄĆĘŁŃÓŚŹŻ'
 GLUED_WORDS = re.compile(rf'([{LOWER}]{{3}})([{UPPER}][{LOWER}])')
 GLUED_SENTENCES = re.compile(rf'([{LOWER}\d)]{{2}}[.!?:])([{UPPER}][{LOWER}])')
 NOT_A_VENUE = {'trójmiasto'}
+TRICITY = ('Gdańsk', 'Gdynia', 'Sopot')
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,11 @@ def parse_end_hour(label: str | None) -> time | None:
     return _clock_time(END_HOUR.search(label or ''))
 
 
+def _main_city(value: str) -> str:
+    # The listing can name more than one place here, as in "Gdańsk Sopot" or "Gdańsk Oliwa".
+    return next((city for city in TRICITY if value.startswith(city)), value)
+
+
 def _real_venue(name: str | None) -> str | None:
     return name if name and name.casefold() not in NOT_A_VENUE else None
 
@@ -126,7 +132,7 @@ def parse_listing(page_html: str) -> list[ListingItem]:
             url=urljoin(SITE_URL, link['href']),
             title=title,
             category=text_of('.event__item__category').lower() or None,
-            city=text_of('.event__item__location__city').rstrip(', ') or None,
+            city=_main_city(text_of('.event__item__location__city').rstrip(', ')) or None,
             venue=_real_venue(text_of('.event__item__location__place')),
             start_date=_parse_day(element.select_one('.event__item__date')),
             hour=parse_hour(text_of('.event__item__date__hour')),

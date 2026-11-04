@@ -52,11 +52,7 @@ class Geocoder:
             place = self._search(query, exact=True)
             if place is not None:
                 return place
-        place = self._search({'city': city, 'country': 'Polska'}, exact=False)
-        if place is None and ' ' in city:
-            # The listing can name two places here, as in "Sopot Brodwino".
-            place = self._search({'city': city.split()[0], 'country': 'Polska'}, exact=False)
-        return place
+        return self._search({'city': city, 'country': 'Polska'}, exact=False)
 
     def postcode_at(self, place: Place) -> str | None:
         # A city has no postal code of its own, so this takes the one at its centre.

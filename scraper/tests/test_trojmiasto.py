@@ -63,6 +63,29 @@ def test_listing_keeps_an_item_with_no_hour():
     assert parse_listing(listing_item(hour='cały dzień'))[0].hour is None
 
 
+@pytest.mark.parametrize('listed_city, city', [
+    ('Gdańsk,', 'Gdańsk'),
+    ('Gdańsk Sopot,', 'Gdańsk'),
+    ('Gdańsk Gdynia,', 'Gdańsk'),
+    ('Gdańsk Oliwa,', 'Gdańsk'),
+    ('Gdańsk-Czołpino-Gdańsk,', 'Gdańsk'),
+    ('Sopot Brodwino,', 'Sopot'),
+    ('Gdynia,', 'Gdynia'),
+    ('Pruszcz Gdański,', 'Pruszcz Gdański'),
+    ('Wejherowo,', 'Wejherowo'),
+    ('Rumia,', 'Rumia'),
+    ('Bąkowo,', 'Bąkowo'),
+    ('Reda,', 'Reda'),
+    ('Lokalizacja,', 'Lokalizacja'),
+])
+def test_listing_keeps_one_real_city(listed_city, city):
+    assert parse_listing(listing_item(city=listed_city))[0].city == city
+
+
+def test_listing_keeps_an_item_with_no_city():
+    assert parse_listing(listing_item(city=''))[0].city is None
+
+
 def test_listing_reads_both_ends_of_an_hour_range():
     item = parse_listing(listing_item(hour='Godz. 14:00 - 18:00'))[0]
 
