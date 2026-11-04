@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from api import ApiError, CooltureApi
 
@@ -46,7 +47,7 @@ def page(urls, next_cursor=None):
 
 
 def test_needs_an_identity():
-    with pytest.raises(ValueError):
+    with pytest.raises(ApiError):
         CooltureApi(FakeSession([]), 'http://api.test')
 
 
@@ -128,3 +129,38 @@ def test_a_rejected_token_stops_the_run(status):
 
     with pytest.raises(ApiError):
         api(session).create_post({})
+
+
+def test_a_post_that_timed_out_counts_as_rejected():
+    class Slow(FakeSession):
+        def post(self, url, timeout, **kwargs):
+            raise requests.ReadTimeout('slow')
+
+    assert 'timed out' in api(Slow([])).create_post({})
+
+
+class NotJson(FakeResponse):
+    def json(self):
+        raise requests.exceptions.JSONDecodeError('Expecting value', '<html>', 0)
+
+
+@pytest.mark.parametrize('response', [
+    FakeResponse(200, {'name': 'no id'}),
+    FakeResponse(200, ['a list']),
+    NotJson(200, '<html>CloudFront</html>'),
+])
+def test_a_200_with_the_wrong_body_is_an_api_error_on_me(response):
+    with pytest.raises(ApiError):
+        api(FakeSession([response])).me()
+
+
+@pytest.mark.parametrize('response', [
+    FakeResponse(200, {'page': {'hasMore': False}}),
+    FakeResponse(200, {'items': [], 'page': {'hasMore': True}}),
+    FakeResponse(200, {'items': ['not an object'], 'page': {'hasMore': False}}),
+    FakeResponse(200, ['a list']),
+    NotJson(200, '<html>CloudFront</html>'),
+])
+def test_a_200_with_the_wrong_body_is_an_api_error_on_the_list(response):
+    with pytest.raises(ApiError):
+        api(FakeSession([response])).existing_event_urls('bot-id')

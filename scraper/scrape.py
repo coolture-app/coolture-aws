@@ -41,8 +41,7 @@ def http_session() -> requests.Session:
     return session
 
 
-def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, now: datetime, limit: int | None) -> Counter:
-    stats: Counter = Counter()
+def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, stats: Counter, now: datetime, limit: int | None) -> None:
     existing = api.existing_event_urls(api.me()) if api else set()
 
     for item in site.listing_items():
@@ -85,8 +84,6 @@ def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, now: datetime, 
         else:
             stats['created'] += 1
 
-    return stats
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='Import trojmiasto.pl events into Coolture')
@@ -95,19 +92,21 @@ def main() -> int:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', stream=sys.stderr)
 
-    geocoder = Geocoder(http_session(), os.getenv('SCRAPER_NOMINATIM_URL', DEFAULT_URL))
-    api = None
-    if not args.dry_run:
-        api = CooltureApi(http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
-                          token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
-
+    stats: Counter = Counter()
     try:
-        stats = run(Site(http_session()), geocoder, api, datetime.now(timezone.utc), args.limit)
-    except (ApiError, GeocoderUnavailable) as error:
-        log.error('%s', error)
+        geocoder = Geocoder(http_session(), os.getenv('SCRAPER_NOMINATIM_URL', DEFAULT_URL))
+        api = None
+        if not args.dry_run:
+            api = CooltureApi(http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
+                              token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
+        run(Site(http_session()), geocoder, api, stats, datetime.now(timezone.utc), args.limit)
+    except (ApiError, GeocoderUnavailable, requests.RequestException) as error:
+        # Everything imported so far stays, and the next run goes on from there.
+        log.error('Run stopped: %s', error)
         return 1
+    finally:
+        log.info('Done: %s', dict(stats))
 
-    log.info('Done: %s', dict(stats))
     if not stats['listed']:
         log.error('The listing gave no events, so its markup has probably changed')
         return 1
