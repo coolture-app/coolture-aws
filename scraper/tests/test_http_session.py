@@ -62,6 +62,14 @@ def test_a_throttle_is_retried_after_the_time_the_server_asks_for(stub, pauses):
     assert pauses == [7]
 
 
+def test_a_long_retry_after_is_cut_to_the_limit_on_every_retry(stub, pauses):
+    stub.answers = [(429, {'Retry-After': '21600'})] * 10
+
+    assert http_session().get(stub.url).status_code == 429
+    assert pauses == [120, 120, 120]
+    assert stub.requests == 4
+
+
 def test_a_retry_with_no_stated_time_still_waits(stub, pauses):
     stub.answers = [(429, {}), (429, {})]
 

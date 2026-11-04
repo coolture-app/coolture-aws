@@ -20,6 +20,8 @@ log = logging.getLogger('scraper')
 
 USER_AGENT = 'coolture-scraper/1.0 (+https://github.com/coolture-app/coolture-aws)'
 DEFAULT_API_URL = 'http://localhost:3000'
+# A longer wait would stall the whole run, and urllib3's own limit is 6 hours.
+RETRY_AFTER_MAX_S = 120
 
 
 class PacedRetry(Retry):
@@ -34,7 +36,8 @@ class PacedRetry(Retry):
 def http_session() -> requests.Session:
     # read=False keeps a POST from being sent again after a timeout, and lets the timeout arrive as requests.Timeout.
     retry = PacedRetry(total=3, connect=2, read=False, status_forcelist={429}, backoff_factor=2,
-                       allowed_methods=None, respect_retry_after_header=True, raise_on_status=False)
+                       allowed_methods=None, respect_retry_after_header=True, retry_after_max=RETRY_AFTER_MAX_S,
+                       raise_on_status=False)
     session = requests.Session()
     session.headers['User-Agent'] = USER_AGENT
     session.mount('https://', HTTPAdapter(max_retries=retry))

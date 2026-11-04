@@ -26,7 +26,8 @@ We estimate a whole import of about 400 events at about 40 minutes locally: the 
 local write took a median of 3.3 s. Later runs skip the events already imported, without opening their pages. Each post then reaches
 `post-embedding` as usual. Locally that needs `make embed-posts`, because there are no S3 events.
 
-A failure to reach the site's listing, the API or Nominatim ends the run with one error, the totals and exit 1. What's already imported stays, and
+A throttled request is tried 3 more times, waiting what the server's `Retry-After` asks, up to 2 minutes each. A failure to reach the site's listing,
+the API or Nominatim then ends the run with one error, the totals and exit 1. What's already imported stays, and
 the next run goes on from there. A post that timed out counts as `rejected`, because it may have been saved, and the next run's list settles it.
 
 ## Configuration
