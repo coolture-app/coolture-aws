@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from geocoder import Place
-from posts import DESCRIPTION_MAX, VENUE_MAX, cut, cut_description, to_post
+from posts import DESCRIPTION_MAX, TITLE_MAX, VENUE_MAX, cut, cut_description, to_post, utf16_len
 from trojmiasto import WARSAW, Event
 
 PLACE = Place(54.35, 18.65, '80-001', exact=True)
@@ -119,6 +119,63 @@ def test_description_is_not_cut_at_an_abbreviation():
     result = cut_description('Pierwsze zdanie jest tutaj. ' * 30 + 'Gramy m.in. Piazzollę ' * 30)
 
     assert result.endswith('tutaj.')
+
+
+def test_utf16_len_counts_an_emoji_as_two():
+    assert utf16_len('a😀') == 3
+
+
+def test_text_exactly_at_the_limit_is_left_alone():
+    assert cut('a' * 126 + '😀', 128) == 'a' * 126 + '😀'
+
+
+def test_an_emoji_over_the_limit_is_cut():
+    result = cut('a' * 127 + '😀', 128)
+
+    assert result == 'a' * 127 + '…'
+    assert utf16_len(result) == 128
+
+
+def test_a_cut_does_not_split_an_emoji():
+    result = cut('a' * 126 + '😀' + 'b' * 3, 128)
+
+    assert result == 'a' * 126 + '…'
+    assert utf16_len(result) == 127
+
+
+def test_a_title_of_128_code_points_and_129_units_fits_after_the_cut():
+    post = to_post(event(title='a' * 127 + '😀'), PLACE, '81-350')
+
+    assert utf16_len(post['title']) <= TITLE_MAX
+
+
+def test_a_description_of_1000_code_points_and_1030_units_fits_after_the_cut():
+    result = cut_description('😀 ' * 30 + 'a' * 940)
+
+    assert utf16_len(result) <= DESCRIPTION_MAX
+    result.encode('utf-8')
+
+
+def test_a_description_is_not_split_inside_an_emoji_at_its_limit():
+    result = cut_description('a' * 999 + '😀' + 'b' * 10)
+
+    assert utf16_len(result) <= DESCRIPTION_MAX
+    result.encode('utf-8')
+
+
+def test_a_description_with_emoji_is_cut_at_a_sentence_end():
+    result = cut_description('😀 Pierwsze zdanie jest tutaj. ' * 40)
+
+    assert result.endswith('tutaj.')
+    assert utf16_len(result) <= DESCRIPTION_MAX
+
+
+def test_postal_code_and_building_number_stay_within_the_limits():
+    post = to_post(event(building_number='1' * 15 + '😀'), PLACE, '8' * 15 + '😀')
+
+    assert utf16_len(post['location']['buildingNum']) <= 16
+    assert utf16_len(post['location']['postalCode']) <= 16
+    post['location']['buildingNum'].encode('utf-8')
 
 
 def test_description_with_no_sentence_end_is_cut_at_a_word():

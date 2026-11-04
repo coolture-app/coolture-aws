@@ -16,16 +16,26 @@ POSTAL_CODE_MAX = 16
 SENTENCE_END = re.compile(r'[a-ząćęłńóśźż]{3}[.!?]\s')
 
 
+def utf16_len(text: str) -> int:
+    # The API is Java, and @Size counts UTF-16 units, so an emoji counts as two.
+    return len(text.encode('utf-16-le')) // 2
+
+
+def _head(text: str, units: int) -> str:
+    # Decoding with 'ignore' drops half a surrogate pair left at the end.
+    return text.encode('utf-16-le')[:units * 2].decode('utf-16-le', 'ignore')
+
+
 def cut(text: str, limit: int) -> str:
-    if len(text) <= limit:
+    if utf16_len(text) <= limit:
         return text
-    return text[:limit - 1].rsplit(' ', 1)[0].rstrip(' ,;:-–\n') + '…'
+    return _head(text, limit - 1).rsplit(' ', 1)[0].rstrip(' ,;:-–\n') + '…'
 
 
 def cut_description(text: str) -> str:
-    if len(text) <= DESCRIPTION_MAX:
+    if utf16_len(text) <= DESCRIPTION_MAX:
         return text
-    head = text[:DESCRIPTION_MAX]
+    head = _head(text, DESCRIPTION_MAX)
     end = max((match.end() - 1 for match in SENTENCE_END.finditer(head)), default=0)
     return head[:end] if end >= DESCRIPTION_MAX // 2 else cut(text, DESCRIPTION_MAX)
 
@@ -38,7 +48,7 @@ def _location(event: Event, place: Place, postal_code: str) -> dict:
     location = {
         'countryCode': COUNTRY,
         'city': cut(event.city, ADDRESS_MAX),
-        'postalCode': postal_code[:POSTAL_CODE_MAX],
+        'postalCode': cut(postal_code, POSTAL_CODE_MAX),
         'coordinates': {'latitude': place.latitude, 'longitude': place.longitude},
     }
     if event.venue:
@@ -46,7 +56,7 @@ def _location(event: Event, place: Place, postal_code: str) -> dict:
     if event.street:
         location['street'] = cut(event.street, ADDRESS_MAX)
     if event.building_number:
-        location['buildingNum'] = event.building_number[:BUILDING_NUMBER_MAX]
+        location['buildingNum'] = cut(event.building_number, BUILDING_NUMBER_MAX)
     return location
 
 
