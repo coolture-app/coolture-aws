@@ -59,12 +59,12 @@ for ((i = 0; i < ${#post_ids[@]}; i += BATCH_SIZE)); do
 
     result="$(sam local invoke PostEmbeddingFunction --template-file "$TEMPLATE" --add-host host.docker.internal:host-gateway --event "$event_file")"
     echo "$result"
-    if grep -q '"itemIdentifier"' <<< "$result"; then
+    if grep -qE '"itemIdentifier"|"errorMessage"' <<< "$result"; then
         failed=1
     fi
 done
 
 if [[ $failed -ne 0 ]]; then
-    echo "Some posts failed to embed (see itemIdentifier above)." >&2
+    echo "Some posts failed to embed (see itemIdentifier or errorMessage above)." >&2
     exit 1
 fi
