@@ -66,6 +66,10 @@ def test_values_a_venue_has_not_given_are_left_out_of_the_location():
     assert set(post['location']) == {'countryCode', 'city', 'postalCode', 'coordinates'}
 
 
+def test_the_post_keeps_the_street_as_published():
+    assert to_post(event(street='ul. Morska'), PLACE, '81-350')['location']['street'] == 'ul. Morska'
+
+
 def test_no_tag_when_there_is_no_category():
     assert to_post(event(category=None), PLACE, '81-350')['tags'] == []
 

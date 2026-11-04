@@ -1,3 +1,4 @@
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ PAUSE_S = 1.0
 # Pomerania, as west, north, east, south. A name matched outside it is another place with the same name.
 REGION = '16.5,55.0,20.0,53.3'
 WRONG_SHAPE = (KeyError, AttributeError, TypeError, ValueError)
+STREET_PREFIX = re.compile(r'^(ul\.|ulica\s)\s*', re.IGNORECASE)
 
 
 class GeocoderUnavailable(RuntimeError):
@@ -43,7 +45,9 @@ class Geocoder:
 
         queries = []
         if event.street:
-            address = f'{event.building_number} {event.street}' if event.building_number else event.street
+            # "5 ul. Morska" finds nothing where "5 Morska" does. "pl." and "al." stay, as they can be part of the name.
+            street = STREET_PREFIX.sub('', event.street)
+            address = f'{event.building_number} {street}' if event.building_number else street
             queries.append({'street': address, 'city': city, 'country': 'Polska'})
         if event.venue:
             queries.append({'q': f'{event.venue}, {city}'})

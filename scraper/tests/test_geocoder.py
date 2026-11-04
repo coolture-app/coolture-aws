@@ -61,6 +61,22 @@ def test_street_address_wins_and_is_exact():
     assert len(session.queries) == 1
 
 
+@pytest.mark.parametrize('street, asked', [
+    ('ul. Morska', '5 Morska'),
+    ('Ul. Morska', '5 Morska'),
+    ('ul.Morska', '5 Morska'),
+    ('ulica Morska', '5 Morska'),
+    ('Ulanowska', '5 Ulanowska'),
+    ('pl. Grunwaldzki', '5 pl. Grunwaldzki'),
+    ('al. Zwycięstwa', '5 al. Zwycięstwa'),
+])
+def test_only_the_street_prefix_is_left_out_of_the_query(street, asked):
+    session = FakeSession({asked: hit()})
+
+    assert geocoder(session).locate(event(None, street, '5', 'Gdynia')).exact is True
+    assert session.queries[0]['street'] == asked
+
+
 def test_venue_is_tried_when_the_street_misses():
     session = FakeSession({'Klub, Gdynia': hit()})
 
