@@ -7,6 +7,8 @@ from collections import Counter
 from datetime import datetime, timezone
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from api import ApiError, CooltureApi
 from geocoder import DEFAULT_URL, Geocoder
@@ -17,6 +19,26 @@ log = logging.getLogger('scraper')
 
 USER_AGENT = 'coolture-scraper/1.0 (+https://github.com/coolture-app/coolture-aws)'
 DEFAULT_API_URL = 'http://localhost:3000'
+
+
+class PacedRetry(Retry):
+    # Only a throttle is retried, because a 5xx may come after a post was saved, whatever Retry-After says.
+    RETRY_AFTER_STATUS_CODES = frozenset({429})
+
+    def get_backoff_time(self) -> float:
+        # urllib3 sends the first retry at once, which would break the one-a-second limit of the site and Nominatim.
+        return max(super().get_backoff_time(), self.backoff_factor)
+
+
+def http_session() -> requests.Session:
+    # read=False keeps a POST from being sent again after a timeout, and lets the timeout arrive as requests.Timeout.
+    retry = PacedRetry(total=3, connect=2, read=False, status_forcelist={429}, backoff_factor=2,
+                       allowed_methods=None, respect_retry_after_header=True, raise_on_status=False)
+    session = requests.Session()
+    session.headers['User-Agent'] = USER_AGENT
+    session.mount('https://', HTTPAdapter(max_retries=retry))
+    session.mount('http://', HTTPAdapter(max_retries=retry))
+    return session
 
 
 def run(site: Site, geocoder: Geocoder, api: CooltureApi | None, now: datetime, limit: int | None) -> Counter:
@@ -73,19 +95,14 @@ def main() -> int:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', stream=sys.stderr)
 
-    site_session = requests.Session()
-    site_session.headers['User-Agent'] = USER_AGENT
-    api_session = requests.Session()
-    api_session.headers['User-Agent'] = USER_AGENT
-
-    geocoder = Geocoder(site_session, os.getenv('SCRAPER_NOMINATIM_URL', DEFAULT_URL))
+    geocoder = Geocoder(http_session(), os.getenv('SCRAPER_NOMINATIM_URL', DEFAULT_URL))
     api = None
     if not args.dry_run:
-        api = CooltureApi(api_session, os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
+        api = CooltureApi(http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
                           token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
 
     try:
-        stats = run(Site(site_session), geocoder, api, datetime.now(timezone.utc), args.limit)
+        stats = run(Site(http_session()), geocoder, api, datetime.now(timezone.utc), args.limit)
     except ApiError as error:
         log.error('%s', error)
         return 1

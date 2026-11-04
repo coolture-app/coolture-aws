@@ -19,13 +19,24 @@ class FakeSession:
         self.responses = list(responses)
         self.calls = []
 
-    def request(self, method, url, timeout, **kwargs):
+    def _answer(self, method, url, kwargs):
         self.calls.append((method, url, kwargs))
         return self.responses.pop(0)
 
+    def get(self, url, timeout, **kwargs):
+        return self._answer('GET', url, kwargs)
+
+    def post(self, url, timeout, **kwargs):
+        return self._answer('POST', url, kwargs)
+
+
+@pytest.fixture(autouse=True)
+def no_write_pause(monkeypatch):
+    monkeypatch.setattr('api.WRITE_PAUSE_S', 0)
+
 
 def api(session):
-    return CooltureApi(session, 'http://api.test/', user_id='bot', sleep=lambda _: None)
+    return CooltureApi(session, 'http://api.test/', user_id='bot')
 
 
 def page(urls, next_cursor=None):
@@ -70,9 +81,9 @@ def test_cursor_of_a_page_is_sent_with_the_next_request():
     seen = []
 
     class Recording(FakeSession):
-        def request(self, method, url, timeout, **kwargs):
+        def get(self, url, timeout, **kwargs):
             seen.append(kwargs['params'].get('cursor'))
-            return super().request(method, url, timeout, **kwargs)
+            return super().get(url, timeout, **kwargs)
 
     api(Recording(responses)).existing_event_urls('bot-id')
 
@@ -92,12 +103,6 @@ def test_a_rejected_cursor_stops_the_run_instead_of_posting_duplicates():
         api(session).existing_event_urls('bot-id')
 
 
-def test_reads_retry_a_throttle_and_a_failure():
-    session = FakeSession([FakeResponse(429), FakeResponse(503), page(['a'])])
-
-    assert api(session).existing_event_urls('bot-id') == {'a'}
-
-
 def test_create_returns_nothing_on_success():
     session = FakeSession([FakeResponse(201, {'id': 'post'})])
 
@@ -105,17 +110,10 @@ def test_create_returns_nothing_on_success():
     assert session.calls[0][2]['json'] == {'title': 't'}
 
 
-def test_create_retries_a_throttle():
-    session = FakeSession([FakeResponse(429), FakeResponse(201, {})])
-
-    assert api(session).create_post({}) is None
-
-
-def test_create_does_not_retry_a_failure_that_may_have_saved_the_post():
+def test_a_failure_that_may_have_saved_the_post_is_reported():
     session = FakeSession([FakeResponse(500, {'error': 'x'})])
 
     assert api(session).create_post({}).startswith('500')
-    assert len(session.calls) == 1
 
 
 def test_a_rejected_post_is_reported_and_the_run_goes_on():
