@@ -36,6 +36,12 @@ def no_write_pause(monkeypatch):
     monkeypatch.setattr('api.WRITE_PAUSE_S', 0)
 
 
+@pytest.fixture(autouse=True)
+def ledger(monkeypatch, tmp_path):
+    monkeypatch.setattr('api.LEDGER_DIR', tmp_path)
+    return tmp_path / '.imported-api.test.txt'
+
+
 def api(session):
     return CooltureApi(session, 'http://api.test/', user_id='bot')
 
@@ -113,8 +119,10 @@ def test_a_rejected_cursor_stops_the_run_instead_of_posting_duplicates():
 def test_create_returns_nothing_on_success():
     session = FakeSession([FakeResponse(201, {'id': 'post'})])
 
-    assert api(session).create_post({'title': 't'}) is None
-    assert session.calls[0][2]['json'] == {'title': 't'}
+    post = {'title': 't', 'eventUrl': 'a'}
+
+    assert api(session).create_post(post) is None
+    assert session.calls[0][2]['json'] == post
 
 
 def test_a_failure_that_may_have_saved_the_post_is_reported():
@@ -143,6 +151,60 @@ def test_a_post_that_timed_out_counts_as_rejected():
             raise requests.ReadTimeout('slow')
 
     assert 'timed out' in api(Slow([])).create_post({})
+
+
+def test_a_listed_post_is_remembered(ledger):
+    assert api(FakeSession([ME, page(['a'])])).existing_event_urls() == {'a'}
+
+    assert ledger.read_text(encoding='utf-8').splitlines() == ['a']
+
+
+def test_a_deleted_post_is_still_known(ledger):
+    ledger.write_text('a\nb\n', encoding='utf-8')
+
+    assert api(FakeSession([ME, page(['a'])])).existing_event_urls() == {'a', 'b'}
+    assert ledger.read_text(encoding='utf-8').splitlines() == ['a', 'b']
+
+
+def test_a_database_with_none_of_our_posts_starts_over(ledger):
+    ledger.write_text('a\nb\n', encoding='utf-8')
+
+    assert api(FakeSession([ME, page([])])).existing_event_urls() == set()
+    assert ledger.read_text(encoding='utf-8') == ''
+
+
+def test_a_created_post_is_remembered_at_once(ledger):
+    ledger.write_text('a\n', encoding='utf-8')
+
+    api(FakeSession([FakeResponse(201, {})])).create_post({'eventUrl': 'b'})
+
+    assert ledger.read_text(encoding='utf-8').splitlines() == ['a', 'b']
+
+
+def test_a_post_that_failed_is_not_remembered(ledger):
+    api(FakeSession([FakeResponse(500, {})])).create_post({'eventUrl': 'b'})
+
+    assert not ledger.exists()
+
+
+def test_a_failed_list_leaves_what_is_remembered(ledger):
+    ledger.write_text('a\n', encoding='utf-8')
+
+    with pytest.raises(ApiError):
+        api(FakeSession([ME, FakeResponse(500, {})])).existing_event_urls()
+
+    assert ledger.read_text(encoding='utf-8') == 'a\n'
+
+
+def test_each_environment_has_its_own_file_named_by_host(tmp_path):
+    local = CooltureApi(FakeSession([ME, page(['a'])]), 'http://localhost:3000', user_id='bot')
+    aws = CooltureApi(FakeSession([ME, page(['b'])]), 'https://dev.example.test/api', token='abc')
+
+    assert local.existing_event_urls() == {'a'}
+    assert aws.existing_event_urls() == {'b'}
+
+    assert (tmp_path / '.imported-localhost.txt').read_text(encoding='utf-8') == 'a\n'
+    assert (tmp_path / '.imported-dev.example.test.txt').read_text(encoding='utf-8') == 'b\n'
 
 
 class NotJson(FakeResponse):

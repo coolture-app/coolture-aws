@@ -1,9 +1,13 @@
 import logging
 import time
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
 log = logging.getLogger(__name__)
+
+LEDGER_DIR = Path(__file__).parent
 
 PAGE_LIMIT = 100
 TIMEOUT_S = 40
@@ -27,6 +31,8 @@ class CooltureApi:
     def __init__(self, session: requests.Session, base_url: str, token: str | None = None, user_id: str | None = None) -> None:
         self._session = session
         self._base_url = base_url.rstrip('/')
+        # GET /posts never returns a deleted post, so this remembers what would otherwise be posted again.
+        self._ledger = LEDGER_DIR / f'.imported-{urlsplit(base_url).hostname}.txt'
         if token:
             session.headers['Authorization'] = f'Bearer {token}'
         elif user_id:
@@ -46,8 +52,21 @@ class CooltureApi:
             raise ApiError(f'GET /auth/me gave an unexpected body: {_answer(response)}') from error
 
     def existing_event_urls(self) -> set[str]:
+        listed = self._listed_urls(self._me())
+        # A database with none of our posts is a new one, for example after make reset-db, so the old list doesn't apply.
+        remembered = self._read_ledger() if listed else set()
+        self._write_ledger(listed | remembered)
+        return listed | remembered
+
+    def _read_ledger(self) -> set[str]:
+        return set(self._ledger.read_text(encoding='utf-8').splitlines()) if self._ledger.exists() else set()
+
+    def _write_ledger(self, urls: set[str]) -> None:
+        self._ledger.write_text(''.join(f'{url}\n' for url in sorted(urls)), encoding='utf-8')
+
+    def _listed_urls(self, author_id: str) -> set[str]:
         urls: set[str] = set()
-        params: dict = {'authorId': self._me(), 'includePast': 'true', 'limit': PAGE_LIMIT}
+        params: dict = {'authorId': author_id, 'includePast': 'true', 'limit': PAGE_LIMIT}
         while True:
             response = self._session.get(f'{self._base_url}/posts', params=params, timeout=TIMEOUT_S)
             if response.status_code != 200:
@@ -71,4 +90,8 @@ class CooltureApi:
         time.sleep(WRITE_PAUSE_S)
         if response.status_code in (401, 403):
             raise ApiError(f'POST /posts returned {_answer(response)}')
-        return None if response.status_code == 201 else _answer(response)
+        if response.status_code != 201:
+            return _answer(response)
+        with self._ledger.open('a', encoding='utf-8') as ledger:
+            ledger.write(f'{post["eventUrl"]}\n')
+        return None
