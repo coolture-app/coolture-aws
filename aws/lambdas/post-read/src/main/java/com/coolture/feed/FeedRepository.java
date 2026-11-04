@@ -33,7 +33,7 @@ public class FeedRepository {
         SELECT p.id,
                p.starts_at,
                COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0) AS engagement,
-               1 - (pe.embedding <=> (SELECT embedding FROM user_embeddings WHERE user_id = ?::uuid)) AS similarity,
+               1 - (pe.embedding <=> (SELECT embedding FROM user_embeddings WHERE user_id = ?::uuid AND model = pe.model)) AS similarity,
                ST_Distance(el.coordinates,
                            ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters
         FROM posts p
