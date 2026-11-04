@@ -16,3 +16,4 @@ __pycache__/
 .venv
 .agents
 aws/lambdas/ssr/dist/
+scraper/.imported-*
