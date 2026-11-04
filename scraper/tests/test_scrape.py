@@ -290,6 +290,33 @@ def test_a_failed_run_logs_one_error_and_the_totals_and_exits_1(monkeypatch, cap
     assert [record.levelname for record in caplog.records].count('ERROR') == 1
 
 
+def test_a_network_error_names_the_request_in_one_line(monkeypatch, caplog, scraper_args):
+    request = requests.Request('GET', 'http://localhost:3000/auth/me').prepare()
+
+    def fail(*_):
+        raise requests.ConnectionError('HTTPConnectionPool(...): Max retries exceeded', request=request)
+
+    monkeypatch.setattr('scrape.run', fail)
+
+    assert main() == 1
+    assert 'Run stopped: GET http://localhost:3000/auth/me failed: ConnectionError' in caplog.text
+    assert 'HTTPConnectionPool' not in caplog.text
+
+
+def test_a_failed_status_is_named_too(monkeypatch, caplog, scraper_args):
+    request = requests.Request('GET', 'https://site.test/imprezy').prepare()
+    response = requests.Response()
+    response.status_code = 503
+
+    def fail(*_):
+        raise requests.HTTPError('503 Server Error', request=request, response=response)
+
+    monkeypatch.setattr('scrape.run', fail)
+
+    assert main() == 1
+    assert 'Run stopped: GET https://site.test/imprezy failed: 503' in caplog.text
+
+
 def test_a_missing_identity_is_one_clear_error(monkeypatch, caplog, scraper_args):
     monkeypatch.delenv('SCRAPER_USER_ID')
 

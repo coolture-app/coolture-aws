@@ -101,12 +101,20 @@ def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Count
             stats['created'] += 1
 
 
+def _failed_request(error: requests.RequestException) -> str:
+    where = f'{error.request.method} {error.request.url}' if error.request else 'a request'
+    outcome = error.response.status_code if error.response is not None else type(error).__name__
+    return f'{where} failed: {outcome}'
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Import trojmiasto.pl events into Coolture')
     parser.add_argument('--limit', type=int, help='stop after this many new posts')
     parser.add_argument('--dry-run', action='store_true', help='print the posts as JSON lines instead of sending them')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', stream=sys.stderr)
+    # A retry that fails ends in the one error below, so its warnings would only repeat it.
+    logging.getLogger('urllib3').setLevel(logging.ERROR)
 
     stats: Counter = Counter()
     try:
@@ -115,9 +123,12 @@ def main() -> int:
             http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
             token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
         run(Site(http_session()), geocoder, sink, stats, args.limit)
-    except (ApiError, GeocoderUnavailable, requests.RequestException) as error:
-        # Everything imported so far stays, and the next run goes on from there.
+    # Everything imported so far stays after an error, and the next run goes on from there.
+    except (ApiError, GeocoderUnavailable) as error:
         log.error('Run stopped: %s', error)
+        return 1
+    except requests.RequestException as error:
+        log.error('Run stopped: %s', _failed_request(error))
         return 1
     finally:
         log.info('Done: %s', dict(stats))
