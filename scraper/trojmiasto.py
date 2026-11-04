@@ -22,6 +22,7 @@ WARSAW = ZoneInfo('Europe/Warsaw')
 NO_HOUR = time(12, 0)
 
 HOUR = re.compile(r'godz\.\s*(\d{1,2})[:.](\d{2})', re.IGNORECASE)
+END_HOUR = re.compile(r'godz\.\s*\d{1,2}[:.]\d{2}\s*[-–]\s*(\d{1,2})[:.](\d{2})', re.IGNORECASE)
 BUILDING_NUMBER = re.compile(r'^(?P<street>.*\S)\s+(?P<number>\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)?)$')
 REMARK = re.compile(r'\s*\([^)]*\)$')
 
@@ -41,6 +42,7 @@ class ListingItem:
     venue: str | None
     start_date: date | None
     hour: time | None
+    end_hour: time | None = None
 
 
 @dataclass(frozen=True)
@@ -82,11 +84,19 @@ def clean_description(value: str | None) -> str:
     return GLUED_WORDS.sub(r'\1 \2', text)
 
 
-def parse_hour(label: str | None) -> time | None:
-    match = HOUR.search(label or '')
+def _clock_time(match: re.Match | None) -> time | None:
     if match is None or int(match[1]) > 23 or int(match[2]) > 59:
         return None
     return time(int(match[1]), int(match[2]))
+
+
+def parse_hour(label: str | None) -> time | None:
+    return _clock_time(HOUR.search(label or ''))
+
+
+def parse_end_hour(label: str | None) -> time | None:
+    # "Godz. 14:00 - 18:00" is a range, while "Godz. 17:00, 20:00" is two showings and gives no end.
+    return _clock_time(END_HOUR.search(label or ''))
 
 
 def _real_venue(name: str | None) -> str | None:
@@ -120,6 +130,7 @@ def parse_listing(page_html: str) -> list[ListingItem]:
             venue=_real_venue(text_of('.event__item__location__place')),
             start_date=_parse_day(element.select_one('.event__item__date')),
             hour=parse_hour(text_of('.event__item__date__hour')),
+            end_hour=parse_end_hour(text_of('.event__item__date__hour')),
         ))
     return items
 
@@ -216,6 +227,13 @@ def _ends_at(end: datetime | None, start: datetime) -> datetime | None:
     return end if end > start else None
 
 
+def _listed_end(end_hour: time | None, start: datetime) -> datetime | None:
+    if end_hour is None:
+        return None
+    end = datetime.combine(start.date(), end_hour, tzinfo=WARSAW)
+    return end if end > start else end + timedelta(days=1)
+
+
 def _facts(item: ListingItem, venue: str | None) -> str:
     facts = ', '.join(part for part in (item.title, venue, item.city) if part)
     return f'{item.category.capitalize()}: {facts}.' if item.category else f'{facts}.'
@@ -241,7 +259,7 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
         online=page.online,
         description=page.description or _facts(item, venue),
         start=start,
-        end=_ends_at(page.end, start),
+        end=_ends_at(page.end, start) or _listed_end(item.end_hour, start),
     )
 
 

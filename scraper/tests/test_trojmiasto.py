@@ -63,6 +63,26 @@ def test_listing_keeps_an_item_with_no_hour():
     assert parse_listing(listing_item(hour='cały dzień'))[0].hour is None
 
 
+def test_listing_reads_both_ends_of_an_hour_range():
+    item = parse_listing(listing_item(hour='Godz. 14:00 - 18:00'))[0]
+
+    assert (item.hour, item.end_hour) == (time(14, 0), time(18, 0))
+
+
+def test_a_single_hour_has_no_end():
+    assert parse_listing(listing_item())[0].end_hour is None
+
+
+def test_a_list_of_hours_is_not_a_range():
+    item = parse_listing(listing_item(hour='Godz. 17:00, 20:00'))[0]
+
+    assert (item.hour, item.end_hour) == (time(17, 0), None)
+
+
+def test_a_range_ending_at_an_impossible_hour_has_no_end():
+    assert parse_listing(listing_item(hour='Godz. 14:00 - 25:00'))[0].end_hour is None
+
+
 def test_event_page_reads_the_address_and_ignores_the_block_midnight():
     page = parse_event_page(event_page())
 
@@ -321,6 +341,23 @@ def test_end_before_the_start_is_dropped():
     end = datetime.fromisoformat('2026-11-05T10:00:00+01:00')
 
     assert merge(listed(), read_page(end=end)).end is None
+
+
+def test_end_hour_of_the_listing_is_used_when_the_page_gives_no_end():
+    event = merge(listed(hour=time(14, 0), end_hour=time(18, 0)), read_page())
+
+    assert (event.end.day, event.end.hour) == (5, 18)
+
+
+def test_end_hour_at_or_before_the_start_is_on_the_next_day():
+    assert merge(listed(hour=time(22, 0), end_hour=time(2, 0)), read_page()).end.day == 6
+    assert merge(listed(hour=time(22, 0), end_hour=time(22, 0)), read_page()).end.day == 6
+
+
+def test_end_of_the_page_wins_over_the_end_hour_of_the_listing():
+    end = datetime.fromisoformat('2026-11-05T21:00:00+01:00')
+
+    assert merge(listed(hour=time(14, 0), end_hour=time(18, 0)), read_page(end=end)).end.hour == 21
 
 
 def test_empty_description_is_built_from_the_facts():
