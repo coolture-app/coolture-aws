@@ -86,7 +86,8 @@ Invoking `PostEmbeddingFunction` with `{"action":"embed-interests"}` embeds inte
 `scripts/deploy.sh` does this after deploying the embeddings stack. Locally use `make embed-interests`.
 
 The model is `sdadas/mmlw-roberta-base`, pinned to a revision in `recommender/embedding-workers/post-embedding/Dockerfile`.
-A deploy that changes the model re-embeds only the interests, so posts and users need it separately.
+Vectors of different models are never compared: `UserEmbeddingFunction` reads only the current model's vectors, and the feed gives a
+post and a user on different models neutral similarity. See [Changing the embedding model](#changing-the-embedding-model).
 
 The schedule is every 30 minutes, 08:00-15:59 Warsaw time, and stays off unless you deploy with `USER_EMBEDDING_SCHEDULE=true`.
 
@@ -107,9 +108,9 @@ Locally, `sam local` emulates neither S3 notifications nor SQS triggers (and pos
 so embeddings are computed on demand against the docker Postgres (`make up` and `make build-embeddings` first):
 
 ```bash
-make embed-posts                     # posts with no embedding, or edited since it was computed
+make embed-posts                     # posts with no embedding, one from another model, or edited since it was computed
 make embed-posts POST_ID=<uuid>      # one post
-make embed-posts ALL=1               # every non-deleted post (e.g. after changing the model)
+make embed-posts ALL=1               # every non-deleted post
 make embed-posts DRY_RUN=1           # print the generated SQS/S3 events, don't invoke
 make embed-users                     # what the schedule does in AWS
 ```
@@ -118,6 +119,65 @@ make embed-users                     # what the schedule does in AWS
 `sam local invoke PostEmbeddingFunction`, 50 posts per invocation (`BATCH_SIZE=`), and exits non-zero if any post fails.
 
 Unit tests: `pip install -r recommender/embedding-workers/<worker>/requirements-dev.txt` then `make test-python`.
+`DB_TEST=true make test-python` also runs `user-embedding`'s queries against `make up`, and leaves the database as it was.
+
+### Changing the embedding model
+
+Set the model in the `Dockerfile` and in both workers' `settings.py`, and keep it 768-dimensional or add a migration for the vector
+columns. Then re-embed in this order, because user vectors are built from the other two: interests, posts, users. Until that's done,
+nothing fails, and vectors of the same model are still compared. A post and a user on different models get affinity `0.5`, the same as
+a post with no vector.
+
+The feed's affinity scale belongs to the model too. `AFFINITY_LOW` and `AFFINITY_HIGH` in `FeedConfig` cover the cosines this model gives
+between user vectors and events, with their midpoint at the median. Measure them again for a new model, or if interests start using
+a prefix, and keep in mind that a user's cosines rise as they like more posts.
+
+A new name is what marks a vector as old. A new revision, or a change to how text is encoded, isn't visible this way. Locally, use
+`make embed-posts ALL=1` for that and clear `interest_embeddings` first. There's no equivalent on AWS yet.
+
+Locally:
+
+```bash
+make build-embeddings
+make embed-interests
+make embed-posts                     # picks up every post on another model
+make embed-users
+```
+
+On AWS, **untested, because none of this has run on AWS yet**. Only the listing of posts below has been run, against `make local`.
+Replace `dev` for another environment.
+
+```bash
+# 1. Interests. The deploy does this.
+make deploy-embeddings
+
+# 2. Posts. An empty object per post goes through the normal S3 → SQS → PostEmbeddingFunction path.
+API="$(aws cloudformation describe-stacks --stack-name coolture-backend-dev \
+    --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)"
+API="${API%/}"
+BUCKET="coolture-dev-embedding-requests-$(aws sts get-caller-identity --query Account --output text)"
+cursor=""
+while :; do
+    page="$(curl -fsS -G "$API/posts" -d includePast=true -d limit=100 ${cursor:+--data-urlencode "cursor=$cursor"})"
+    for id in $(jq -r '.items[].id' <<< "$page"); do
+        aws s3api put-object --bucket "$BUCKET" --key "posts/$id" > /dev/null
+    done
+    cursor="$(jq -r '.page.nextCursor // empty' <<< "$page")"
+    [[ -n "$cursor" ]] || break
+done
+
+# Wait until both counts are 0. Anything on coolture-dev-post-embedding-dlq failed three times.
+aws sqs get-queue-attributes --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible \
+    --queue-url "$(aws sqs get-queue-url --queue-name coolture-dev-post-embedding --query QueueUrl --output text)"
+
+# 3. Users.
+aws lambda invoke --function-name coolture-dev-user-embedding --cli-binary-format raw-in-base64-out \
+    --cli-read-timeout 310 --payload '{}' /dev/stdout
+```
+
+The listing goes through the public API, because Aurora is reachable only from inside the VPC, so it sees public posts only. A
+friends-only or private post keeps its old vector until it's next edited: it stays neutral in the feed, and likes of it don't count
+towards user vectors.
 
 ## Interest onboarding
 

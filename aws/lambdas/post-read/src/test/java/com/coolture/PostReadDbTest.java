@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -59,6 +60,7 @@ import static org.mockito.Mockito.mock;
 class PostReadDbTest {
 
     private static final UUID ME = UUID.fromString("a0000000-0000-0000-0000-000000000001");
+    private static final UUID OTHER_MODEL_POST = UUID.fromString("a0000000-0000-0000-0000-000000000200");
 
     private static final Set<String> PUBLIC_LIVE = Set.of("future_public", "no_end_started_2h", "multi_day_running", "commented");
     private static final Set<String> INTERACTED = Set.of("liked", "disliked", "interested", "attending");
@@ -203,6 +205,17 @@ class PostReadDbTest {
             ruleTitles(feedRepository.findUpcoming(ME, Instant.now(), null, null, 1000)));
         assertEquals(ruleTitles(walkFeed(feedService, null, 100, null, null, FeedMode.RANKED)),
             ruleTitles(feedRepository.findUpcoming(null, Instant.now(), null, null, 1000)));
+    }
+
+    @Test
+    void feed_aPostVectorFromAnotherModel_isNeutral() throws SQLException {
+        Instant now = Instant.now();
+        List<FeedScorer.Facts> candidates = feedRepository.findCandidates(ME, now, null, null);
+        FeedScorer.Facts otherModel = candidates.stream().filter(f -> f.id().equals(OTHER_MODEL_POST)).findFirst().orElseThrow();
+
+        assertNull(otherModel.similarity());
+        assertEquals(FeedConfig.NEUTRAL, new FeedScorer(FeedConfig.DEFAULTS).score(otherModel, now, 42).affinity());
+        assertTrue(candidates.stream().anyMatch(f -> f.similarity() != null), "vectors of the same model must still be compared");
     }
 
     // ===== /posts rules =====

@@ -74,6 +74,13 @@ WHERE p.title LIKE 'walk\_%' AND p.author_id = 'a0000000-0000-0000-0000-00000000
 INSERT INTO user_embeddings (user_id, embedding, model)
 SELECT 'a0000000-0000-0000-0000-000000000001', array_agg(cos(i / 89.0))::real[]::vector, 'test' FROM generate_series(1, 768) i;
 
+-- A vector labelled with another model: comparing it with the viewer's would give a number that means nothing.
+INSERT INTO posts (id, author_id, title, starts_at, type)
+VALUES ('a0000000-0000-0000-0000-000000000200', 'a0000000-0000-0000-0000-000000000002', 'other_model_vector', now() + interval '2 days', 'ONLINE');
+
+INSERT INTO post_embeddings (post_id, embedding, model)
+SELECT 'a0000000-0000-0000-0000-000000000200', embedding, 'other-model' FROM post_embeddings LIMIT 1;
+
 -- The map only shows posts with a location.
 INSERT INTO event_locations (id, coordinates)
 VALUES ('a0000000-0000-0000-0000-000000000100', ST_SetSRID(ST_MakePoint(18.65, 54.35), 4326)::geography);

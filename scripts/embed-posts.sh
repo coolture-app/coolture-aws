@@ -3,6 +3,7 @@ set -euo pipefail
 
 TEMPLATE="${TEMPLATE:-.aws-sam/embeddings/template.yaml}"
 BATCH_SIZE="${BATCH_SIZE:-50}"
+DOCKERFILE=recommender/embedding-workers/post-embedding/Dockerfile
 
 psql_query() {
     docker compose exec -T postgres psql -U coolture_admin -d coolture -At -v ON_ERROR_STOP=1 -c "$1"
@@ -11,7 +12,10 @@ psql_query() {
 if [[ -n "${POST_ID:-}" ]]; then
     post_ids=("$POST_ID")
 else
-    stale_filter="AND (pe.post_id IS NULL OR p.last_modified_at > pe.updated_at)"
+    # The image labels its vectors with this value, so a post with any other label, or none, holds no current vector.
+    model="$(sed -n 's/^ARG EMBEDDING_MODEL=//p' "$DOCKERFILE")"
+    [[ -n "$model" ]] || { echo "No EMBEDDING_MODEL in $DOCKERFILE." >&2; exit 1; }
+    stale_filter="AND (pe.model IS DISTINCT FROM '$model' OR p.last_modified_at > pe.updated_at)"
     [[ -n "${ALL:-}" ]] && stale_filter=""
     mapfile -t post_ids < <(psql_query "
         SELECT p.id

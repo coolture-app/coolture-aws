@@ -125,7 +125,18 @@ def test_should_read_only_the_requested_users():
     app.run_once(conn, [USER_ID])
 
     params = [c.args[1] for c in cursor.execute.call_args_list if len(c.args) > 1]
-    assert [p["users"] for p in params] == [[USER_ID], [USER_ID]]
+    assert [p["users"] for p in params if "users" in p] == [[USER_ID], [USER_ID]]
+
+
+def test_should_read_only_vectors_of_the_current_model():
+    conn, cursor = connection_returning()
+
+    app.run_once(conn)
+
+    reads = [c.args for c in cursor.execute.call_args_list if len(c.args) > 1 and "model" in c.args[1]]
+    assert [params["model"] for _, params in reads] == [MODEL, MODEL]
+    assert "pe.model = %(model)s" in reads[0][0]
+    assert "ie.model = %(model)s" in reads[1][0]
 
 
 def test_should_read_every_user_when_invoked_by_schedule(monkeypatch):
