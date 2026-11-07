@@ -1,9 +1,12 @@
 import logging
 import time
+from contextlib import suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
+
+from trojmiasto import Image, Site
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +31,10 @@ def _answer(response: requests.Response) -> str:
 
 class CooltureApi:
 
-    def __init__(self, session: requests.Session, base_url: str, token: str | None = None, user_id: str | None = None) -> None:
+    def __init__(self, session: requests.Session, base_url: str, token: str | None = None, user_id: str | None = None,
+                 storage: requests.Session | None = None) -> None:
         self._session = session
+        self._storage = storage or requests.Session()
         self._base_url = base_url.rstrip('/')
         # GET /posts never returns a deleted post, so this remembers what would otherwise be posted again.
         self._ledger = LEDGER_DIR / f'.imported-{urlsplit(base_url).hostname}.txt'
@@ -90,8 +95,36 @@ class CooltureApi:
         time.sleep(WRITE_PAUSE_S)
         if response.status_code in (401, 403):
             raise ApiError(f'POST /posts returned {_answer(response)}')
+        if 400 <= response.status_code < 500:
+            for media_id in post.get('mediaIds', []):
+                with suppress(requests.RequestException):
+                    self._session.delete(f'{self._base_url}/media/{media_id}', timeout=TIMEOUT_S)
         if response.status_code != 201:
             return _answer(response)
         with self._ledger.open('a', encoding='utf-8') as ledger:
             ledger.write(f'{post["eventUrl"]}\n')
         return None
+
+    def attach_image(self, post: dict, image_url: str, site: Site) -> bool:
+        image = site.image(image_url)
+        if image is None:
+            return False
+        try:
+            post['mediaIds'] = [self._upload_image(image)]
+        except (requests.RequestException, *WRONG_SHAPE) as error:
+            log.warning('Image not uploaded url=%s reason=%s', image_url, error)
+            return False
+        return True
+
+    def _upload_image(self, image: Image) -> str:
+        response = self._session.post(f'{self._base_url}/media/uploads/init', timeout=TIMEOUT_S, json={
+            'purpose': 'EVENT_COVER', 'mimeType': image.mime_type, 'sizeBytes': len(image.content), 'fileName': image.file_name})
+        if response.status_code in (401, 403):
+            raise ApiError(f'POST /media/uploads/init returned {_answer(response)}')
+        response.raise_for_status()
+        upload = response.json()
+        self._storage.put(upload['uploadUrl'], data=image.content, headers=upload['requiredHeaders'],
+                          timeout=TIMEOUT_S).raise_for_status()
+        self._session.post(f'{self._base_url}/media/uploads/{upload["mediaId"]}/complete',
+                           timeout=TIMEOUT_S).raise_for_status()
+        return upload['mediaId']

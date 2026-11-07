@@ -68,6 +68,10 @@ class FakeApi:
     def existing_event_urls(self):
         return self.existing
 
+    def attach_image(self, post, image_url, site):
+        post['mediaIds'] = [image_url]
+        return True
+
     def create_post(self, post):
         self.created.append(post)
         return self.failure
@@ -322,3 +326,27 @@ def test_a_missing_identity_is_one_clear_error(monkeypatch, caplog, scraper_args
 
     assert main() == 1
     assert 'SCRAPER_USER_ID' in caplog.text
+
+
+def test_event_image_is_attached():
+    api = FakeApi()
+
+    stats = run_import(FakeSite([item(1)], {item(1).url: page(image_url='http://img')}), FakeGeocoder(), api)
+
+    assert api.created[0]['mediaIds'] == ['http://img']
+    assert stats['with_image'] == 1
+
+
+def test_event_with_no_image_is_posted_without_one():
+    api = FakeApi()
+
+    stats = run_import(FakeSite([item(1)]), FakeGeocoder(), api)
+
+    assert 'mediaIds' not in api.created[0]
+    assert stats['with_image'] == 0
+
+
+def test_dry_run_names_the_image(capsys):
+    run_import(FakeSite([item(1)], {item(1).url: page(image_url='http://img')}), FakeGeocoder(), DryRun())
+
+    assert json.loads(capsys.readouterr().out)['imageUrl'] == 'http://img'

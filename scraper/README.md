@@ -4,7 +4,7 @@ Imports the events of the [trojmiasto.pl](https://www.trojmiasto.pl/imprezy/dni,
 account. It runs outside AWS and writes only through the public API, as `POST /posts`, like any other client. Aurora isn't
 reachable from outside the VPC.
 
-Each post has a real title and description, its address, and coordinates, which the feed's proximity signal needs. An event held
+Each post has a real title and description, its image, its address, and coordinates, which the feed's proximity signal needs. An event held
 in a place is sent as `OFFLINE`. If it can't be located it's left out, because an `ONLINE` post would get no proximity signal.
 
 ## Running it
@@ -48,15 +48,17 @@ the next run goes on from there. A post that timed out counts as `rejected`, bec
 | Street, postal code, online or not | The schema.org `Event` block. Theatre pages on `/kultura/` have none, so only the venue is known |
 | Coordinates | Nominatim: the street address, then the venue, then the city centre, limited to Pomerania |
 | Missing postal code | Nominatim's reverse lookup at those coordinates, only when neither the page nor the search has one |
+| Image | The page's `og:image` when it's an event photo under `/zdj/`, uploaded through `/media/uploads` |
 
 Run totals are logged at the end. `exact_location` and `city_location` show how many posts have a precise point, and `no_location`
-how many were left out.
+how many were left out. `with_image` counts the posts sent with their image. An image that can't be uploaded is left out, and
+`--dry-run` prints its address as `imageUrl`.
 
 ## Limits
 
 - **Events that have already started are skipped,** because `POST /posts` accepts only future starts. That includes exhibitions
   that opened earlier.
-- **Imported posts aren't updated.** A later change on the site isn't picked up.
+- **Imported posts aren't updated.** A later change on the site isn't picked up, and posts imported before images have none.
 - **An event with no hour starts at 12:00.**
 - **A deleted post stays out only on the machine that saw it.** `GET /posts` never returns a deleted post, so the scraper keeps the URLs it has seen
   in `scraper/.imported-<api host>.txt`, which git ignores. That covers one operator per environment: a post deleted before this machine ever saw it

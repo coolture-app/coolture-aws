@@ -2,6 +2,7 @@ import pytest
 import requests
 
 from api import ApiError, CooltureApi
+from trojmiasto import Image
 
 
 class FakeResponse:
@@ -12,6 +13,10 @@ class FakeResponse:
 
     def json(self):
         return self._body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(self.status_code)
 
 
 class FakeSession:
@@ -29,6 +34,12 @@ class FakeSession:
 
     def post(self, url, timeout, **kwargs):
         return self._answer('POST', url, kwargs)
+
+    def put(self, url, timeout, **kwargs):
+        return self._answer('PUT', url, kwargs)
+
+    def delete(self, url, timeout, **kwargs):
+        return self._answer('DELETE', url, kwargs)
 
 
 @pytest.fixture(autouse=True)
@@ -232,3 +243,89 @@ def test_a_200_with_the_wrong_body_is_an_api_error_on_me(response):
 def test_a_200_with_the_wrong_body_is_an_api_error_on_the_list(response):
     with pytest.raises(ApiError):
         api(FakeSession([ME, response])).existing_event_urls()
+
+
+
+IMAGE = Image(b'img', 'image/webp', '1.webp')
+INIT = FakeResponse(201, {'mediaId': 'm1', 'uploadUrl': 'http://storage.test/k?sig', 'requiredHeaders': {'Content-Type': 'image/webp'}})
+
+
+class FakeSite:
+    def image(self, url):
+        return None if 'broken' in url else IMAGE
+
+
+class Failing(FakeSession):
+    def _answer(self, method, url, kwargs):
+        raise requests.Timeout('slow')
+
+
+def uploading(api_responses, storage=None):
+    session = FakeSession(api_responses)
+    return CooltureApi(session, 'http://api.test', token='t', storage=storage or FakeSession([FakeResponse(200)])), session
+
+
+def test_image_is_uploaded_and_attached():
+    storage = FakeSession([FakeResponse(200)])
+    client, session = uploading([INIT, FakeResponse(200)], storage)
+    post = {}
+
+    assert client.attach_image(post, 'http://img', FakeSite())
+
+    assert post == {'mediaIds': ['m1']}
+    assert session.calls[0][2]['json'] == {'purpose': 'EVENT_COVER', 'mimeType': 'image/webp', 'sizeBytes': 3,
+                                           'fileName': '1.webp'}
+    assert storage.calls == [('PUT', 'http://storage.test/k?sig', {'data': b'img', 'headers': {'Content-Type': 'image/webp'}})]
+    assert session.calls[1][1] == 'http://api.test/media/uploads/m1/complete'
+
+
+@pytest.mark.parametrize('api_responses, storage', [
+    ([FakeResponse(400)], None),
+    ([FakeResponse(201, {'mediaId': 'm1'})], None),
+    ([NotJson(201, '<html>')], None),
+    ([INIT], FakeSession([FakeResponse(403)])),
+    ([INIT], Failing([])),
+    ([INIT, FakeResponse(400)], None),
+])
+def test_a_failed_upload_leaves_only_the_image_out(api_responses, storage):
+    client, _ = uploading(api_responses, storage)
+    post = {}
+
+    assert not client.attach_image(post, 'http://img', FakeSite())
+    assert post == {}
+
+
+def test_an_unread_image_is_not_uploaded():
+    client, session = uploading([])
+
+    assert not client.attach_image({}, 'http://broken', FakeSite())
+    assert session.calls == []
+
+
+def test_a_refused_token_stops_the_run_at_the_image():
+    with pytest.raises(ApiError):
+        uploading([FakeResponse(401)])[0].attach_image({}, 'http://img', FakeSite())
+
+
+def test_the_image_of_a_rejected_post_is_deleted():
+    session = FakeSession([FakeResponse(400), FakeResponse(204)])
+
+    api(session).create_post({'eventUrl': 'a', 'mediaIds': ['m1']})
+
+    assert session.calls[1][:2] == ('DELETE', 'http://api.test/media/m1')
+
+
+def test_the_image_is_kept_when_the_post_may_have_been_saved():
+    session = FakeSession([FakeResponse(504)])
+
+    api(session).create_post({'eventUrl': 'a', 'mediaIds': ['m1']})
+
+    assert len(session.calls) == 1
+
+
+def test_a_failed_delete_does_not_stop_the_run():
+    class DeleteFails(FakeSession):
+        def delete(self, url, timeout, **kwargs):
+            raise requests.ConnectionError('down')
+
+    assert api(DeleteFails([FakeResponse(400)])).create_post({'eventUrl': 'a', 'mediaIds': ['m1']}).startswith('400')

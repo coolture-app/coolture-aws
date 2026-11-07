@@ -59,6 +59,10 @@ class DryRun:
     def existing_event_urls(self) -> set[str]:
         return set()
 
+    def attach_image(self, post: dict, image_url: str, site: Site) -> bool:
+        post['imageUrl'] = image_url
+        return True
+
     def create_post(self, post: dict) -> None:
         print(json.dumps(post, ensure_ascii=False))
 
@@ -96,6 +100,8 @@ def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Count
 
         post = to_post(event, place, postal_code)
         stats['online' if event.online else 'exact_location' if place.exact else 'city_location'] += 1
+        if event.image_url and sink.attach_image(post, event.image_url, site):
+            stats['with_image'] += 1
         failure = sink.create_post(post)
         if failure:
             stats['rejected'] += 1
