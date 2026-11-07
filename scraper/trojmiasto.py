@@ -6,7 +6,8 @@ import time as clock
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from urllib.parse import urljoin
+from pathlib import PurePosixPath
+from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 import requests
@@ -57,6 +58,7 @@ class EventPage:
     building_number: str | None
     postal_code: str | None
     hour: time | None
+    image_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,14 @@ class Event:
     description: str
     start: datetime
     end: datetime | None
+    image_url: str | None = None
+
+
+@dataclass(frozen=True)
+class Image:
+    content: bytes
+    mime_type: str
+    file_name: str
 
 
 def clean_text(value: str | None) -> str:
@@ -194,6 +204,11 @@ def _description(page: BeautifulSoup, block: dict) -> str:
     return max(text, clean_description(_text(block, 'description')), key=len)
 
 
+def _image_url(page: BeautifulSoup) -> str | None:
+    meta = page.select_one('meta[property="og:image"][content]')
+    return meta['content'] if meta and '/zdj/' in urlparse(meta['content']).path else None
+
+
 def parse_event_page(page_html: str) -> EventPage | None:
     soup = BeautifulSoup(page_html, 'html.parser')
     # Theatre pages have no schema.org block, so the page gives only the text and the listing gives the rest.
@@ -220,6 +235,7 @@ def parse_event_page(page_html: str) -> EventPage | None:
         postal_code=_text(address, 'postalCode') or None,
         # startDate is always midnight, and the name holds the hour.
         hour=parse_hour(_text(block, 'name')),
+        image_url=_image_url(soup),
     )
 
 
@@ -266,6 +282,7 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
         description=page.description or _facts(item, venue),
         start=start,
         end=_ends_at(page.end, start) or _listed_end(item.end_hour, start),
+        image_url=page.image_url,
     )
 
 
@@ -275,18 +292,18 @@ class Site:
         self._session = session
         self._sleep = sleep
 
-    def _get(self, url: str, params: dict | None = None) -> str:
+    def _get(self, url: str, params: dict | None = None) -> requests.Response:
         self._sleep(SITE_PAUSE_S)
         response = self._session.get(url, params=params, timeout=30)
         response.raise_for_status()
-        return response.text
+        return response
 
     def listing_items(self) -> Iterator[ListingItem]:
         """Walks the listing until a page adds nothing, because the site repeats its last page past the end."""
         seen: set[str] = set()
         page_number = 0
         while True:
-            page_html = self._get(LISTING_URL, {LISTING_PAGE_PARAMETER: page_number})
+            page_html = self._get(LISTING_URL, {LISTING_PAGE_PARAMETER: page_number}).text
             items = [i for i in parse_listing(page_html) if i.url not in seen]
             if not items:
                 return
@@ -297,8 +314,17 @@ class Site:
 
     def event(self, item: ListingItem) -> Event | None:
         try:
-            page = parse_event_page(self._get(item.url))
+            page = parse_event_page(self._get(item.url).text)
         except requests.RequestException as error:
             log.warning('Event page unread url=%s error=%s', item.url, error)
             return None
         return merge(item, page) if page else None
+
+    def image(self, url: str) -> Image | None:
+        try:
+            response = self._get(url)
+        except requests.RequestException as error:
+            log.warning('Image unread url=%s error=%s', url, error)
+            return None
+        mime_type = response.headers.get('Content-Type', '').split(';')[0].strip().lower()
+        return Image(response.content, mime_type, PurePosixPath(urlparse(url).path).name)

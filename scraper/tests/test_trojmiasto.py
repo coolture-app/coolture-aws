@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timezone
 import pytest
 import requests
 
-from trojmiasto import EventPage, ListingItem, Site, clean_description, merge, parse_event_page, parse_listing
+from trojmiasto import EventPage, Image, ListingItem, Site, clean_description, merge, parse_event_page, parse_listing
 
 
 def listing_item(title='Koncert testowy', href='/imprezy/Koncert-imp1.html', hour='Godz.19:30', city='Gdańsk,',
@@ -409,3 +409,40 @@ def test_a_read_page_gives_the_merged_event():
     event = Site(session, sleep=lambda _: None).event(listed())
 
     assert (event.street, event.start.day, event.start.hour) == ('Portowa', 5, 19)
+
+
+PHOTO = 'https://s-trojmiasto.pl/zdj/c/n/3/1/1200x0/4192984.webp?r=1'
+
+
+@pytest.mark.parametrize('body, expected', [
+    (f'<meta property="og:image" content="{PHOTO}">', PHOTO),
+    ('<meta property="og:image" content="https://s-trojmiasto.pl/_img/logo.png">', None),
+    ('', None),
+])
+def test_image_is_an_og_image_from_the_photo_folder(body, expected):
+    assert parse_event_page(event_page(body)).image_url == expected
+
+
+def test_merged_event_keeps_the_image():
+    assert merge(listed(), read_page(image_url=PHOTO)).image_url == PHOTO
+
+
+class FakeImageSession:
+    def __init__(self, status=200):
+        self.status = status
+
+    def get(self, url, params, timeout):
+        response = requests.Response()
+        response.status_code, response._content = self.status, b'img'
+        response.headers['Content-Type'] = 'IMAGE/WEBP; charset=binary'
+        return response
+
+
+def test_image_is_downloaded_with_its_type_and_name():
+    image = Site(FakeImageSession(), sleep=lambda _: None).image(PHOTO)
+
+    assert image == Image(b'img', 'image/webp', '4192984.webp')
+
+
+def test_missing_image_gives_nothing():
+    assert Site(FakeImageSession(404), sleep=lambda _: None).image(PHOTO) is None
