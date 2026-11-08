@@ -369,6 +369,11 @@ class PostReadDbTest {
     }
 
     @Test
+    void nearest_worksForAGuest() throws SQLException {
+        assertEquals(24, distances(titles(walkPosts(null, around("NEAREST", null), 7))).size());
+    }
+
+    @Test
     void cards_carryEveryPhoto_coverFirst_atMostTheLimit() throws SQLException {
         PostCardDto card = card(walkPosts(ME, filters("RECENT", false, null, null), 100), "ten_photos");
 
