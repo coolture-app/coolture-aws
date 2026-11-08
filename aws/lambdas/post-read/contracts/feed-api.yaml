@@ -20,12 +20,23 @@ paths:
       operationId: getFeed
       summary: Home feed for guests and signed-in users
       description: >
-        The first request starts a session and may send a location. Every later request sends only cursor and limit.
+        The first request starts a session and may send a location. Every later request sends the cursor, the limit and
+        the same filters again. The filters narrow which posts are ranked, with the same meaning as on /posts.
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Latitude'
         - $ref: '#/components/parameters/Longitude'
+        - $ref: '#/components/parameters/IncludePast'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/Tags'
+        - $ref: '#/components/parameters/AuthorId'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Visibility'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/StartsFrom'
+        - $ref: '#/components/parameters/StartsTo'
+        - $ref: '#/components/parameters/RadiusKm'
       responses:
         '200':
           description: One page. A short or empty page doesn't mean the end. Only hasMore false does.
@@ -62,20 +73,21 @@ paths:
           in: query
           schema:
             type: string
-            enum: [RECENT, POPULAR, UPCOMING]
+            enum: [RECENT, POPULAR, UPCOMING, NEAREST]
             default: RECENT
+          description: NEAREST needs latitude and longitude, and shows only posts with a place.
         - $ref: '#/components/parameters/IncludePast'
-        - {name: q, in: query, schema: {type: string}}
-        - {name: tags, in: query, description: Comma-separated or repeated., schema: {type: array, items: {type: string}}, style: form, explode: true}
-        - {name: authorId, in: query, schema: {type: string, format: uuid}}
-        - {name: status, in: query, schema: {$ref: '#/components/schemas/PostStatus'}}
-        - {name: visibility, in: query, schema: {$ref: '#/components/schemas/PostVisibility'}}
-        - {name: type, in: query, schema: {$ref: '#/components/schemas/PostType'}}
-        - {name: startsFrom, in: query, description: Setting this turns the past-events window off., schema: {type: string, format: date-time}}
-        - {name: startsTo, in: query, description: Setting this turns the past-events window off., schema: {type: string, format: date-time}}
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/Tags'
+        - $ref: '#/components/parameters/AuthorId'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Visibility'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/StartsFrom'
+        - $ref: '#/components/parameters/StartsTo'
         - $ref: '#/components/parameters/Latitude'
         - $ref: '#/components/parameters/Longitude'
-        - {name: radiusKm, in: query, schema: {type: number}}
+        - $ref: '#/components/parameters/RadiusKm'
         - {name: participationTypes, in: query, description: Signed-in only., schema: {type: array, items: {$ref: '#/components/schemas/ParticipationType'}}, style: form, explode: true}
         - {name: reactionType, in: query, description: Signed-in only., schema: {$ref: '#/components/schemas/ReactionType'}}
       responses:
@@ -93,9 +105,16 @@ paths:
     get:
       tags: [Lists]
       operationId: getPostMarks
-      summary: Map markers. Takes the same filters as /posts, plus the map bounds. Only includePast is listed here because it is new.
+      summary: Map markers. Takes the same filters as /posts, plus the map bounds. Only the newer parameters are listed here.
       parameters:
         - $ref: '#/components/parameters/IncludePast'
+        - $ref: '#/components/parameters/RadiusKm'
+        - name: excludeMine
+          in: query
+          description: >
+            Signed-in only. Leaves out what the feed leaves out for this viewer: their own posts, and posts they reacted
+            to or take part in, so the map of the feed's tab matches its list.
+          schema: {type: boolean, default: false}
       responses:
         '200':
           description: All markers inside the bounds, without paging.
@@ -127,13 +146,58 @@ components:
     Latitude:
       name: latitude
       in: query
-      description: Send together with longitude, rounded to 2 decimals. On /feed, only on the first page.
+      description: >
+        Send together with longitude, rounded to 2 decimals. The centre of radiusKm and of NEAREST. On /feed, the first
+        page's position is also used for proximity, and later pages send it again only with radiusKm.
       schema: {type: number, format: double, minimum: -90, maximum: 90}
     Longitude:
       name: longitude
       in: query
-      description: Send together with latitude, rounded to 2 decimals. On /feed, only on the first page.
+      description: Send together with latitude. See latitude.
       schema: {type: number, format: double, minimum: -180, maximum: 180}
+    RadiusKm:
+      name: radiusKm
+      in: query
+      description: Only posts with a place within this many km of latitude and longitude. Ignored without them.
+      schema: {type: number}
+    Q:
+      name: q
+      in: query
+      description: Matches a part of the title or the description, ignoring case.
+      schema: {type: string}
+    Tags:
+      name: tags
+      in: query
+      description: Comma-separated or repeated. A post matches if it has any of them.
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    AuthorId:
+      name: authorId
+      in: query
+      schema: {type: string, format: uuid}
+    Status:
+      name: status
+      in: query
+      schema: {$ref: '#/components/schemas/PostStatus'}
+    Visibility:
+      name: visibility
+      in: query
+      schema: {$ref: '#/components/schemas/PostVisibility'}
+    Type:
+      name: type
+      in: query
+      schema: {$ref: '#/components/schemas/PostType'}
+    StartsFrom:
+      name: startsFrom
+      in: query
+      description: Setting this turns the past-events window off.
+      schema: {type: string, format: date-time}
+    StartsTo:
+      name: startsTo
+      in: query
+      description: Setting this turns the past-events window off.
+      schema: {type: string, format: date-time}
     IncludePast:
       name: includePast
       in: query
@@ -221,6 +285,13 @@ components:
         coverMedia: {$ref: '#/components/schemas/MediaResource'}
         myReaction: {$ref: '#/components/schemas/ReactionType'}
         myParticipation: {$ref: '#/components/schemas/ParticipationType'}
+        photos:
+          type: array
+          description: >
+            Every photo of the post, cover first, then in the post's order. At most 8, the limit a post can have
+            (PostLimits.MAX_PHOTOS). Left out when the post has none.
+          maxItems: 8
+          items: {$ref: '#/components/schemas/MediaResource'}
     PostMark:
       type: object
       additionalProperties: false

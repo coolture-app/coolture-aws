@@ -15,12 +15,19 @@ This folder is inside `post-read` because that Lambda serves everything describe
 
 | | `GET /feed` | `GET /posts` |
 |---|---|---|
-| **Used by** | Home page with no search or filter | Search, filters, Recent, Popular and Upcoming sorts, My Events |
-| **Input** | First page: `limit`, location. Later pages: `cursor`, `limit` | All filters and sorts, plus `includePast` |
-| **Contains** | Live posts ranked for this viewer | Everything visible, minus old events by default |
-| **Order** | Score, or upcoming if ranking fails | `RECENT`, `POPULAR` or `UPCOMING` |
+| **Used by** | The home page's "Dla Ciebie" tab, with or without search and filters | The "Wszystkie" tab, My Events, profiles |
+| **Input** | First page: `limit`, location, filters. Later pages: `cursor`, `limit`, the same filters | All filters and sorts, plus `includePast` |
+| **Contains** | Posts new to this viewer, ranked, narrowed by the filters | Everything visible, minus old events by default |
+| **Order** | Score, or upcoming if ranking fails | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST` |
 
-`GET /posts/map` takes the same filters as `/posts`, plus the map bounds. `GET /posts/{id}` doesn't change.
+**The filters mean the same everywhere:** `q`, `tags`, `authorId`, `status`, `visibility`, `type`, `startsFrom`, `startsTo`,
+`includePast`, and `radiusKm` around `latitude`/`longitude`. One piece of SQL applies them to `/feed`, `/posts` and `/posts/map`.
+
+`GET /posts/map` takes the same filters as `/posts`, plus the map bounds, and `excludeMine=true` to leave out what the feed leaves
+out. `GET /posts/{id}` doesn't change.
+
+**Photos:** every `PostCard` has `photos`, all of the post's photos with the cover first, at most 8. A post can't have more than 8
+(`PostLimits.MAX_PHOTOS` in `common`; `POST` and `PUT /posts` return `400` above it).
 `GET /posts/recommendations` no longer exists.
 
 ## `GET /feed`
@@ -44,7 +51,10 @@ GET /feed?limit=20&cursor=eyJ2Ijox...                 every later page
 - **`mode`** says how the page was ordered: `RANKED` or `UPCOMING`. The UI behaves the same for both, and treats an unknown value
   like `RANKED`, so new modes can be added. It exists for logs, tests and evaluation.
 - **Location** is optional. `latitude` and `longitude` come together or the request gets `400`. The frontend rounds them to 2 decimals
-  and the server rounds again. On later pages they stay in the cursor, so they aren't sent again.
+  and the server rounds again. For proximity, the first page's position stays in the cursor. With `radiusKm`, every page sends
+  the position again, as the radius's centre.
+- **Filters** are sent with every page, like `/posts`, and narrow which posts are ranked. They never show what the rules below
+  hide, except that `includePast`, `startsFrom` or `startsTo` let ended events in.
 
 ### What the feed may show
 
@@ -55,7 +65,7 @@ An event's end is `COALESCE(ends_at, starts_at + 3 hours)`, everywhere in this d
 | A post appears in `/feed` only if | Signed in | Guest |
 |---|---|---|
 | Not deleted | Yes | Yes |
-| Event hasn't ended, checked against the real time on every page | Yes | Yes |
+| Event hasn't ended, checked against the real time on every page, unless `includePast`, `startsFrom` or `startsTo` is set | Yes | Yes |
 | Created at or before the session's `asOf` | Yes | Yes |
 | Public | Yes | Yes |
 | Or friends-only, and the viewer follows the author | Yes | No |
@@ -82,9 +92,10 @@ All existing parameters keep their meaning. What's specific to this contract:
 | Parameter or behaviour | Rule |
 |---|---|
 | `includePast` | Default `false`. See the table below |
-| `sortBy` | `RECENT`, `POPULAR` or `UPCOMING`. Anything else, including `RECOMMENDED`, returns `400` |
+| `sortBy` | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST`. Anything else, including `RECOMMENDED`, returns `400` |
+| `NEAREST` | Needs `latitude` and `longitude`, else `400`. Only posts with a place |
 | `cursor` | Continues the sort it was created for. Using it with a different sort returns `400` |
-| Order | `RECENT`: `created_at, id` descending. `POPULAR`: likes, `id` descending. `UPCOMING`: `starts_at, id` ascending |
+| Order | `RECENT`: `created_at, id` descending. `POPULAR`: likes, `id` descending. `UPCOMING`: `starts_at, id` ascending. `NEAREST`: metres from the position, `id` ascending |
 
 ### Past events
 
@@ -130,6 +141,7 @@ Each sort pages on its own key, and the key is in the cursor:
 | `RECENT` | `(created_at, id)` below the cursor |
 | `POPULAR` | `(likes, id)` below the cursor |
 | `UPCOMING` | `(starts_at, id)` above the cursor |
+| `NEAREST` | `(metres, id)` above the cursor's post, whose distance is measured again from the request's position |
 
 Other lists, such as comments and followers, keep their own cursors. The rule about `hasMore` is the same.
 
@@ -139,7 +151,7 @@ Errors have the shape `{"error": "message"}`.
 
 | Status | When | Frontend does |
 |---|---|---|
-| `400` | Unreadable cursor, wrong-sort cursor, unknown `sortBy`, non-numeric `limit`, location out of range or half-sent, invalid `includePast` | Restarts the list once from page 1. A second `400` shows the retry message, so it can't loop |
+| `400` | Unreadable cursor, wrong-sort cursor, unknown `sortBy`, `NEAREST` without a position, non-numeric `limit`, location out of range or half-sent, invalid `includePast` or `excludeMine`, more than 8 photos on a post | Restarts the list once from page 1. A second `400` shows the retry message, so it can't loop |
 | `401`, `403` | Token rejected | Existing auth handling |
 | `429` | Over the API throttle | Shows retry |
 | `500` | Database or Lambda failure, also after the fallback | Keeps what's shown and offers a retry |
