@@ -85,7 +85,8 @@ public final class ResultSetMappers {
 
     /**
      * Maps cover media from ResultSet if present.
-     * Expects cover columns: cover_id, cover_purpose, cover_mime_type, cover_size_bytes, cover_status, cover_created_at, cover_deleted_at
+     * Expects cover columns: cover_id, cover_purpose, cover_mime_type, cover_size_bytes, cover_status, cover_created_at, cover_deleted_at,
+     * cover_width, cover_height
      */
     public static MediaResourceDto mapCoverMedia(ResultSet rs) throws SQLException {
         UUID coverId = (UUID) rs.getObject("cover_id");
@@ -99,7 +100,9 @@ public final class ResultSetMappers {
             mapEnum(rs, "cover_status", MediaStatus.class),
             MediaUrls.presign(rs.getString("cover_object_key")),
             mapInstant(rs, "cover_created_at"),
-            mapInstant(rs, "cover_deleted_at")
+            mapInstant(rs, "cover_deleted_at"),
+            mapInteger(rs, "cover_width"),
+            mapInteger(rs, "cover_height")
         );
     }
 
@@ -142,8 +145,15 @@ public final class ResultSetMappers {
             mapEnum(rs, "status", MediaStatus.class),
             MediaUrls.presign(rs.getString("object_key")),
             mapInstant(rs, "created_at"),
-            mapInstant(rs, "deleted_at")
+            mapInstant(rs, "deleted_at"),
+            mapInteger(rs, "width"),
+            mapInteger(rs, "height")
         );
+    }
+
+    private static Integer mapInteger(ResultSet rs, String column) throws SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
     }
 
     /**

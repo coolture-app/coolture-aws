@@ -49,6 +49,7 @@ public final class PostSql {
                cover_m.id AS cover_id, cover_m.purpose AS cover_purpose, cover_m.mime_type AS cover_mime_type,
                cover_m.size_bytes AS cover_size_bytes, cover_m.status AS cover_status,
                cover_m.created_at AS cover_created_at, cover_m.deleted_at AS cover_deleted_at, cover_m.object_key AS cover_object_key,
+               cover_m.width AS cover_width, cover_m.height AS cover_height,
                pr_my.type AS my_reaction,
                pp_my.type AS my_participation
         FROM posts p
@@ -57,7 +58,8 @@ public final class PostSql {
         LEFT JOIN media avatar_m ON avatar_m.id = pi.thumbnail_media_id
         LEFT JOIN event_locations el ON el.id = p.event_location_id
         LEFT JOIN LATERAL (
-            SELECT m.id, m.object_key, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at, m.deleted_at
+            SELECT m.id, m.object_key, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at, m.deleted_at,
+                   m.width, m.height
             FROM post_media pm
             JOIN media m ON m.id = pm.media_id
             WHERE pm.post_id = p.id
