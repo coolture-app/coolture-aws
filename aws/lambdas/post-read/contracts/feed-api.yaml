@@ -279,6 +279,8 @@ components:
         url: {type: string}
         createdAt: {type: string, format: date-time}
         deletedAt: {type: string, format: date-time}
+        width: {type: integer, minimum: 1, description: 'Pixels. Missing for media uploaded before sizes were stored.'}
+        height: {type: integer, minimum: 1, description: 'Pixels. Sent together with width.'}
     PostType: {type: string, enum: [ONLINE, OFFLINE]}
     PostStatus: {type: string, enum: [ACTIVE, EDITED, DELETED]}
     PostVisibility: {type: string, enum: [PUBLIC, PRIVATE, FRIENDS]}
