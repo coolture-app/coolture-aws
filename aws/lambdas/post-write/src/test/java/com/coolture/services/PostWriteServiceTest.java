@@ -101,6 +101,23 @@ class PostWriteServiceTest {
     }
 
     @Test
+    void createPost_whenMorePhotosThanTheLimit_throwsIllegalArgumentException() {
+        UUID authorId = UUID.randomUUID();
+        List<UUID> tooMany = java.util.stream.Stream.generate(UUID::randomUUID)
+            .limit(com.coolture.common.validation.PostLimits.MAX_PHOTOS + 1).toList();
+
+        CreatePostRequest req = new CreatePostRequest(
+            "Online Event", "Description", "https://example.com",
+            Instant.now(), Instant.now().plusSeconds(3600),
+            List.of("talk"), PostType.ONLINE, PostVisibility.PUBLIC,
+            null, tooMany, null
+        );
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.createPost(authorId, req));
+        assertTrue(ex.getMessage().contains("at most 8 photos"));
+    }
+
+    @Test
     void createPost_whenCoverMediaIdNotPresentInMediaIds_throwsIllegalArgumentException() {
         UUID authorId = UUID.randomUUID();
         UUID media1 = UUID.randomUUID();
