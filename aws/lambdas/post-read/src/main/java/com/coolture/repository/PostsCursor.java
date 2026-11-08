@@ -19,6 +19,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
             case RECENT -> new PostsCursor(sort, card.id(), card.createdAt(), null, null);
             case POPULAR -> new PostsCursor(sort, card.id(), null, card.positiveReactionCount(), null);
             case UPCOMING -> new PostsCursor(sort, card.id(), null, null, card.startsAt());
+            case NEAREST -> new PostsCursor(sort, card.id(), null, null, null);
         });
     }
 
@@ -32,6 +33,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
                 case RECENT -> c.createdAt != null;
                 case POPULAR -> c.likes != null;
                 case UPCOMING -> c.startsAt != null;
+                case NEAREST -> true;
             };
             if (c.id == null || !hasValue) {
                 throw new IllegalArgumentException("Invalid cursor");
@@ -40,12 +42,15 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
         return cursor;
     }
 
-    /** Binds the two parameters of the sort's keyset condition. */
-    void bindKeyset(ParamBinder binder) throws SQLException {
+    /** Binds the parameters of the sort's keyset condition. NEAREST needs the request's position. */
+    void bindKeyset(ParamBinder binder, Double latitude, Double longitude) throws SQLException {
         switch (sort) {
             case RECENT -> binder.bindTimestamp(createdAt);
             case POPULAR -> binder.bindInt(likes);
             case UPCOMING -> binder.bindTimestamp(startsAt);
+            case NEAREST -> binder.bindDouble(longitude).bindDouble(latitude)
+                .bindDouble(longitude).bindDouble(latitude)
+                .bindUUID(id);
         }
         binder.bindUUID(id);
     }

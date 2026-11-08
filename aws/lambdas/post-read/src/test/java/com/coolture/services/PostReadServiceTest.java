@@ -119,17 +119,29 @@ class PostReadServiceTest {
         verify(repository).findFeed(eq(filters), eq(PostSort.RECENT), eq(callerId), isNull(), eq(101));
     }
 
+    /** NEAREST gets a position, which it needs. */
     private static PostFeedFilters sortedBy(String sortBy) {
+        boolean nearest = "NEAREST".equals(sortBy);
         return new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, nearest ? 54.35 : null, nearest ? 18.65 : null, null,
             null, null, null, 20, sortBy
         );
+    }
+
+    @Test
+    void getFeed_whenNearestHasNoPosition_throws() {
+        PostFeedFilters noPosition = new PostFeedFilters(
+            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, "NEAREST"
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, noPosition, null, 20));
     }
 
     private static PostCardDto card(int likes) {
         Instant now = Instant.parse("2026-11-02T12:00:00.123456Z");
         return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, now.plusSeconds(60), null, List.of(),
-            likes, 0, 0, 0, null, null, null, now, null, null, null, null, null);
+            likes, 0, 0, 0, null, null, null, now, null, null, null, null, null, null);
     }
 
     @ParameterizedTest
@@ -228,12 +240,12 @@ class PostReadServiceTest {
             new com.coolture.common.dto.GeoPointDto(54.5, 18.0),
             new com.coolture.common.dto.GeoPointDto(54.0, 19.0)
         );
-        when(repository.findPostMarks(filters, bounds, callerId)).thenReturn(List.of());
+        when(repository.findPostMarks(filters, bounds, callerId, false)).thenReturn(List.of());
 
-        var result = service.getMapMarks(callerId, filters, bounds);
+        var result = service.getMapMarks(callerId, filters, bounds, false);
 
         assertNotNull(result);
-        verify(repository).findPostMarks(filters, bounds, callerId);
+        verify(repository).findPostMarks(filters, bounds, callerId, false);
     }
 
     @Test

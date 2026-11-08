@@ -103,6 +103,22 @@ class FeedScorerTest {
     }
 
     @Test
+    void score_whenEventEnded_timeFadesWithTheDaysSinceItsEnd() {
+        Instant start = AS_OF.minus(Duration.ofDays(20));
+        FeedScorer.Facts ended = new FeedScorer.Facts(UUID.randomUUID(), start, AS_OF.minus(Duration.ofDays(14)), 0, null, null);
+
+        assertEquals(Math.exp(-1), DEFAULT.score(ended, AS_OF, 7).time(), 1e-12);
+    }
+
+    @Test
+    void score_whenEventRunsAtAsOf_timeIsAtItsMaximumEvenWithAnEnd() {
+        FeedScorer.Facts running = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.minus(Duration.ofDays(30)),
+            AS_OF.plus(Duration.ofDays(30)), 0, null, null);
+
+        assertEquals(1.0, DEFAULT.score(running, AS_OF, 7).time());
+    }
+
+    @Test
     void score_whenEventHasStarted_timeIsAtItsMaximum() {
         FeedScorer.Facts running = facts(UUID.randomUUID(), AS_OF.minus(Duration.ofDays(30)), 0, null, null);
 

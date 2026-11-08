@@ -41,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -69,7 +70,7 @@ class ContractTest {
             new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, Instant.now(), 0, 0),
             null, "Koncert", null, null, Instant.now(), null, List.of(),
             0, 0, 0, 0, PostType.ONLINE, PostStatus.ACTIVE, PostVisibility.PUBLIC,
-            Instant.now(), null, null, null, null, null
+            Instant.now(), null, null, null, null, null, null
         );
     }
 
@@ -86,7 +87,7 @@ class ContractTest {
             new UserSummaryDto(UUID.randomUUID(), "anna", "Anna", "Nowak", avatar, now, 1, 2),
             location, "Koncert", "Opis", "https://example.com", now, now.plusSeconds(60), List.of("jazz"),
             1, 2, 3, 4, PostType.OFFLINE, PostStatus.EDITED, PostVisibility.FRIENDS,
-            now, now, null, cover, ReactionType.LIKE, ParticipationType.TAKES_PART
+            now, now, null, cover, ReactionType.LIKE, ParticipationType.TAKES_PART, List.of(cover)
         );
     }
 
@@ -105,7 +106,7 @@ class ContractTest {
 
     @Test
     void feed_firstPageWithMore_matches() throws Exception {
-        when(feed.getFeed(any(), any(), anyInt(), any(), any()))
+        when(feed.getFeed(any(), any(), anyInt(), any(), any(), any()))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(minimalCard(), fullCard()), new PaginationMeta(2, true, "abc")));
 
         assertMatches(responseReport("/feed", ApiGatewayEvents.get("/feed", Map.of("limit", "2", "latitude", "54.35", "longitude", "18.65"))));
@@ -113,7 +114,7 @@ class ContractTest {
 
     @Test
     void feed_laterPageInUpcomingMode_matches() throws Exception {
-        when(feed.getFeed(any(), any(), anyInt(), any(), any()))
+        when(feed.getFeed(any(), any(), anyInt(), any(), any(), any()))
             .thenReturn(new FeedPage(FeedMode.UPCOMING, List.of(), new PaginationMeta(20, false, null)));
 
         assertMatches(responseReport("/feed", ApiGatewayEvents.get("/feed", Map.of("cursor", "abc"))));
@@ -137,7 +138,7 @@ class ContractTest {
 
     @Test
     void postMap_matches() throws Exception {
-        when(posts.getMapMarks(any(), any(), any())).thenReturn(List.of(
+        when(posts.getMapMarks(any(), any(), any(), anyBoolean())).thenReturn(List.of(
             new PostMarkDto(UUID.randomUUID(), "Koncert", "Opis", "http://localhost/c.png", 3, new GeoPointDto(54.35, 18.65)),
             new PostMarkDto(UUID.randomUUID(), "Koncert", null, null, 0, new GeoPointDto(54.35, 18.65))));
 

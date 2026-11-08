@@ -253,7 +253,8 @@ public final class ResultSetMappers {
             mapInstant(rs, "deleted_at"),
             mapCoverMedia(rs),
             mapMyReaction(rs),
-            mapMyParticipation(rs)
+            mapMyParticipation(rs),
+            null
         );
     }
 }

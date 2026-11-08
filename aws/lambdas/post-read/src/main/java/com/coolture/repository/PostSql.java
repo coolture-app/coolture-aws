@@ -1,6 +1,10 @@
 package com.coolture.repository;
 
+import com.coolture.common.db.ParamBinder;
 import com.coolture.feed.FeedConfig;
+
+import java.sql.SQLException;
+import java.util.UUID;
 
 /**
  * SQL fragments shared by /posts, /posts/map and /feed. Each ? must be bound in the order it appears here.
@@ -32,6 +36,18 @@ public final class PostSql {
                     WHERE b.type = 'BLOCK'
                       AND ((b.source_user_id = ?::uuid AND b.target_user_id = p.author_id)
                         OR (b.source_user_id = p.author_id AND b.target_user_id = ?::uuid)))""";
+
+    /** Not the viewer's own, and not reacted to or taken part in: what makes the feed "new for you". Bind with bindNotMine. */
+    public static final String NOT_MINE = """
+        p.author_id IS DISTINCT FROM ?::uuid
+          AND NOT EXISTS (SELECT 1 FROM post_reactions r WHERE r.post_id = p.id AND r.user_id = ?::uuid)
+          AND NOT EXISTS (SELECT 1 FROM post_participations r WHERE r.post_id = p.id AND r.user_id = ?::uuid)""";
+
+    public static void bindNotMine(ParamBinder b, UUID viewer) throws SQLException {
+        b.bindNullableUUID(viewer)
+         .bindNullableUUID(viewer)
+         .bindNullableUUID(viewer);
+    }
 
     /** Everything ResultSetMappers.mapPostCard reads, up to the WHERE. Binds the viewer twice. */
     public static final String CARD_SELECT = """

@@ -101,11 +101,10 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         Map<String, String> qp = getQueryParams(event);
         String cursor = qp.get("cursor");
         int limit = parseLimit(qp.get("limit"), 20);
-        Double lat = parseCoordinate(qp, "latitude", 90);
-        Double lng = parseCoordinate(qp, "longitude", 180);
-        requireFullLocation(lat, lng);
+        // The same filters as /posts, which also check the position. My Events' filters and sortBy don't apply here.
+        PostFeedFilters filters = parseFeedFilters(qp);
 
-        return ApiResponse.ok(feedService.getFeed(callerId, cursor, limit, lat, lng));
+        return ApiResponse.ok(feedService.getFeed(callerId, cursor, limit, filters.latitude(), filters.longitude(), filters));
     }
 
     private APIGatewayV2HTTPResponse getFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
@@ -129,7 +128,9 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         PostFeedFilters filters = parseFeedFilters(qp);
         MapBoundsDto bounds = parseMapBounds(qp);
 
-        List<PostMarkDto> marks = service.getMapMarks(callerId, filters, bounds);
+        boolean excludeMine = parseBoolean(qp.get("excludeMine"), "excludeMine");
+
+        List<PostMarkDto> marks = service.getMapMarks(callerId, filters, bounds, excludeMine);
         return ApiResponse.ok(marks);
     }
 
@@ -204,9 +205,13 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
     }
 
     private boolean parseIncludePast(String raw) {
+        return parseBoolean(raw, "includePast");
+    }
+
+    private boolean parseBoolean(String raw, String name) {
         if (raw == null || raw.isBlank() || "false".equalsIgnoreCase(raw)) return false;
         if ("true".equalsIgnoreCase(raw)) return true;
-        throw new IllegalArgumentException("Invalid includePast");
+        throw new IllegalArgumentException("Invalid " + name);
     }
 
     private MapBoundsDto parseMapBounds(Map<String, String> qp) {

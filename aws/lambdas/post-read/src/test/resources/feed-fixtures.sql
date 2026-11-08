@@ -90,3 +90,32 @@ INSERT INTO posts (author_id, event_location_id, title, starts_at, ends_at, type
   ('a0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000100', 'map_ended_last_year', now() - interval '400 days', now() - interval '399 days',  'OFFLINE'),
   ('a0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000100', 'map_by_i_blocked',    now() + interval '2 days',   NULL,                         'OFFLINE'),
   ('a0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000100', 'map_by_blocked_me',   now() + interval '2 days',   NULL,                         'OFFLINE');
+
+-- My own post on the map, which excludeMine leaves out.
+INSERT INTO posts (author_id, event_location_id, title, starts_at, type) VALUES
+  ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000100', 'map_mine', now() + interval '2 days', 'OFFLINE');
+
+-- Places at three distances from (54.35, 18.65), for the radius filter and NEAREST, with ties at each distance.
+INSERT INTO event_locations (id, coordinates) VALUES
+  ('a0000000-0000-0000-0000-000000000101', ST_SetSRID(ST_MakePoint(18.66, 54.35), 4326)::geography),
+  ('a0000000-0000-0000-0000-000000000102', ST_SetSRID(ST_MakePoint(18.70, 54.40), 4326)::geography);
+
+INSERT INTO posts (author_id, event_location_id, title, starts_at, type)
+SELECT 'a0000000-0000-0000-0000-000000000002', l.loc::uuid, 'near_' || l.name || '_' || g, now() + interval '3 days', 'OFFLINE'
+FROM (VALUES ('a0000000-0000-0000-0000-000000000100', 'close'),
+             ('a0000000-0000-0000-0000-000000000101', 'mid'),
+             ('a0000000-0000-0000-0000-000000000102', 'far')) AS l(loc, name),
+     generate_series(1, 8) g;
+
+-- Ten photos on one post, with the cover last by position: a card shows the cover first, and at most 8.
+INSERT INTO posts (id, author_id, title, starts_at, type)
+VALUES ('a0000000-0000-0000-0000-000000000201', 'a0000000-0000-0000-0000-000000000002', 'ten_photos', now() + interval '2 days', 'ONLINE');
+
+INSERT INTO media (id, owner_id, object_key, purpose, mime_type, status, width, height)
+SELECT ('a0000000-0000-0000-0001-' || lpad(g::text, 12, '0'))::uuid, 'a0000000-0000-0000-0000-000000000002',
+       'fixtures/photo_' || g, 'EVENT_MEDIA', 'image/jpeg', 'ATTACHED', 800, 600
+FROM generate_series(1, 10) g;
+
+INSERT INTO post_media (post_id, media_id, position, is_cover)
+SELECT 'a0000000-0000-0000-0000-000000000201', ('a0000000-0000-0000-0001-' || lpad(g::text, 12, '0'))::uuid, g - 1, g = 10
+FROM generate_series(1, 10) g;
