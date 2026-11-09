@@ -63,6 +63,27 @@ class SecurityContextTest {
     }
 
     @Test
+    void getGroups_whenDevFallbackEnabledWithUserIdHeaderOnly_returnsNoGroups() {
+        SecurityContext.setDevFallbackOverride(true);
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("X-User-Id", UUID.randomUUID().toString()))
+            .build();
+
+        assertTrue(SecurityContext.getGroups(event).isEmpty());
+        assertThrows(SecurityException.class, () -> SecurityContext.requireAdmin(event));
+    }
+
+    @Test
+    void getGroups_whenDevFallbackEnabledWithUserIdAndRoleHeaders_returnsTheRole() {
+        SecurityContext.setDevFallbackOverride(true);
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("X-User-Id", UUID.randomUUID().toString(), "X-User-Role", "COOLTURE_ADMIN"))
+            .build();
+
+        assertEquals(java.util.List.of("COOLTURE_ADMIN"), SecurityContext.getGroups(event));
+    }
+
+    @Test
     void getUserId_whenDevFallbackEnabledWithCustomHeader_returnsCustomUUID() {
         SecurityContext.setDevFallbackOverride(true);
         UUID customUser = UUID.randomUUID();

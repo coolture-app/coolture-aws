@@ -129,6 +129,9 @@ public class SecurityContext {
                 } else if ("cognito:groups".equals(claimName)) {
                     String val = getHeaderCaseInsensitive(event.getHeaders(), "x-user-role");
                     if (val != null && !val.isBlank()) return Optional.of(val);
+                    // Someone named by X-User-Id is a regular user unless X-User-Role says otherwise, as with Cognito.
+                    String userId = getHeaderCaseInsensitive(event.getHeaders(), "x-user-id");
+                    if (userId != null && !userId.isBlank()) return Optional.empty();
                 }
             }
 
