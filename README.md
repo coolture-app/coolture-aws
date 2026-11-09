@@ -271,9 +271,8 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 `make seed` does, in order, skipping whatever is already done:
 
 1. `scrape-snapshot`: if there's no snapshot yet, saves events from trojmiasto.pl with their photos into the gitignored
-   `scraper/snapshot/`. About 12 minutes, once. Every category of the site gets a share by the square root of its size
-   (24 concerts, 19 shows, 16 parties, 15 exhibitions, 13 films, 12 sport, 8 occasional, 7 fairs, 6 food), spread over
-   the next 30 days. `make scrape-snapshot ALL=1` saves the whole listing instead (about 40 minutes).
+   `scraper/snapshot/`. About 12 minutes, once. Every category of the site gets a share by the square root of its size,
+   spread over the next 30 days (see [scraper/README.md](scraper/README.md#snapshot-and-seed)). `make scrape-snapshot ALL=1` saves the whole listing instead (about 40 minutes).
 2. `seed-events`: loads the snapshot through the API as `coolture_bot`, four posts at a time, every date moved forward
    by the same whole number of days so they're all ahead and keep their hour. About 4 minutes.
 3. `embed-interests`, `embed-posts`: the first run builds the embedding image (3.5 GB, about 10 minutes).

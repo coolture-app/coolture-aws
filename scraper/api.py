@@ -22,7 +22,7 @@ TIMEOUT_S = 40
 WRITE_PAUSE_S = 0.1
 # PostLimits.MAX_PHOTOS: POST /posts refuses more.
 MAX_PHOTOS = 8
-# Without it the local user takes the dev default, which the seed already owns. The API would turn a hyphen into this underscore.
+# The local API names a new X-User-Id user after it. The API would turn a hyphen into this underscore.
 LOCAL_USER_NAME = 'coolture_bot'
 # A 200 can still hold the wrong thing, such as CloudFront's HTML when the URL lacks /api. Not JSON is a ValueError too.
 WRONG_SHAPE = (KeyError, TypeError, AttributeError, ValueError)

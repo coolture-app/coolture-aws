@@ -186,14 +186,15 @@ def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
                             '`make seed-events embed-interests embed-posts`.')
         session = session_factory()
         session.headers.update({'X-User-Id': user_id, 'X-User-Name': username})
-        for post_id, path, kind in picks(ranking):
+        chosen = picks(ranking)
+        for post_id, path, kind in chosen:
             response = session.put(f'{base_url}/posts/{post_id}/{path}', json={'type': kind}, timeout=TIMEOUT_S)
             if not response.ok:
                 raise SeedError(f'PUT /posts/{post_id}/{path} as {username} returned {response.status_code}: '
                                 f'{response.text[:300]}')
             stats[kind.lower()] += 1
         stats['users'] += 1
-        log.info('%s reacted to %d of %d posts', username, len(picks(ranking)), len(ranking))
+        log.info('%s reacted to %d of %d posts', username, len(chosen), len(ranking))
     return stats
 
 

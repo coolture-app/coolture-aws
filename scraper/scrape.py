@@ -101,12 +101,12 @@ def run_snapshot(site: Site, geocoder: Geocoder, snapshot: Snapshot, stats: Coun
             groups[category_of(item)].append(item)
     supply = {category: len(items) for category, items in groups.items()}
     quotas = supply if size is None else allocate(supply, size)
-    saved = snapshot.categories()
     existing = snapshot.existing_event_urls()
 
     for category in sorted(groups, key=lambda name: (-quotas[name], name)):
-        count = saved[category]
-        for item in spread_over_dates(groups[category]):
+        items = spread_over_dates(groups[category])
+        count = sum(item.url in existing for item in items)
+        for item in items:
             if count >= quotas[category]:
                 break
             if item.url not in existing and import_item(item, site, geocoder, snapshot, stats, clock):

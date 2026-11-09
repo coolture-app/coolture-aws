@@ -124,10 +124,7 @@ build_frontend() {
     (cd "$FRONTEND_DIR" && tar cf - --exclude=node_modules --exclude=dist --exclude=.angular --exclude=.git \
         src public angular.json package.json tsconfig*.json) | tar xf - -C "$src"
     ln -s "$FRONTEND_DIR/node_modules" "$src/node_modules"
-    # Same shape as the frontend's own environment.ts. devTools stays null, so no dev identity code is built.
     cat > "$src/src/environments/environment.ts" <<ENV
-import type { DevTools } from '../app/core/auth/dev-identity';
-
 export const environment = {
   production: true,
   apiUrlServer: '$api_endpoint',
@@ -136,7 +133,6 @@ export const environment = {
     domain: '$cognito_domain',
     clientId: '$cognito_client_id',
   },
-  devTools: null as DevTools | null,
 };
 ENV
     (cd "$src" && npx ng build --configuration production)

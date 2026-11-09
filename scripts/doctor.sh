@@ -3,6 +3,9 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
+# The Makefile passes these. The defaults are for running the script by hand.
+EMBEDDINGS_IMAGE="${EMBEDDINGS_IMAGE:-postembeddingfunction:python3.13-v1}"
+SNAPSHOT_DIR="${SNAPSHOT_DIR:-scraper/snapshot}"
 
 problems=0
 ok() { printf '  [ok] %s\n' "$*"; }
@@ -70,10 +73,6 @@ else
     warn "node: not found. Only the frontend needs it ($install_hint)"
 fi
 
-if [[ "$platform" == windows && "$SHELL" != *bash* && -z "${BASH_VERSION:-}" ]]; then
-    warn "make isn't running recipes in bash. Install Git for Windows"
-fi
-
 echo
 echo "Machine"
 
@@ -122,9 +121,9 @@ fi
 if port_open 3000; then ok "API on http://localhost:3000"; else warn "API not running (make local, or make dev)"; fi
 if port_open 4200; then ok "frontend on http://localhost:4200"; else warn "frontend not running (npm start in ../coolture-frontend)"; fi
 
-if [[ -f scraper/snapshot/posts.jsonl ]]; then
-    events="$(grep -c . scraper/snapshot/posts.jsonl)"
-    if [[ -f scraper/snapshot/complete ]]; then ok "snapshot: $events events"; else warn "snapshot: $events events, unfinished (make scrape-snapshot goes on)"; fi
+if [[ -f "$SNAPSHOT_DIR/posts.jsonl" ]]; then
+    events="$(grep -c . "$SNAPSHOT_DIR/posts.jsonl")"
+    if [[ -f "$SNAPSHOT_DIR/complete" ]]; then ok "snapshot: $events events"; else warn "snapshot: $events events, unfinished (make scrape-snapshot goes on)"; fi
 else
     warn "no snapshot yet. make seed makes one first (about 12 minutes, once)"
 fi
@@ -140,7 +139,7 @@ if running postgres; then
     fi
 fi
 
-if [[ -f .aws-sam/embeddings/template.yaml ]] && docker image inspect postembeddingfunction:python3.13-v1 > /dev/null 2>&1; then
+if [[ -f .aws-sam/embeddings/template.yaml ]] && docker image inspect "$EMBEDDINGS_IMAGE" > /dev/null 2>&1; then
     ok "embedding workers built"
 else
     warn "embedding workers not built yet (make seed builds them, 3.5 GB)"

@@ -6,7 +6,7 @@ stay out of the public repository.
 import hashlib
 import json
 import math
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -78,11 +78,6 @@ class Entry:
     post: dict
     images: tuple[dict, ...]
 
-    @property
-    def category(self) -> str:
-        tags = self.post.get('tags') or [NO_CATEGORY]
-        return tags[0]
-
 
 def read(directory: Path) -> list[Entry]:
     posts = directory / POSTS_FILE
@@ -122,9 +117,6 @@ class Snapshot:
 
     def existing_event_urls(self) -> set[str]:
         return {entry.post['eventUrl'] for entry in read(self.directory)}
-
-    def categories(self) -> Counter:
-        return Counter(entry.category for entry in read(self.directory))
 
     def create_post(self, post: dict, images: Iterable[Image] = ()) -> Outcome:
         # Named after the event, so a run that stopped halfway writes the same files again rather than new ones.

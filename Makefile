@@ -89,7 +89,7 @@ clean-all: stop-lambdas clean ## Remove everything local: containers, data, imag
 	@echo "Clean. The snapshot in $(SNAPSHOT_DIR) stays; delete it by hand to scrape a new one."
 
 doctor: ## Check tools, Docker, ports and disk, and show what's running
-	@scripts/doctor.sh
+	@EMBEDDINGS_IMAGE=$(EMBEDDINGS_IMAGE) SNAPSHOT_DIR=$(SNAPSHOT_DIR) scripts/doctor.sh
 
 $(VENV_PY): $(PY_REQUIREMENTS)
 	@[ -x "$(VENV_PY)" ] || { echo "Creating .venv ..."; $(PYTHON) -m venv .venv; }
@@ -123,7 +123,7 @@ scrape: $(VENV_PY) ## Import trojmiasto.pl events live through the local API, ne
 	@SCRAPER_USER_ID=$${SCRAPER_USER_ID:-00000000-0000-0000-0000-00000000b07a} $(VENV_PY) scraper/scrape.py $(ARGS)
 
 scrape-snapshot: $(VENV_PY) ## Save about 120 events of every category, with photos, to scraper/snapshot (~12 min once; ALL=1 for all)
-	@$(VENV_PY) scraper/scrape.py --snapshot $(SNAPSHOT_DIR) $(if $(ALL),--all,--size $(or $(SIZE),120))
+	@$(VENV_PY) scraper/scrape.py --snapshot $(SNAPSHOT_DIR) $(if $(ALL),--all,$(if $(SIZE),--size $(SIZE)))
 
 $(SNAPSHOT_DIR)/complete:
 	@echo "No snapshot yet, so scraping one first (about 12 minutes, once)."

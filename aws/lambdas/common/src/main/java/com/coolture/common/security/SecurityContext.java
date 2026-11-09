@@ -105,49 +105,42 @@ public class SecurityContext {
             }
         }
 
-        // 3. Local development fallback (only active when isDevFallbackEnabled() is true)
+        // 3. Local development fallback. A user named by X-User-Id gets claims only from the headers, as with Cognito,
+        // so they are a regular user unless X-User-Role says otherwise. Without X-User-Id it's the local_dev admin.
         if (isDevFallbackEnabled()) {
-            boolean isExplicitAnonymous = event.getHeaders() != null && (
-                "true".equalsIgnoreCase(getHeaderCaseInsensitive(event.getHeaders(), "x-anonymous")) ||
-                "anonymous".equalsIgnoreCase(getHeaderCaseInsensitive(event.getHeaders(), "x-user-id"))
-            );
-            if (isExplicitAnonymous) {
+            Map<String, String> headers = event.getHeaders();
+            String userId = getHeaderCaseInsensitive(headers, "x-user-id");
+            if ("true".equalsIgnoreCase(getHeaderCaseInsensitive(headers, "x-anonymous")) || "anonymous".equalsIgnoreCase(userId)) {
                 return Optional.empty();
             }
-
-            // Check custom dev headers first
-            if (event.getHeaders() != null) {
-                if ("sub".equals(claimName)) {
-                    String val = getHeaderCaseInsensitive(event.getHeaders(), "x-user-id");
-                    if (val != null && !val.isBlank()) return Optional.of(val);
-                } else if ("email".equals(claimName)) {
-                    String val = getHeaderCaseInsensitive(event.getHeaders(), "x-user-email");
-                    if (val != null && !val.isBlank()) return Optional.of(val);
-                } else if ("cognito:username".equals(claimName) || "username".equals(claimName)) {
-                    String val = getHeaderCaseInsensitive(event.getHeaders(), "x-user-name");
-                    if (val != null && !val.isBlank()) return Optional.of(val);
-                } else if ("cognito:groups".equals(claimName)) {
-                    String val = getHeaderCaseInsensitive(event.getHeaders(), "x-user-role");
-                    if (val != null && !val.isBlank()) return Optional.of(val);
-                    // Someone named by X-User-Id is a regular user unless X-User-Role says otherwise, as with Cognito.
-                    String userId = getHeaderCaseInsensitive(event.getHeaders(), "x-user-id");
-                    if (userId != null && !userId.isBlank()) return Optional.empty();
-                }
-            }
-
-            // Default mock dev user fallback
-            if ("sub".equals(claimName)) {
-                return Optional.of(DEV_USER_ID.toString());
-            } else if ("email".equals(claimName)) {
-                return Optional.of(DEV_USER_EMAIL);
-            } else if ("cognito:username".equals(claimName) || "username".equals(claimName)) {
-                return Optional.of(DEV_USER_NAME);
-            } else if ("cognito:groups".equals(claimName)) {
-                return Optional.of(DEV_USER_ROLE);
-            }
+            Optional<String> fromHeader = Optional.ofNullable(devHeaderFor(claimName))
+                .map(header -> getHeaderCaseInsensitive(headers, header))
+                .filter(value -> !value.isBlank());
+            boolean namedUser = userId != null && !userId.isBlank();
+            return namedUser ? fromHeader : fromHeader.or(() -> Optional.ofNullable(devDefaultFor(claimName)));
         }
 
         return Optional.empty();
+    }
+
+    private static String devHeaderFor(String claimName) {
+        return switch (claimName) {
+            case "sub" -> "x-user-id";
+            case "email" -> "x-user-email";
+            case "cognito:username", "username" -> "x-user-name";
+            case "cognito:groups" -> "x-user-role";
+            default -> null;
+        };
+    }
+
+    private static String devDefaultFor(String claimName) {
+        return switch (claimName) {
+            case "sub" -> DEV_USER_ID.toString();
+            case "email" -> DEV_USER_EMAIL;
+            case "cognito:username", "username" -> DEV_USER_NAME;
+            case "cognito:groups" -> DEV_USER_ROLE;
+            default -> null;
+        };
     }
 
     private static Optional<String> getLambdaAuthorizerClaim(Map<String, Object> context, String claimName) {

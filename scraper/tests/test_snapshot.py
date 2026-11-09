@@ -58,7 +58,6 @@ def test_snapshot_keeps_the_post_and_its_photos(tmp_path):
     assert outcome.photos == 2
     assert entry.post == post
     assert entry.scraped_at == NOW
-    assert entry.category == 'koncerty'
     assert [(image.content, image.mime_type, image.file_name, image.width) for image in load_images(tmp_path, entry)] == [
         (b'one', 'image/webp', 'a.webp', 4), (b'two', 'image/jpeg', 'b.jpg', None)]
     assert snapshot.existing_event_urls() == {'https://site.test/1'}
@@ -71,7 +70,7 @@ def test_snapshot_run_samples_every_category_and_marks_it_complete(tmp_path):
     run_snapshot(FakeSite(items), FakeGeocoder(), Snapshot(tmp_path), stats, size=6, clock=lambda: NOW)
 
     # The square roots of 10 and 2 split six as 4 and 2.
-    assert Counter(entry.category for entry in read(tmp_path)) == {'koncerty': 4, 'kulinaria': 2}
+    assert Counter(entry.post['tags'][0] for entry in read(tmp_path)) == {'koncerty': 4, 'kulinaria': 2}
     assert is_complete(tmp_path)
     assert stats['listed'] == 12
 
