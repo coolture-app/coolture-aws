@@ -118,7 +118,7 @@ make embed-users                     # what the schedule does in AWS
 `embed-posts` (`scripts/embed-posts.sh`) builds the same SQS-wrapped S3 events AWS delivers and runs
 `sam local invoke PostEmbeddingFunction`, 50 posts per invocation (`BATCH_SIZE=`), and exits non-zero if any post fails.
 
-Unit tests: `pip install -r recommender/embedding-workers/<worker>/requirements-dev.txt` then `make test-python`.
+Unit tests: `make test-python`, which installs what they need into `.venv` first.
 `DB_TEST=true make test-python` also runs `user-embedding`'s queries against `make up`, and leaves the database as it was.
 
 ### Changing the embedding model
@@ -224,69 +224,117 @@ The architecture uses a dual-mode authorization model: strictly enforced Cognito
 
 ### 2. Local Development – Frictionless Mocking
 When `ENVIRONMENT=local` (set automatically in `make local`):
-- **Zero-Config Auth**: If no auth headers are provided, requests automatically resolve to the default mock user `local_dev` (`00000000-0000-0000-0000-000000000001`). You can curl protected endpoints without tokens.
-- **Switch Users**: Pass `-H "X-User-Id: <uuid>"` to simulate requests from any specific user ID.
-- **Anonymous Access**: Pass `-H "X-Anonymous: true"` to test guest mode.
+- **Zero-Config Auth**: If no auth headers are provided, requests automatically resolve to the default mock user `local_dev` (`00000000-0000-0000-0000-000000000001`), an admin. You can curl protected endpoints without tokens.
+- **Switch Users**: Pass `-H "X-User-Id: <uuid>"` to simulate requests from any specific user ID. That user is a regular user, as with Cognito, unless you also pass `-H "X-User-Role: COOLTURE_ADMIN"`.
+- **Anonymous Access**: Pass `-H "X-Anonymous: true"` to test guest mode. No header at all means `local_dev`, not a guest.
+- The frontend's development build sends these headers from its DEV pill, see [Run locally](#3-act-as-someone).
 - *(Security: In AWS environments, `X-User-Id` and `X-Anonymous` headers are strictly ignored and fallback is disabled).*
 
 ### 3. Database Isolation (Local vs. AWS)
 - **Production Migrations** (`migrations/*.sql`): Strictly schema DDL (tables, indexes, extensions). No mock users are present, ensuring clean AWS deployments.
-- **Local Dev Seed** (`db/local-dev-seed.sql`): Creates the `local_dev` user and a small demo dataset (3 users, 6 posts, follows, likes) only in local Docker Postgres, applied by the `migrate` compose service after the migrations.
+- **Local Dev Seed** (`db/local-dev-seed.sql`): Creates `local_dev`, `coolture_bot` and three demo users with interests and follows, only in local Docker Postgres, applied by the `migrate` compose service after the migrations. Events and reactions come from `make seed`.
 
-## Prerequisites
+## Run locally
 
-- AWS SAM CLI
-- Docker
-- Maven 3.x
-- Java 21
-- Python 3.13 (`sam build` of the Python functions)
+The whole app on your machine: PostgreSQL, S3 storage (Garage), the API under `sam local`, the embedding workers and the
+frontend, with about 120 real events from trojmiasto.pl, three demo users with their own tastes, and a guest.
+It works on Windows (Git Bash or PowerShell), WSL, Linux and macOS.
 
-## Local Development
+### 1. Install the tools, once
 
-### Setup
+| Tool | Why | Windows | Linux, WSL, macOS |
+|---|---|---|---|
+| Docker | Database, storage, the Lambdas | [Docker Desktop](https://docs.docker.com/desktop/) | Docker Engine with the compose plugin, or Docker Desktop |
+| Git (with Git Bash on Windows) | Code. `make` runs its recipes in Git's bash | `winget install Git.Git` | package manager |
+| make | Every command below | `winget install ezwinports.make` | package manager (`build-essential` on Ubuntu) |
+| [mise](https://mise.jdx.dev) | Installs the rest at pinned versions | `winget install jdx.mise` | `curl https://mise.run` piped to `sh` |
 
-Start local PostgreSQL and local S3 (Garage):
-
-```bash
-make up
-```
-
-> `make up` runs PostgreSQL (port `5430`), S3 Garage (port `3900`), `s3-init` which provisions the `coolture-bucket` with CORS enabled for direct browser uploads, and `migrate`, which applies `migrations/` with the same runner as on AWS (`aws/lambdas/migrations`) and then `db/local-dev-seed.sql`. It returns once the database is migrated and seeded.
-
-After adding a migration, apply it without restarting anything (already applied files are skipped):
+Then, in this folder and in `../coolture-frontend`:
 
 ```bash
-make migrate
+mise trust && mise install    # Java 21 (sets JAVA_HOME), Maven, Python 3.13, the SAM CLI, Node 24
+make doctor                   # checks all of the above, Docker, ports and disk, and says what to fix
 ```
 
-Start the recommender (local SQS + worker) and run its tests, see [recommender/README.md](recommender/README.md):
+mise is optional: with Java 21, Maven, Python 3.10+, the AWS SAM CLI and Node 24 installed another way, `make doctor`
+passes too. On WSL, keep the repositories on WSL's own disk (`~/...`), not under `/mnt/c`, or builds are slow.
+On Debian or Ubuntu without mise, Python also needs `sudo apt install python3-venv`.
+
+### 2. Start it
 
 ```bash
-make rec-up
-make rec-test
+make dev                      # terminal 1: database, storage, migrations, build, then the API on :3000
+make seed                     # terminal 2: realistic data. It waits for the API, so start it right away
+cd ../coolture-frontend && npm install && npm start    # terminal 3: http://localhost:4200
 ```
 
-### Running Local API
+`make seed` does, in order, skipping whatever is already done:
 
-Build the Lambdas and start API Gateway locally on port 3000:
+1. `scrape-snapshot`: if there's no snapshot yet, saves events from trojmiasto.pl with their photos into the gitignored
+   `scraper/snapshot/`. About 12 minutes, once. Every category of the site gets a share by the square root of its size
+   (24 concerts, 19 shows, 16 parties, 15 exhibitions, 13 films, 12 sport, 8 occasional, 7 fairs, 6 food), spread over
+   the next 30 days. `make scrape-snapshot ALL=1` saves the whole listing instead (about 40 minutes).
+2. `seed-events`: loads the snapshot through the API as `coolture_bot`, four posts at a time, every date moved forward
+   by the same whole number of days so they're all ahead and keep their hour. About 4 minutes.
+3. `embed-interests`, `embed-posts`: the first run builds the embedding image (3.5 GB, about 10 minutes).
+4. `seed-reactions`: each demo user likes, marks as interesting or dislikes a few posts, picked by how close they are
+   to the user's interests. A user who already reacted to anything is left alone.
+5. `embed-users`: the demo users' vectors, so their feeds are personal.
 
-```bash
-make local
-```
+**The first run takes about 30 minutes**, mostly the snapshot and the embedding image. Later runs take a minute or two.
+Running `make seed` again adds nothing.
 
-`make dev` does `make up` and `make local` in one go.
+### 3. Act as someone
 
-The API will use these default connection parameters:
+The frontend's development build has a **DEV** pill at the bottom left. It switches between:
 
-- Host: `host.docker.internal`
-- Port: `5430`
-- Database: `coolture`
-- User: `coolture_admin`
-- Password: `admin`
+| Who | What for |
+|---|---|
+| Gość (default) | A visitor with no account. The API sees no user |
+| Anna, Jan, Ola | Regular users with different interests: concerts and clubs; theatre and film; art, running and food |
+| Bot | The author of the imported events, to edit or delete them |
+| local_dev | The admin |
 
-### Running the frontend against the local API
+The choice is a cookie, so server-rendered pages see the same user, and the page reloads on a switch. Zaloguj opens the
+menu and Wyloguj goes back to the guest. Production builds have no pill and no dev code, and AWS ignores these headers.
 
-In `../coolture-frontend`, `npm install` and `npx ng serve` serve the app on `http://localhost:4200`. Its development environment points at `http://localhost:3000`, where `make local` serves the routes without the `/api` prefix that CloudFront strips on AWS. There is no local login: pages that need no login work, and authenticated calls are easiest with curl and `X-User-Id` (see Authentication & Authorization).
+### Stop, restart, start over
+
+| Command | Does |
+|---|---|
+| Ctrl+C in terminal 1 | Stops the API. If its containers stay behind (it happens on Windows), `make stop-lambdas` |
+| `make local` | Restarts only the API, after a code change. It rebuilds first |
+| `make stop` (or `make down`) | Stops everything. Data stays |
+| `make dev` | Starts everything again |
+| `make reset-db` | Deletes the database and the stored photos. Then `make up && make seed` (about 5 minutes with the snapshot) |
+| `make clean-all` | Removes all containers, data, images (including the 3.5 GB one), builds and `.venv`. Keeps the snapshot |
+| `make doctor` | What's missing, and what's running now |
+
+Seeded events turn into past events over the following weeks. `make reset-db && make up && make seed` moves them ahead
+again. Delete `scraper/snapshot/` and run `make seed` for fresh events.
+
+### When something fails
+
+| Symptom | Fix |
+|---|---|
+| `make up`: "Migrations failed", "... was changed after it was applied" | A migration was edited, or the branch has different ones: `make reset-db && make up` |
+| `make up`: a container name "is already in use" | Containers from an older copy of the stack. `make doctor` names the command, `docker compose -p <name> down` |
+| `make build`: "invalid target release: 21", or `JAVA_HOME` errors | Java isn't 21. `mise install`, or point `JAVA_HOME` at a JDK 21 |
+| `make` from PowerShell: "'grep' is not recognized" | Git for Windows is missing. The Makefile uses Git's bash |
+| Photos or uploads fail with 403 | The API was started by hand without the Garage keys. Use `make local` |
+| The API can't reach the database on Linux | `make local` maps `host.docker.internal`. A hand-started `sam local` needs `--add-host host.docker.internal:host-gateway` |
+| `make seed`: "Waiting for the API" | Start `make dev` or `make local`. It waits up to 15 minutes |
+| `make seed-reactions`: "No ranked posts" | Embed first: `make embed-interests embed-posts` (`make seed` does it in order) |
+
+### Other local commands
+
+After adding a migration, `make migrate` applies it without restarting anything. `make rec-up` and `make rec-test` start
+the recommender's local SQS and worker and run its tests, see [recommender/README.md](recommender/README.md).
+`make test-python` and `make test-scraper` run the Python tests in `.venv`, which they create.
+`make scrape` imports events live, as before the snapshot (see [scraper/README.md](scraper/README.md)).
+
+The API connects to PostgreSQL at `host.docker.internal:5430`, database `coolture`, user `coolture_admin`, password
+`admin`. Its routes have no `/api` prefix, which CloudFront strips on AWS.
 
 ### Testing the API
 
