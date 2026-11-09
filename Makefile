@@ -34,6 +34,8 @@ SAM_LOCAL_ARGS := --template-file .aws-sam/build/template.yaml --skip-pull-image
 LAMBDA_IMAGES := public.ecr.aws/lambda/java:21-rapid-x86_64 public.ecr.aws/lambda/python:3.13-rapid-x86_64 \
 	postembeddingfunction:rapid-x86_64
 EMBEDDINGS_TEMPLATE := .aws-sam/embeddings/template.yaml
+# The post-embedding worker's image, which sam build tags from DockerTag in recommender/embedding-workers/template.yaml.
+EMBEDDINGS_IMAGE := postembeddingfunction:python3.13-v1
 SNAPSHOT_DIR := scraper/snapshot
 
 help: ## Show available commands
@@ -82,7 +84,7 @@ clean: ## Clean build artifacts
 
 clean-all: stop-lambdas clean ## Remove everything local: containers, data, images (incl. the 3.5 GB one), builds, .venv. Keeps the snapshot
 	$(COMPOSE_ALL) down -v --rmi all --remove-orphans
-	@docker rmi -f $(LAMBDA_IMAGES) > /dev/null 2>&1 || true
+	@docker rmi -f $(LAMBDA_IMAGES) $(EMBEDDINGS_IMAGE) > /dev/null 2>&1 || true
 	@rm -rf .venv
 	@echo "Clean. The snapshot in $(SNAPSHOT_DIR) stays; delete it by hand to scrape a new one."
 
@@ -141,15 +143,15 @@ seed: seed-events embed-interests embed-posts seed-reactions embed-users ## All 
 test-post-read-db: build-common ## Run the post-read database tests against `make up`
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-read/pom.xml -Dtest=PostReadDbTest
 
-embed-posts: $(if $(DRY_RUN),,$(EMBEDDINGS_TEMPLATE)) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
+embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
 	@scripts/embed-posts.sh
 
-# Built on first use. After changing a worker's code, run make build-embeddings again.
-$(EMBEDDINGS_TEMPLATE):
-	@echo "Building the embedding workers once. The first build downloads the model into a 3.5 GB image."
-	@$(MAKE) --no-print-directory build-embeddings
-
-require-embeddings-build: $(EMBEDDINGS_TEMPLATE)
+# Built on first use, or when its image was removed. After changing a worker's code, run make build-embeddings again.
+require-embeddings-build:
+	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
+		echo "Building the embedding workers. The first build downloads the model into a 3.5 GB image."; \
+		$(MAKE) --no-print-directory build-embeddings; \
+	fi
 
 embed-interests: require-embeddings-build ## Embed interests missing vectors locally
 	@out="$$(echo '{"action":"embed-interests"}' | sam local invoke PostEmbeddingFunction --template-file .aws-sam/embeddings/template.yaml --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'

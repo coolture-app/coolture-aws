@@ -139,7 +139,11 @@ if running postgres; then
     fi
 fi
 
-if [[ -f .aws-sam/embeddings/template.yaml ]]; then ok "embedding workers built"; else warn "embedding workers not built yet (make seed builds them, 3.5 GB)"; fi
+if [[ -f .aws-sam/embeddings/template.yaml ]] && docker image inspect postembeddingfunction:python3.13-v1 > /dev/null 2>&1; then
+    ok "embedding workers built"
+else
+    warn "embedding workers not built yet (make seed builds them, 3.5 GB)"
+fi
 
 echo
 if [[ "$problems" -gt 0 ]]; then
