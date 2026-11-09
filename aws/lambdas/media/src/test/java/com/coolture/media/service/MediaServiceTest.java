@@ -16,10 +16,12 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -29,6 +31,44 @@ class MediaServiceTest {
     private final MediaRepository repository = mock(MediaRepository.class);
     private final S3StorageService s3Storage = mock(S3StorageService.class);
     private final MediaService service = new MediaService(repository, s3Storage);
+
+    @Test
+    void deleteAbandoned_deletesTheFileAndMarksTheRow() throws Exception {
+        Instant cutoff = Instant.parse("2026-11-08T00:00:00Z");
+        UUID id = UUID.randomUUID();
+        when(repository.findAbandoned(eq(cutoff), anyInt()))
+            .thenReturn(List.of(new MediaRepository.AbandonedMedia(id, "EVENT_MEDIA/a.jpg")));
+
+        assertEquals(1, service.deleteAbandoned(cutoff));
+
+        verify(s3Storage).deleteObject("EVENT_MEDIA/a.jpg");
+        verify(repository).markDeleted(eq(id), any());
+    }
+
+    @Test
+    void deleteAbandoned_goesOnAfterOneFails() throws Exception {
+        Instant cutoff = Instant.parse("2026-11-08T00:00:00Z");
+        UUID stuck = UUID.randomUUID();
+        UUID next = UUID.randomUUID();
+        when(repository.findAbandoned(eq(cutoff), anyInt())).thenReturn(List.of(
+            new MediaRepository.AbandonedMedia(stuck, "stuck.jpg"),
+            new MediaRepository.AbandonedMedia(next, "next.jpg")));
+        doThrow(new RuntimeException("storage down")).when(s3Storage).deleteObject("stuck.jpg");
+
+        assertEquals(1, service.deleteAbandoned(cutoff));
+
+        verify(repository, never()).markDeleted(eq(stuck), any());
+        verify(repository).markDeleted(eq(next), any());
+    }
+
+    @Test
+    void deleteAbandoned_withNothingToDelete_touchesNoStorage() throws Exception {
+        when(repository.findAbandoned(any(), anyInt())).thenReturn(List.of());
+
+        assertEquals(0, service.deleteAbandoned(Instant.now()));
+
+        verifyNoInteractions(s3Storage);
+    }
 
     private static final UUID CALLER_ID = UUID.randomUUID();
     private static final UUID MEDIA_ID = UUID.randomUUID();

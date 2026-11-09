@@ -603,6 +603,32 @@ Resources:
         GetMedia: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/media/{mediaId}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         DeleteMedia: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/media/{mediaId}', Method: DELETE}}
 
+  MediaCleanupLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-media-cleanup'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Deletes the photos of posts that were never published, such as after a closed tab.
+  MediaCleanupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-media-cleanup'
+      LoggingConfig:
+        LogGroup: !Ref MediaCleanupLogGroup
+      CodeUri: lambdas/media/
+      Handler: com.coolture.media.MediaCleanupHandler::handleRequest
+      Timeout: 300
+      Policies:
+        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
+        - S3CrudPolicy:
+            BucketName: !Ref MediaBucket
+      Events:
+        Daily:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+
 Outputs:
   ApiEndpoint:
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'

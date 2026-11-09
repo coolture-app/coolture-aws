@@ -12,6 +12,8 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -159,6 +161,37 @@ public class MediaRepository {
             stmt.setObject(3, id);
 
             stmt.executeUpdate();
+        }
+    }
+
+    public record AbandonedMedia(UUID id, String objectKey) {}
+
+    /** Event photos uploaded before the cutoff that no post holds. Profile images are kept by other rules. */
+    public List<AbandonedMedia> findAbandoned(Instant cutoff, int limit) throws SQLException {
+        String sql = """
+            SELECT m.id, m.object_key
+            FROM media m
+            WHERE m.purpose = 'EVENT_MEDIA'
+              AND m.status IN ('PENDING', 'UPLOADED')
+              AND m.created_at < ?
+              AND NOT EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = m.id)
+            ORDER BY m.created_at ASC
+            LIMIT ?
+        """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setTimestamp(1, Timestamp.from(cutoff));
+            stmt.setInt(2, limit);
+
+            List<AbandonedMedia> found = new ArrayList<>();
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    found.add(new AbandonedMedia((UUID) rs.getObject("id"), rs.getString("object_key")));
+                }
+            }
+            return found;
         }
     }
 
