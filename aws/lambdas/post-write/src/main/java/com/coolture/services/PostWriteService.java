@@ -3,6 +3,7 @@ package com.coolture.services;
 import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.PostDetailDto;
+import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.dto.CountryCodeRequest;
@@ -18,8 +19,10 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 public class PostWriteService {
 
@@ -44,8 +47,9 @@ public class PostWriteService {
         validateDateRange(req.startsAt(), req.endsAt());
         validateMedia(req.mediaIds(), req.coverMediaId());
 
-        repository.validateMediaOwnership(authorId, req.mediaIds());
-        PostDetailDto created = repository.createPost(authorId, req);
+        requireEventPhotos(repository.validateMediaOwnership(authorId, req.mediaIds()));
+        PostDetailDto created = repository.createPost(authorId,
+            req.coverMediaId() == null ? req : req.withMediaIds(coverFirst(req.mediaIds(), req.coverMediaId())));
         embeddingPublisher.requestPost(created.id());
         return created;
     }
@@ -71,12 +75,16 @@ public class PostWriteService {
         Instant newEndsAt = req.endsAt() != null ? req.endsAt() : existing.endsAt();
         validateDateRange(newStartsAt, newEndsAt);
 
+        UpdatePostRequest toSave = req;
         if (req.mediaIds() != null) {
             validateMedia(req.mediaIds(), req.coverMediaId());
-            repository.validateMediaOwnership(callerId, req.mediaIds());
+            requireEventPhotos(repository.validateMediaOwnership(callerId, req.mediaIds()));
+            if (req.coverMediaId() != null) {
+                toSave = req.withMediaIds(coverFirst(req.mediaIds(), req.coverMediaId()));
+            }
         }
 
-        PostDetailDto updated = repository.updatePost(postId, callerId, existing, req);
+        PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave);
         if (embeddedContentChanged(existing, updated)) {
             embeddingPublisher.requestPost(updated.id());
         }
@@ -212,6 +220,21 @@ public class PostWriteService {
         if (endsAt != null && startsAt != null && !endsAt.isAfter(startsAt)) {
             throw new IllegalArgumentException("endsAt must be strictly after startsAt");
         }
+    }
+
+    /** A post holds only event photos, which keeps a profile image out of it. */
+    private static void requireEventPhotos(Map<UUID, MediaPurpose> purposes) {
+        purposes.forEach((id, purpose) -> {
+            if (purpose != null && purpose != MediaPurpose.EVENT_MEDIA) {
+                throw new IllegalArgumentException("Media " + id + " is a " + purpose + ", not an event photo");
+            }
+        });
+    }
+
+    /** A post's first photo is its cover, so a named cover moves there and the others keep their order. */
+    private static List<UUID> coverFirst(List<UUID> mediaIds, UUID coverMediaId) {
+        if (mediaIds == null || mediaIds.isEmpty()) return mediaIds;
+        return Stream.concat(Stream.of(coverMediaId), mediaIds.stream().filter(id -> !id.equals(coverMediaId))).toList();
     }
 
     private void validateMedia(List<UUID> mediaIds, UUID coverMediaId) {

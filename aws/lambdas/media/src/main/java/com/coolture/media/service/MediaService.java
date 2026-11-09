@@ -10,11 +10,16 @@ import com.coolture.media.dto.MediaUploadInitResponse;
 import com.coolture.media.repository.MediaRepository;
 import com.coolture.media.repository.MediaRepository.MediaRecord;
 
+import java.util.logging.Logger;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.UUID;
 
 public class MediaService {
+
+    private static final Logger LOG = Logger.getLogger(MediaService.class.getName());
+    /** Far more than a day brings, and the rest wait for the next run if it ever isn't. */
+    private static final int ABANDONED_PER_RUN = 1000;
 
     private final MediaRepository mediaRepository;
     private final S3StorageService s3StorageService;
@@ -149,6 +154,24 @@ public class MediaService {
                     }
                     return new IllegalArgumentException("Media " + mediaId + " not found");
                 });
+    }
+
+    /**
+     * Deletes event photos that never reached a post and are older than the cutoff.
+     * One that fails is logged and left for the next run, so it can't stop the others.
+     */
+    public int deleteAbandoned(Instant cutoff) throws SQLException {
+        int deleted = 0;
+        for (MediaRepository.AbandonedMedia media : mediaRepository.findAbandoned(cutoff, ABANDONED_PER_RUN)) {
+            try {
+                s3StorageService.deleteObject(media.objectKey());
+                mediaRepository.markDeleted(media.id(), Instant.now());
+                deleted++;
+            } catch (RuntimeException | SQLException e) {
+                LOG.warning("Could not delete abandoned media " + media.id() + ": " + e.getMessage());
+            }
+        }
+        return deleted;
     }
 
     private static String extractExtension(String fileName) {

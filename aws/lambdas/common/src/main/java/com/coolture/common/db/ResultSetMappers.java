@@ -162,8 +162,7 @@ public final class ResultSetMappers {
     public static PostMediaDto mapPostMedia(ResultSet rs) throws SQLException {
         return new PostMediaDto(
             mapMediaResource(rs, "media_id"),
-            rs.getInt("position"),
-            rs.getBoolean("is_cover")
+            rs.getInt("position")
         );
     }
 

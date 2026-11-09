@@ -24,7 +24,7 @@ public final class MediaQueries {
 
     public static List<PostMediaDto> getPostMediaList(Connection conn, UUID postId) throws SQLException {
         String sql = """
-            SELECT pm.position, pm.is_cover,
+            SELECT pm.position,
                    m.id AS media_id, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at, m.deleted_at, m.object_key,
                    m.width, m.height
             FROM post_media pm
@@ -45,7 +45,7 @@ public final class MediaQueries {
         return list;
     }
 
-    /** Fills in each card's photos, cover first, with one query for the whole list. */
+    /** Fills in each card's photos, in their order, the cover first, with one query for the whole list. */
     public static List<PostCardDto> withPhotos(Connection conn, List<PostCardDto> cards) throws SQLException {
         if (cards.isEmpty()) {
             return cards;
@@ -55,7 +55,7 @@ public final class MediaQueries {
             FROM (
                 SELECT pm.post_id, m.id AS media_id, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at,
                        m.deleted_at, m.object_key, m.width, m.height,
-                       ROW_NUMBER() OVER (PARTITION BY pm.post_id ORDER BY pm.is_cover DESC, pm.position ASC) AS n
+                       ROW_NUMBER() OVER (PARTITION BY pm.post_id ORDER BY pm.position ASC) AS n
                 FROM post_media pm
                 JOIN media m ON m.id = pm.media_id
                 WHERE pm.post_id = ANY(?::uuid[])

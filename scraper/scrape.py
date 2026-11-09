@@ -4,15 +4,17 @@ import logging
 import os
 import sys
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
+from itertools import islice
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from api import ApiError, CooltureApi
+from api import MAX_PHOTOS, ApiError, CooltureApi, Outcome
 from geocoder import DEFAULT_URL, Geocoder, GeocoderUnavailable
+from images import Image
 from posts import to_post
 from trojmiasto import Site
 
@@ -59,8 +61,11 @@ class DryRun:
     def existing_event_urls(self) -> set[str]:
         return set()
 
-    def create_post(self, post: dict) -> None:
-        print(json.dumps(post, ensure_ascii=False))
+    def create_post(self, post: dict, images: Iterable[Image] = ()) -> Outcome:
+        uploads = [{'fileName': image.file_name, 'mimeType': image.mime_type, 'sizeBytes': len(image.content),
+                    'width': image.width, 'height': image.height} for image in islice(images, MAX_PHOTOS)]
+        print(json.dumps({**post, 'images': uploads} if uploads else post, ensure_ascii=False))
+        return Outcome(photos=len(uploads))
 
 
 def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Counter, limit: int | None,
@@ -96,12 +101,17 @@ def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Count
 
         post = to_post(event, place, postal_code)
         stats['online' if event.online else 'exact_location' if place.exact else 'city_location'] += 1
-        failure = sink.create_post(post)
-        if failure:
+        # Downloaded one at a time as the sink asks, so it stops at the API's limit without fetching the rest.
+        images = (image for image in map(site.image, event.image_urls) if image is not None)
+        outcome = sink.create_post(post, images)
+        if outcome.failure:
             stats['rejected'] += 1
-            log.warning('Rejected url=%s reason=%s', item.url, failure)
-        else:
-            stats['created'] += 1
+            log.warning('Rejected url=%s reason=%s', item.url, outcome.failure)
+            continue
+        stats['created'] += 1
+        if outcome.photos:
+            stats['with_image'] += 1
+            stats['photos'] += outcome.photos
 
 
 def _failed_request(error: requests.RequestException) -> str:
@@ -123,7 +133,7 @@ def main() -> int:
     try:
         geocoder = Geocoder(http_session(), os.getenv('SCRAPER_NOMINATIM_URL', DEFAULT_URL))
         sink = DryRun() if args.dry_run else CooltureApi(
-            http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
+            http_session(), http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
             token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
         run(Site(http_session()), geocoder, sink, stats, args.limit)
     # Everything imported so far stays after an error, and the next run goes on from there.

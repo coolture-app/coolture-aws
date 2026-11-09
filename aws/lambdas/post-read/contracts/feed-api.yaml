@@ -343,7 +343,7 @@ components:
       required: [id]
       properties:
         id: {type: string, format: uuid}
-        purpose: {type: string, enum: [PROFILE_IMAGE, PROFILE_IMAGE_THUMBNAIL, EVENT_COVER, EVENT_MEDIA]}
+        purpose: {type: string, enum: [PROFILE_IMAGE, PROFILE_IMAGE_THUMBNAIL, EVENT_MEDIA]}
         mimeType: {type: string}
         sizeBytes: {type: integer, format: int64}
         status: {type: string, enum: [PENDING, UPLOADED, ATTACHED, DELETED]}
