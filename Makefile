@@ -27,9 +27,12 @@ PY_REQUIREMENTS := scraper/requirements-dev.txt aws/lambdas/migrations/requireme
 # The local Garage keys, the defaults in docker-compose.yml. Without them every upload and photo URL gets a 403.
 GARAGE_ACCESS_KEY_ID ?= GK9f23fc115cfabe3da0a5bcb5
 GARAGE_ACCESS_KEY_SECRET ?= 8fa745da69f465aff2fafb09ab290c6358e6e58c0ec3d3fc174d27f300688111
+# make api-docs serves the contracts here, and its "try it" calls the local API from that origin.
+API_DOCS_PORT ?= 8081
 # host-gateway makes host.docker.internal work on Linux's Docker Engine too, not only on Docker Desktop.
 SAM_LOCAL_ARGS := --template-file .aws-sam/build/template.yaml --skip-pull-image --add-host host.docker.internal:host-gateway \
-	--parameter-overrides GarageAccessKeyId=$(GARAGE_ACCESS_KEY_ID) GarageAccessKeySecret=$(GARAGE_ACCESS_KEY_SECRET)
+	--parameter-overrides GarageAccessKeyId=$(GARAGE_ACCESS_KEY_ID) GarageAccessKeySecret=$(GARAGE_ACCESS_KEY_SECRET) \
+	CorsAllowedOrigins=http://localhost:4200,http://localhost:$(API_DOCS_PORT)
 # The containers sam local starts for the API and the embedding workers. Ctrl+C doesn't always remove them on Windows.
 LAMBDA_IMAGES := public.ecr.aws/lambda/java:21-rapid-x86_64 public.ecr.aws/lambda/python:3.13-rapid-x86_64 \
 	postembeddingfunction:rapid-x86_64
@@ -115,6 +118,17 @@ test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding workers
 			aws/lambdas/migrations aws/lambdas/authorizer; do \
 		echo "$$dir"; (cd $$dir && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests) || exit 1; \
 	done
+
+api-test: ## Run the request flows in api/ against the local stack (after make dev and make seed)
+	@command -v hurl > /dev/null || { echo "hurl not found: mise install, or see https://hurl.dev"; exit 1; }
+	@hurl --test --variables-file api/local.env api/*.hurl
+
+# Every aws/lambdas/<area>/contracts folder shows up under its area's name.
+api-docs: ## Browse the API contracts and try requests on http://localhost:8081 (Ctrl+C stops)
+	@echo "API docs: http://localhost:$(API_DOCS_PORT)"
+	@MSYS_NO_PATHCONV=1 docker run --rm -p $(API_DOCS_PORT):8080 \
+		$(foreach dir,$(wildcard aws/lambdas/*/contracts),-v "$(CURDIR)/$(dir):/docs/$(word 3,$(subst /, ,$(dir))):ro") \
+		scalarapi/api-reference:0.6.17
 
 test-scraper: $(VENV_PY) ## Run the scraper's unit tests
 	@cd scraper && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests

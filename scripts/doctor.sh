@@ -73,6 +73,8 @@ else
     warn "node: not found. Only the frontend needs it ($install_hint)"
 fi
 
+if has hurl; then ok "hurl $(hurl --version 2> /dev/null | head -n 1 | minor)"; else warn "hurl: not found. Only make api-test needs it ($install_hint)"; fi
+
 echo
 echo "Machine"
 

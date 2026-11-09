@@ -9,3 +9,5 @@ uv = "latest"
 aws-sam = "1.171"
 # For ../coolture-frontend and make deploy-frontend.
 node = "24"
+# Runs the request flows in api/ (make api-test).
+hurl = "8.1"
