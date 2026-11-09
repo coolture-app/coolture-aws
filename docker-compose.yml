@@ -104,6 +104,26 @@ services:
     restart: on-failure:3
     entrypoint: ["/bin/sh", "/init.sh"]
 
+  # The geocoder (profile geo), with the AWS instance's memory. make up starts it once make geo-index has built the index.
+  photon:
+    build: ./geocoder
+    image: coolture-aws-photon:latest
+    profiles: [geo]
+    container_name: coolture-photon
+    mem_limit: 1g
+    ports:
+      - "127.0.0.1:2322:2322"
+    volumes:
+      - geocoder-index:/data
+
+  photon-import:
+    image: coolture-aws-photon:latest
+    profiles: [geo]
+    mem_limit: 4g
+    command: [import]
+    volumes:
+      - geocoder-index:/data
+
   # Recommender (docker compose --profile rec): local SQS and the worker that stores graph scores.
   sqs:
     image: softwaremill/elasticmq-native:1.7.1
@@ -150,3 +170,7 @@ volumes:
   sqs-data:
   garage_data:
   garage_meta:
+  # External, so make reset-db's down -v keeps an index that is slow to build. make clean-all removes it.
+  geocoder-index:
+    external: true
+    name: coolture-geocoder-index
