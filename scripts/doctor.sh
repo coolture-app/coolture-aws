@@ -99,7 +99,8 @@ if has docker && docker info > /dev/null 2>&1; then
     done
 fi
 
-port_open() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null; }
+# Both addresses: ng serve listens on IPv6 only, Docker and sam local on IPv4.
+port_open() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null || (exec 3<> "/dev/tcp/::1/$1") 2> /dev/null; }
 running() { docker compose ps --status running --services 2> /dev/null | grep -qx "$1"; }
 if [[ -z "$clash" ]]; then
     for entry in 5430:postgres:PostgreSQL 3900:s3garage:Garage; do
