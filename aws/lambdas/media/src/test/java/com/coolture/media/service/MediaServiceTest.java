@@ -36,7 +36,7 @@ class MediaServiceTest {
     @Test
     void initUpload_createsMediaRecord_andReturnsPresignedPutUrl() throws SQLException {
         MediaUploadInitRequest request = new MediaUploadInitRequest(
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 "cover.jpg",
@@ -57,7 +57,7 @@ class MediaServiceTest {
 
         assertNotNull(response);
         assertNotNull(response.mediaId());
-        assertTrue(response.objectKey().contains("EVENT_COVER/" + CALLER_ID));
+        assertTrue(response.objectKey().contains("EVENT_MEDIA/" + CALLER_ID));
         assertTrue(response.objectKey().endsWith(".jpg"));
         assertEquals("http://localhost:3900/bucket/key?sig=xyz", response.uploadUrl());
         assertEquals("PUT", response.httpMethod());
@@ -66,7 +66,7 @@ class MediaServiceTest {
         verify(repository).insert(recordCaptor.capture());
         MediaRecord saved = recordCaptor.getValue();
         assertEquals(CALLER_ID, saved.ownerId());
-        assertEquals(MediaPurpose.EVENT_COVER, saved.purpose());
+        assertEquals(MediaPurpose.EVENT_MEDIA, saved.purpose());
         assertEquals(MediaStatus.PENDING, saved.status());
         assertEquals(1080, saved.width());
         assertEquals(1350, saved.height());
@@ -75,7 +75,7 @@ class MediaServiceTest {
     @Test
     void initUpload_throwsException_whenMimeTypeNotAllowed() throws SQLException {
         MediaUploadInitRequest request = new MediaUploadInitRequest(
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "application/pdf",
                 102400L,
                 "document.pdf",
@@ -92,9 +92,9 @@ class MediaServiceTest {
         MediaRecord record = new MediaRecord(
                 MEDIA_ID,
                 CALLER_ID,
-                "EVENT_COVER/123/abc.jpg",
+                "EVENT_MEDIA/123/abc.jpg",
                 "cover.jpg",
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 MediaStatus.PENDING,
@@ -105,9 +105,9 @@ class MediaServiceTest {
         );
 
         when(repository.findByIdAndOwnerId(MEDIA_ID, CALLER_ID)).thenReturn(Optional.of(record));
-        when(s3Storage.headObject("EVENT_COVER/123/abc.jpg"))
+        when(s3Storage.headObject("EVENT_MEDIA/123/abc.jpg"))
                 .thenReturn(Optional.of(new S3StorageService.StoredObject(102400L, "image/jpeg")));
-        when(s3Storage.presignGet("EVENT_COVER/123/abc.jpg")).thenReturn("http://localhost:3900/get-url");
+        when(s3Storage.presignGet("EVENT_MEDIA/123/abc.jpg")).thenReturn("http://localhost:3900/get-url");
 
         MediaResourceDto dto = service.completeUpload(MEDIA_ID, CALLER_ID, new MediaCompleteRequest(null));
 
@@ -121,7 +121,7 @@ class MediaServiceTest {
     @Test
     void initUpload_throwsBadRequest_whenImageExceedsSizeLimit() throws SQLException {
         MediaUploadInitRequest request = new MediaUploadInitRequest(
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/png",
                 10L * 1024 * 1024 + 1,
                 "huge.png",
@@ -138,7 +138,7 @@ class MediaServiceTest {
     @Test
     void initUpload_allowsLargerVideos_upToVideoLimit() throws SQLException {
         MediaUploadInitRequest request = new MediaUploadInitRequest(
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "video/mp4",
                 100L * 1024 * 1024,
                 "clip.mp4",
@@ -180,9 +180,9 @@ class MediaServiceTest {
         return new MediaRecord(
                 MEDIA_ID,
                 CALLER_ID,
-                "EVENT_COVER/123/abc.jpg",
+                "EVENT_MEDIA/123/abc.jpg",
                 "cover.jpg",
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 MediaStatus.PENDING,
@@ -198,9 +198,9 @@ class MediaServiceTest {
         MediaRecord record = new MediaRecord(
                 MEDIA_ID,
                 CALLER_ID,
-                "EVENT_COVER/123/abc.jpg",
+                "EVENT_MEDIA/123/abc.jpg",
                 "cover.jpg",
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 MediaStatus.UPLOADED,
@@ -229,9 +229,9 @@ class MediaServiceTest {
         MediaRecord record = new MediaRecord(
                 MEDIA_ID,
                 CALLER_ID,
-                "EVENT_COVER/123/abc.jpg",
+                "EVENT_MEDIA/123/abc.jpg",
                 "cover.jpg",
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 MediaStatus.UPLOADED,
@@ -242,7 +242,7 @@ class MediaServiceTest {
         );
 
         when(repository.findById(MEDIA_ID)).thenReturn(Optional.of(record));
-        when(s3Storage.presignGet("EVENT_COVER/123/abc.jpg")).thenReturn("http://localhost:3900/view");
+        when(s3Storage.presignGet("EVENT_MEDIA/123/abc.jpg")).thenReturn("http://localhost:3900/view");
 
         MediaResourceDto dto = service.getById(MEDIA_ID);
 
@@ -256,9 +256,9 @@ class MediaServiceTest {
         MediaRecord record = new MediaRecord(
                 MEDIA_ID,
                 CALLER_ID,
-                "EVENT_COVER/123/abc.jpg",
+                "EVENT_MEDIA/123/abc.jpg",
                 "cover.jpg",
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 MediaStatus.DELETED,
@@ -278,9 +278,9 @@ class MediaServiceTest {
         MediaRecord record = new MediaRecord(
                 MEDIA_ID,
                 CALLER_ID,
-                "EVENT_COVER/123/abc.jpg",
+                "EVENT_MEDIA/123/abc.jpg",
                 "cover.jpg",
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 MediaStatus.UPLOADED,
@@ -295,7 +295,7 @@ class MediaServiceTest {
 
         service.delete(MEDIA_ID, CALLER_ID);
 
-        verify(s3Storage).deleteObject("EVENT_COVER/123/abc.jpg");
+        verify(s3Storage).deleteObject("EVENT_MEDIA/123/abc.jpg");
         verify(repository).markDeleted(eq(MEDIA_ID), any());
     }
 
@@ -304,9 +304,9 @@ class MediaServiceTest {
         MediaRecord record = new MediaRecord(
                 MEDIA_ID,
                 CALLER_ID,
-                "EVENT_COVER/123/abc.jpg",
+                "EVENT_MEDIA/123/abc.jpg",
                 "cover.jpg",
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 MediaStatus.DELETED,
@@ -328,9 +328,9 @@ class MediaServiceTest {
         MediaRecord record = new MediaRecord(
                 MEDIA_ID,
                 CALLER_ID,
-                "EVENT_COVER/123/abc.jpg",
+                "EVENT_MEDIA/123/abc.jpg",
                 "cover.jpg",
-                MediaPurpose.EVENT_COVER,
+                MediaPurpose.EVENT_MEDIA,
                 "image/jpeg",
                 102400L,
                 MediaStatus.UPLOADED,

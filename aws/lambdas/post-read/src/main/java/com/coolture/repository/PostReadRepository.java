@@ -149,7 +149,6 @@ public class PostReadRepository {
                 if (rs.next()) {
                     List<PostMediaDto> mediaList = MediaQueries.getPostMediaList(conn, postId);
                     MediaResourceDto coverMedia = mediaList.stream()
-                        .filter(PostMediaDto::isCover)
                         .map(PostMediaDto::media)
                         .findFirst()
                         .orElse(null);
@@ -200,7 +199,7 @@ public class PostReadRepository {
                 FROM post_media pm
                 JOIN media m ON m.id = pm.media_id
                 WHERE pm.post_id = p.id
-                ORDER BY pm.is_cover DESC, pm.position ASC
+                ORDER BY pm.position ASC
                 LIMIT 1
             ) cover_m ON true
             WHERE p.deleted_at IS NULL

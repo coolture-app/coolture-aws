@@ -111,8 +111,7 @@ class CooltureApi:
         media_ids: list[str] = []
         try:
             for image in images:
-                # The API makes the EVENT_COVER photo the post's cover: the og:image, or the next if it can't be uploaded.
-                media_id = self._upload(image, 'EVENT_MEDIA' if media_ids else 'EVENT_COVER')
+                media_id = self._upload(image)
                 if media_id:
                     media_ids.append(media_id)
                 if len(media_ids) == MAX_PHOTOS:
@@ -136,9 +135,9 @@ class CooltureApi:
             ledger.write(f'{post["eventUrl"]}\n')
         return Outcome(photos=len(media_ids))
 
-    def _upload(self, image: Image, purpose: str) -> str | None:
+    def _upload(self, image: Image) -> str | None:
         """Gives the new media's id, or None when this image is left out."""
-        fields = {'purpose': purpose, 'mimeType': image.mime_type, 'sizeBytes': len(image.content),
+        fields = {'purpose': 'EVENT_MEDIA', 'mimeType': image.mime_type, 'sizeBytes': len(image.content),
                   'fileName': image.file_name}
         if image.width and image.height:
             fields |= {'width': image.width, 'height': image.height}

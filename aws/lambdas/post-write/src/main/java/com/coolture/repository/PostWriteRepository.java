@@ -188,7 +188,7 @@ public class PostWriteRepository {
                 }
 
                 // 3. Attach Media
-                attachMedia(conn, postId, req.mediaIds(), req.coverMediaId());
+                attachMedia(conn, postId, req.mediaIds());
 
                 PostDetailDto created = getPostDetail(conn, postId);
                 conn.commit();
@@ -225,17 +225,9 @@ public class PostWriteRepository {
                         delStmt.setObject(1, postId);
                         delStmt.executeUpdate();
                     }
-                    attachMedia(conn, postId, req.mediaIds(), req.coverMediaId());
+                    attachMedia(conn, postId, req.mediaIds());
                 } else if (req.coverMediaId() != null) {
-                    String updateCoverSql = "UPDATE post_media SET is_cover = (media_id = ?) WHERE post_id = ?";
-                    try (PreparedStatement stmt = conn.prepareStatement(updateCoverSql)) {
-                        stmt.setObject(1, req.coverMediaId());
-                        stmt.setObject(2, postId);
-                        int affected = stmt.executeUpdate();
-                        if (affected == 0) {
-                            throw new IllegalArgumentException("coverMediaId is not attached to this post");
-                        }
-                    }
+                    moveToFront(conn, postId, req.coverMediaId());
                 }
 
                 // 3. Update Post row
@@ -348,7 +340,6 @@ public class PostWriteRepository {
 
                 List<PostMediaDto> mediaList = MediaQueries.getPostMediaList(conn, postId);
                 MediaResourceDto coverMedia = mediaList.stream()
-                    .filter(PostMediaDto::isCover)
                     .map(PostMediaDto::media)
                     .findFirst()
                     .orElse(null);
@@ -528,23 +519,44 @@ public class PostWriteRepository {
         }
     }
 
-    private void attachMedia(Connection conn, UUID postId, List<UUID> mediaIds, UUID coverMediaId) throws SQLException {
+    /** The cover is the post's first photo, so naming a new one moves it there and the others keep their order. */
+    private void moveToFront(Connection conn, UUID postId, UUID mediaId) throws SQLException {
+        String sql = """
+            UPDATE post_media pm
+            SET position = ordered.new_position
+            FROM (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY (media_id = ?) DESC, position ASC, id ASC) - 1 AS new_position,
+                       BOOL_OR(media_id = ?) OVER () AS attached
+                FROM post_media
+                WHERE post_id = ?
+            ) ordered
+            WHERE pm.id = ordered.id AND ordered.attached
+        """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, mediaId);
+            stmt.setObject(2, mediaId);
+            stmt.setObject(3, postId);
+            if (stmt.executeUpdate() == 0) {
+                throw new IllegalArgumentException("coverMediaId is not attached to this post");
+            }
+        }
+    }
+
+    private void attachMedia(Connection conn, UUID postId, List<UUID> mediaIds) throws SQLException {
         if (mediaIds == null || mediaIds.isEmpty()) return;
 
         String sql = """
-            INSERT INTO post_media (id, post_id, media_id, position, is_cover)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO post_media (id, post_id, media_id, position)
+            VALUES (?, ?, ?, ?)
         """;
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             for (int i = 0; i < mediaIds.size(); i++) {
                 UUID mid = mediaIds.get(i);
-                boolean isCover = mid.equals(coverMediaId) || (coverMediaId == null && i == 0);
                 ParamBinder b = new ParamBinder(stmt, conn);
                 b.bindUUID(UUID.randomUUID())
                  .bindUUID(postId)
                  .bindUUID(mid)
-                 .bindInt(i)
-                 .bindBoolean(isCover);
+                 .bindInt(i);
                 stmt.addBatch();
             }
             stmt.executeBatch();

@@ -146,51 +146,30 @@ class PostWriteServiceTest {
     }
 
     @Test
-    void createPost_withoutACover_makesTheEventCoverMediaTheCover() throws SQLException {
-        UUID authorId = UUID.randomUUID();
-        UUID photo = UUID.randomUUID();
-        UUID poster = UUID.randomUUID();
-        CreatePostRequest req = onlinePostWith(List.of(photo, poster), null);
-        when(repository.validateMediaOwnership(authorId, req.mediaIds()))
-            .thenReturn(Map.of(photo, MediaPurpose.EVENT_MEDIA, poster, MediaPurpose.EVENT_COVER));
-
-        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
-
-        service.createPost(authorId, req);
-
-        verify(repository).createPost(authorId, req.withCoverMediaId(poster));
-    }
-
-    @Test
-    void createPost_withoutAnEventCoverMedia_makesTheFirstPhotoTheCover() throws SQLException {
+    void createPost_keepsTheOrderItIsGiven() throws SQLException {
         UUID authorId = UUID.randomUUID();
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
         CreatePostRequest req = onlinePostWith(List.of(first, second), null);
-        when(repository.validateMediaOwnership(authorId, req.mediaIds()))
-            .thenReturn(Map.of(first, MediaPurpose.EVENT_MEDIA, second, MediaPurpose.EVENT_MEDIA));
-
-        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
-
-        service.createPost(authorId, req);
-
-        verify(repository).createPost(authorId, req.withCoverMediaId(first));
-    }
-
-    @Test
-    void createPost_keepsTheCoverTheClientNames() throws SQLException {
-        UUID authorId = UUID.randomUUID();
-        UUID chosen = UUID.randomUUID();
-        UUID poster = UUID.randomUUID();
-        CreatePostRequest req = onlinePostWith(List.of(chosen, poster), chosen);
-        when(repository.validateMediaOwnership(authorId, req.mediaIds()))
-            .thenReturn(Map.of(chosen, MediaPurpose.EVENT_MEDIA, poster, MediaPurpose.EVENT_COVER));
-
         when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
 
         service.createPost(authorId, req);
 
         verify(repository).createPost(authorId, req);
+    }
+
+    @Test
+    void createPost_movesANamedCoverToTheFrontAndKeepsTheOthersInOrder() throws SQLException {
+        UUID authorId = UUID.randomUUID();
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        UUID cover = UUID.randomUUID();
+        CreatePostRequest req = onlinePostWith(List.of(first, second, cover), cover);
+        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
+
+        service.createPost(authorId, req);
+
+        verify(repository).createPost(authorId, req.withMediaIds(List.of(cover, first, second)));
     }
 
     @Test

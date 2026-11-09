@@ -480,8 +480,7 @@ curl -X POST "http://localhost:3000/posts" \
         "longitude": 21.0122
       }
     },
-    "mediaIds": ["22222222-2222-2222-2222-222222222222"],
-    "coverMediaId": "22222222-2222-2222-2222-222222222222"
+    "mediaIds": ["22222222-2222-2222-2222-222222222222"]
   }'
 ```
 
@@ -585,7 +584,7 @@ curl -X POST "http://localhost:3000/media/uploads/init" \
   -H "Content-Type: application/json" \
   -H "X-User-Id: 00000000-0000-0000-0000-000000000001" \
   -d '{
-    "purpose": "EVENT_COVER",
+    "purpose": "EVENT_MEDIA",
     "mimeType": "image/jpeg",
     "sizeBytes": 204800,
     "fileName": "poster.jpg"
@@ -597,8 +596,8 @@ Response (`201 Created`):
 ```json
 {
   "mediaId": "d3b07384-d113-4f90-a5a6-98124d9c4e23",
-  "objectKey": "EVENT_COVER/00000000-0000-0000-0000-000000000001/a34ef124-....jpg",
-  "uploadUrl": "http://localhost:3900/coolture-bucket/EVENT_COVER/...?X-Amz-Signature=...",
+  "objectKey": "EVENT_MEDIA/00000000-0000-0000-0000-000000000001/a34ef124-....jpg",
+  "uploadUrl": "http://localhost:3900/coolture-bucket/EVENT_MEDIA/...?X-Amz-Signature=...",
   "httpMethod": "PUT",
   "expiresAt": "2026-10-13T10:45:00Z",
   "requiredHeaders": {
@@ -629,11 +628,11 @@ Response (`200 OK`):
 ```json
 {
   "id": "d3b07384-d113-4f90-a5a6-98124d9c4e23",
-  "purpose": "EVENT_COVER",
+  "purpose": "EVENT_MEDIA",
   "mimeType": "image/jpeg",
   "sizeBytes": 204800,
   "status": "UPLOADED",
-  "url": "http://localhost:3900/coolture-bucket/EVENT_COVER/...?X-Amz-Signature=...",
+  "url": "http://localhost:3900/coolture-bucket/EVENT_MEDIA/...?X-Amz-Signature=...",
   "createdAt": "2026-10-13T10:30:00Z"
 }
 ```

@@ -78,7 +78,7 @@ class ContractTest {
         Instant now = Instant.now();
         MediaResourceDto avatar = new MediaResourceDto(UUID.randomUUID(), MediaPurpose.PROFILE_IMAGE_THUMBNAIL, "image/png", 10L,
             MediaStatus.ATTACHED, "http://localhost/a.png", now, null);
-        MediaResourceDto cover = new MediaResourceDto(UUID.randomUUID(), MediaPurpose.EVENT_COVER, "image/png", 10L,
+        MediaResourceDto cover = new MediaResourceDto(UUID.randomUUID(), MediaPurpose.EVENT_MEDIA, "image/png", 10L,
             MediaStatus.ATTACHED, "http://localhost/c.png", now, null, 1080, 1350);
         EventLocationDto location = new EventLocationDto(UUID.randomUUID(), "POL", "Hala", "1", "Długa", "80-001", "Gdańsk",
             new GeoPointDto(54.35, 18.65), null);

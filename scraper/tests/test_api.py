@@ -268,13 +268,13 @@ def requests_made(session):
     return [(method, url) for method, url, _ in session.calls]
 
 
-def test_images_are_uploaded_and_sent_with_the_post_the_first_as_its_cover():
+def test_images_are_uploaded_and_sent_with_the_post_in_order():
     client, session, storage = uploading([init('m1'), OK, init('m2'), OK, CREATED], [OK, OK])
 
     outcome = client.create_post({'eventUrl': 'a'}, [IMAGE, Image(b'png', 'image/png', '2.png')])
 
     assert outcome == Outcome(photos=2)
-    assert session.calls[0][2]['json'] == {'purpose': 'EVENT_COVER', 'mimeType': 'image/webp', 'sizeBytes': 3,
+    assert session.calls[0][2]['json'] == {'purpose': 'EVENT_MEDIA', 'mimeType': 'image/webp', 'sizeBytes': 3,
                                            'fileName': '1.webp', 'width': 1200, 'height': 800}
     # An image whose size can't be read is sent without one.
     assert session.calls[2][2]['json'] == {'purpose': 'EVENT_MEDIA', 'mimeType': 'image/png', 'sizeBytes': 3,
@@ -334,8 +334,6 @@ def test_the_rest_go_on_after_an_image_that_failed():
     client, session, _ = uploading([init('m1'), GONE, init('m2'), OK, CREATED], [FakeResponse(403), OK])
 
     assert client.create_post({'eventUrl': 'a'}, [IMAGE, IMAGE]) == Outcome(photos=1)
-    # The cover is the first image that made it.
-    assert session.calls[2][2]['json']['purpose'] == 'EVENT_COVER'
     assert session.calls[-1][2]['json']['mediaIds'] == ['m2']
 
 

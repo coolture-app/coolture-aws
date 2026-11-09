@@ -79,7 +79,7 @@ public final class PostSql {
             FROM post_media pm
             JOIN media m ON m.id = pm.media_id
             WHERE pm.post_id = p.id
-            ORDER BY pm.is_cover DESC, pm.position ASC
+            ORDER BY pm.position ASC
             LIMIT 1
         ) cover_m ON true
         LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid

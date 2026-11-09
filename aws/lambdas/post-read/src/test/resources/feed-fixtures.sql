@@ -116,6 +116,6 @@ SELECT ('a0000000-0000-0000-0001-' || lpad(g::text, 12, '0'))::uuid, 'a0000000-0
        'fixtures/photo_' || g, 'EVENT_MEDIA', 'image/jpeg', 'ATTACHED', 800, 600
 FROM generate_series(1, 10) g;
 
-INSERT INTO post_media (post_id, media_id, position, is_cover)
-SELECT 'a0000000-0000-0000-0000-000000000201', ('a0000000-0000-0000-0001-' || lpad(g::text, 12, '0'))::uuid, g - 1, g = 10
+INSERT INTO post_media (post_id, media_id, position)
+SELECT 'a0000000-0000-0000-0000-000000000201', ('a0000000-0000-0000-0001-' || lpad(g::text, 12, '0'))::uuid, g % 10
 FROM generate_series(1, 10) g;

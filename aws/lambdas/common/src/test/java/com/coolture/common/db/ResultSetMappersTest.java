@@ -189,7 +189,7 @@ class ResultSetMappersTest {
         ResultSet rs = mock(ResultSet.class);
         UUID coverId = UUID.randomUUID();
         when(rs.getObject("cover_id")).thenReturn(coverId);
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
+        when(rs.getString("cover_purpose")).thenReturn("EVENT_MEDIA");
         when(rs.getString("cover_mime_type")).thenReturn("image/jpeg");
         when(rs.getObject("cover_size_bytes")).thenReturn(2048L);
         when(rs.getLong("cover_size_bytes")).thenReturn(2048L);
@@ -199,7 +199,7 @@ class ResultSetMappersTest {
 
         assertNotNull(cover);
         assertEquals(coverId, cover.id());
-        assertEquals(MediaPurpose.EVENT_COVER, cover.purpose());
+        assertEquals(MediaPurpose.EVENT_MEDIA, cover.purpose());
         assertEquals("image/jpeg", cover.mimeType());
     }
 
@@ -211,14 +211,12 @@ class ResultSetMappersTest {
         when(rs.getObject("media_id")).thenReturn(mediaId);
         when(rs.getString("purpose")).thenReturn("EVENT_MEDIA");
         when(rs.getInt("position")).thenReturn(2);
-        when(rs.getBoolean("is_cover")).thenReturn(true);
 
         PostMediaDto pm = ResultSetMappers.mapPostMedia(rs);
 
         assertNotNull(pm);
         assertEquals(mediaId, pm.media().id());
         assertEquals(2, pm.position());
-        assertTrue(pm.isCover());
     }
 
     @Test
@@ -245,7 +243,7 @@ class ResultSetMappersTest {
         MediaUrls.useStorage(storage);
         ResultSet rs = mock(ResultSet.class);
         when(rs.getObject("cover_id")).thenReturn(UUID.randomUUID());
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
+        when(rs.getString("cover_purpose")).thenReturn("EVENT_MEDIA");
         when(rs.getString("cover_status")).thenReturn("UPLOADED");
         when(rs.getString("cover_object_key")).thenReturn("posts/1/cover.jpg");
 
@@ -274,7 +272,7 @@ class ResultSetMappersTest {
     void mapCoverMedia_withoutObjectKey_leavesUrlNull() throws SQLException {
         ResultSet rs = mock(ResultSet.class);
         when(rs.getObject("cover_id")).thenReturn(UUID.randomUUID());
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
+        when(rs.getString("cover_purpose")).thenReturn("EVENT_MEDIA");
         when(rs.getString("cover_status")).thenReturn("UPLOADED");
 
         MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
