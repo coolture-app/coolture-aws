@@ -46,6 +46,11 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 The first run takes about 30 minutes. Later runs take a minute and add nothing. How the snapshot is picked and loaded
 is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
 
+**Place search in the post form** needs the geocoder, Photon, with an index of Poland. Build it once with
+`make geo-index`: about 40 minutes, 4 GB of memory and 3 GB of disk, so not while `make seed` builds its image. Then
+`make up` starts it on `:2322` with the AWS instance's 1 GB of memory, and `ng serve` sends the app's `/geo` to it, as
+CloudFront does on AWS. Without it the form works, with no suggestions. `make geo-index` again refreshes the data.
+
 ### 3. Act as someone
 
 The frontend's development build has a **DEV** pill at the bottom left:
@@ -66,8 +71,8 @@ Outside the browser, the same users are a header away, see [Who you are](#who-yo
 | Ctrl+C in terminal 1 | Stops the API. If its containers stay behind, as happens on Windows, `make stop-lambdas` |
 | `make local` | Rebuilds and restarts only the API, after a code change |
 | `make stop` | Stops everything. Data stays |
-| `make reset-db` | Deletes the database and the stored photos. Then `make up && make seed`, about 5 minutes |
-| `make clean-all` | Removes all containers, data, images, builds and `.venv`. Keeps the snapshot |
+| `make reset-db` | Deletes the database and the stored photos. Then `make up && make seed`, about 5 minutes. Keeps the geocoder's index |
+| `make clean-all` | Removes all containers, data, the geocoder's index, images, builds and `.venv`. Keeps the snapshot |
 
 Seeded events turn into past events over the following weeks. `make reset-db && make up && make seed` moves them ahead
 again. Delete `scraper/snapshot/` first for fresh events.
@@ -120,7 +125,8 @@ changed.
 ```
 aws/
 ├── auth.yaml, backend.yaml,    # Stacks: Cognito; API Gateway, Lambdas, Aurora, media bucket, embedding queues;
-│   frontend.yaml, waf.yaml     #   SSR Lambda, static files, CloudFront; the IP allow-list in front of CloudFront
+│   geocoder.yaml,              #   the Photon instance; SSR Lambda, static files, CloudFront;
+│   frontend.yaml, waf.yaml     #   the IP allow-list in front of CloudFront
 └── lambdas/
     ├── common/                 # Shared Maven module in every Java Lambda: DB pool, DTOs, security, S3, paging
     ├── post-read/, post-write/ # Posts, the feed, the map, event locations. post-read holds the contract
@@ -131,10 +137,11 @@ aws/
 api/                            # Request flows (Hurl) and the seed users' ids
 db/                             # Local Postgres image (PostGIS, pgvector) and the local seed
 garage/                         # Local S3 storage
+geocoder/                       # Photon's image and photon.sh, run the same locally and on the AWS instance
 migrations/                     # SQL migrations, including the recommender's rec_ tables
 recommender/                    # Embedding workers and the recommender, see its README
 scraper/                        # trojmiasto.pl scraper, snapshot and seed, see its README
-scripts/                        # deploy.sh, doctor.sh, embed-posts.sh
+scripts/                        # deploy.sh, doctor.sh, embed-posts.sh, geo-publish.sh
 ```
 
 `make build` builds and installs `common` before the Lambdas, and rebuilds every Lambda when `common` changes.
@@ -160,15 +167,17 @@ Account-level stacks live in the separate management stack (`~/Projects/aws/mana
 - `account`: IAM roles and groups. Deploy as `AWS_PROFILE=deployer CFN_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/cloudformation-execution scripts/deploy.sh dev`.
 
 Deploy in this order, because later stacks import earlier ones' exports, and delete in reverse:
-`make deploy-auth` → `make deploy-backend` → `make deploy-embeddings` → `make deploy-waf` → `make deploy-frontend`, or `make deploy-all`.
+`make deploy-auth` → `make deploy-backend` → `make deploy-embeddings` → `make deploy-geocoder` → `make deploy-waf` →
+`make deploy-frontend`, or `make deploy-all`.
 
 | Stack | Template | Imports from |
 |---|---|---|
 | `coolture-auth-<env>` | `aws/auth.yaml` | |
 | `coolture-backend-<env>` | `aws/backend.yaml` | networking (VPC, subnets), auth (authorizers, Cognito) |
 | `coolture-embeddings-<env>` | `recommender/embedding-workers/template.yaml` | networking, backend (queue ARN, DB endpoint, security group) |
+| `coolture-geocoder-<env>` | `aws/geocoder.yaml` | networking (VPC, subnets) |
 | `coolture-waf-<env>` (us-east-1) | `aws/waf.yaml` | |
-| `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API domain), waf (web ACL ARN, passed by `deploy.sh`) |
+| `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API domain), geocoder (VPC origin, if deployed), waf (web ACL ARN, passed by `deploy.sh`) |
 
 **Only listed IP addresses can reach the site.** The WAF owns two IP sets, `coolture-<env>-allowed-ipv4` and `-ipv6`,
 created empty. Add addresses in the AWS console under WAF & Shield → IP sets (region "Global (CloudFront)"), as CIDRs such
@@ -178,3 +187,29 @@ as `203.0.113.7/32`, before testing a fresh deploy. The addresses never live in 
 endpoints. VPC Lambdas reach Aurora and S3 (a free gateway endpoint) and nothing else, so anything needing the internet
 or another AWS API runs outside the VPC. Embedding requests go through S3 for that reason, see
 [recommender/README.md](recommender/README.md#embeddings).
+
+### The geocoder
+
+The post form's place search calls `/geo` on the site. CloudFront strips `/geo` and sends it through a
+[VPC origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html) to
+Photon on a `t4g.micro` in a private subnet, about $7 a month. The instance has no public address and only CloudFront
+reaches it. It gets everything from the stack's bucket through the S3 gateway endpoint.
+
+Before the first deploy, **attach an internet gateway to the VPC** in the networking stack (an `InternetGateway` and a
+`VPCGatewayAttachment`). CloudFront requires one for a VPC origin, though no route uses it, so nothing in the VPC gains
+internet access. It costs nothing. The instance also installs Java from Amazon Linux's package mirror, an S3 bucket, so
+if the S3 gateway endpoint's policy is ever narrowed, it must still allow `al2023-repos-<region>-de612dc2` and the
+geocoder's bucket.
+
+Then:
+
+```bash
+make deploy-geocoder          # the instance, its bucket and the VPC origin. The VPC origin takes up to 15 minutes
+make geo-index                # once, locally, if not done yet: the index of Poland
+make geo-publish ENV=dev      # uploads Photon and the index, then reboots the instance, which loads them
+make deploy-frontend          # adds /geo to CloudFront, now that the geocoder stack exists
+```
+
+To refresh the data, run `make geo-index` and `make geo-publish` again, every few months or before a release. The instance
+loads a new index on reboot and keeps its ARN, which the VPC origin points at. To remove the geocoder, deploy the
+frontend without it first: `NO_GEOCODER=1 make deploy-frontend`, then `make delete-geocoder`.

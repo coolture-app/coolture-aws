@@ -44,7 +44,8 @@ SNAPSHOT_DIR := scraper/snapshot
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-COMPOSE_ALL := docker compose --profile rec --profile graph
+COMPOSE_ALL := docker compose --profile rec --profile graph --profile geo
+GEOCODER_INDEX := coolture-geocoder-index
 
 up: ## Start PostgreSQL (migrated and seeded) and Garage
 	docker compose up -d --build
@@ -54,6 +55,9 @@ up: ## Start PostgreSQL (migrated and seeded) and Garage
 		echo "If a migration was edited, or this branch has different migrations than the database,"; \
 		echo "start over with: make reset-db && make up   (deletes local data; make seed fills it again)"; \
 		exit 1; fi
+	@if docker volume inspect $(GEOCODER_INDEX) > /dev/null 2>&1; then \
+		docker compose --profile geo up -d --build photon && echo "Geocoder on http://localhost:2322"; \
+	else echo "No geocoder index, so the post form has no place suggestions. make geo-index builds it (about 40 minutes, once)"; fi
 
 stop: stop-lambdas ## Stop the API, the workers and all local services; data stays
 	@$(COMPOSE_ALL) down
@@ -73,6 +77,16 @@ reset-db: stop-lambdas ## Delete the local database and stored photos (then: mak
 logs: ## Tail PostgreSQL logs (SERVICE=worker for another service)
 	$(COMPOSE_ALL) logs -f $(or $(SERVICE),postgres)
 
+geo-index: ## Build or refresh the geocoder's Poland index for make up and make geo-publish (about 40 minutes and 4 GB of memory)
+	@docker volume create $(GEOCODER_INDEX) > /dev/null
+	docker compose --profile geo build photon
+	docker compose --profile geo run --rm photon-import
+	docker compose --profile geo up -d --force-recreate photon
+	@echo "Geocoder on http://localhost:2322"
+
+geo-publish: ## Upload the geocoder and its index to AWS and restart the instance (ENV=dev), after make geo-index and deploy-geocoder
+	@scripts/geo-publish.sh $(or $(ENV),dev)
+
 rec-up: ## Start the recommender (local SQS + worker) on top of `up`
 	docker compose --profile rec up -d --build
 
@@ -85,8 +99,9 @@ clean: ## Clean build artifacts
 		[ -f "$$dir/pom.xml" ] && (mvn clean -f "$$dir/pom.xml" -q 2>/dev/null) || true; \
 	done
 
-clean-all: stop-lambdas clean ## Remove everything local: containers, data, images (incl. the 3.5 GB one), builds, .venv. Keeps the snapshot
+clean-all: stop-lambdas clean ## Remove everything local: containers, data, the geocoder index, images (incl. the 3.5 GB one), builds, .venv. Keeps the snapshot
 	$(COMPOSE_ALL) down -v --rmi all --remove-orphans
+	@docker volume rm -f $(GEOCODER_INDEX) > /dev/null
 	@docker rmi -f $(LAMBDA_IMAGES) $(EMBEDDINGS_IMAGE) > /dev/null 2>&1 || true
 	@rm -rf .venv
 	@echo "Clean. The snapshot in $(SNAPSHOT_DIR) stays; delete it by hand to scrape a new one."
@@ -202,6 +217,9 @@ deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs mgmt-
 deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="auth backend embeddings waf frontend")
 	@scripts/deploy.sh $(or $(ENV),dev) $(STACKS)
 
+deploy-geocoder: ## Deploy the geocoder instance and its CloudFront VPC origin (dev) - ~$7/month, needs an internet gateway in the VPC
+	@scripts/deploy.sh dev geocoder
+
 deploy-waf: ## Deploy CloudFront WAF web ACL + allowed-IP sets to us-east-1 (dev) - ~$8/month + $0.60 per 1M requests
 	@scripts/deploy.sh dev waf
 
@@ -213,6 +231,9 @@ delete-embeddings: ## Delete embedding workers stack
 
 delete-backend: ## Delete backend stack (delete embeddings first: it imports backend outputs)
 	@sam delete --stack-name coolture-backend-dev --no-prompts
+
+delete-geocoder: ## Delete geocoder stack (first NO_GEOCODER=1 make deploy-frontend: the frontend imports its VPC origin)
+	@sam delete --stack-name coolture-geocoder-dev --no-prompts
 
 delete-frontend: ## Delete frontend stack
 	@sam delete --stack-name coolture-frontend-dev --no-prompts

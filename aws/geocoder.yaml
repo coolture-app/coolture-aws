@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Coolture geocoder - Photon for the post form's place search, reached only through CloudFront at /geo
+
+# Before the first deploy, the networking stack needs an internet gateway attached to the VPC: CloudFront VPC origins
+# require one, though nothing routes through it. After it: make geo-publish uploads Photon and the index. The instance
+# installs Java from Amazon Linux's package mirror, an S3 bucket, so it needs the S3 gateway endpoint to allow it.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  BaseStackName:
+    Type: String
+    Default: mgmt-stack-networking
+  CloudFrontPrefixListId:
+    Type: String
+    Description: The com.amazonaws.global.cloudfront.origin-facing prefix list in this region. deploy.sh looks it up
+  InstanceType:
+    Type: String
+    Default: t4g.micro
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+
+Resources:
+  IndexBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'coolture-${Environment}-geocoder-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-index
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub '${IndexBucket.Arn}/photon/*'
+              # Without it a missing index reads as 403 instead of 404.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt IndexBucket.Arn
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Coolture geocoder, reachable from CloudFront only
+      VpcId: !ImportValue {'Fn::Sub': '${BaseStackName}-VpcId'}
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2322
+          ToPort: 2322
+          SourcePrefixListId: !Ref CloudFrontPrefixListId
+      # S3, through the gateway endpoint, for the index and the package mirror. There's no other way out.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Select [0, !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]]
+      SecurityGroupIds: [!Ref SecurityGroup]
+      IamInstanceProfile: !Ref InstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeType: gp3, VolumeSize: 10, Encrypted: true}
+      Tags:
+        - {Key: Name, Value: !Sub 'coolture-${Environment}-geocoder'}
+      # Runs once, at the first boot. The service fetches Photon and the index on every start, so a new index needs only
+      # a reboot (make geo-publish does it), and the instance keeps its ARN, which the VPC origin points at.
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf install -y java-21-amazon-corretto-headless
+          useradd --system --home-dir /var/lib/photon photon
+          mkdir -p /opt/photon /var/lib/photon
+          chown photon /opt/photon /var/lib/photon
+
+          cat > /opt/photon/fetch.sh <<'FETCH'
+          #!/bin/bash
+          set -euo pipefail
+          aws s3 cp "s3://$BUCKET/photon/photon.jar" /opt/photon/photon.jar --only-show-errors
+          aws s3 cp "s3://$BUCKET/photon/photon.sh" /opt/photon/photon.sh --only-show-errors
+          etag="$(aws s3api head-object --bucket "$BUCKET" --key photon/index.tar.gz --query ETag --output text)"
+          if [ "$etag" != "$(cat /var/lib/photon/etag 2> /dev/null)" ]; then
+              # The old index goes first: the disk doesn't hold two, and the form works while the geocoder is down.
+              rm -rf /var/lib/photon/photon_data /var/lib/photon/etag
+              aws s3 cp "s3://$BUCKET/photon/index.tar.gz" - | tar xz -C /var/lib/photon
+              echo "$etag" > /var/lib/photon/etag
+          fi
+          FETCH
+          chmod +x /opt/photon/fetch.sh
+
+          cat > /etc/systemd/system/photon.service <<'UNIT'
+          [Unit]
+          Description=Photon geocoder
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=photon
+          Environment=HOME=/var/lib/photon BUCKET=${IndexBucket} AWS_REGION=${AWS::Region} DATA=/var/lib/photon PHOTON_JAR=/opt/photon/photon.jar
+          ExecStartPre=/opt/photon/fetch.sh
+          ExecStart=/bin/sh /opt/photon/photon.sh serve
+          TimeoutStartSec=15min
+          # Until make geo-publish has uploaded an index, every start fails; it retries each minute.
+          Restart=always
+          RestartSec=60
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now --no-block photon
+
+  VpcOrigin:
+    Type: AWS::CloudFront::VpcOrigin
+    Properties:
+      VpcOriginEndpointConfig:
+        Name: !Sub 'coolture-${Environment}-geocoder'
+        Arn: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Instance}'
+        HTTPPort: 2322
+        OriginProtocolPolicy: http-only
+
+Outputs:
+  IndexBucketName:
+    Value: !Ref IndexBucket
+  InstanceId:
+    Value: !Ref Instance
+  VpcOriginId:
+    Value: !GetAtt VpcOrigin.Id
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcOriginId'
+  InstancePrivateDnsName:
+    Value: !GetAtt Instance.PrivateDnsName
+    Export:
+      Name: !Sub '${AWS::StackName}-InstancePrivateDnsName'

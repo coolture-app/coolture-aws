@@ -19,9 +19,14 @@ Parameters:
   WebAclArn:
     Type: String
     Default: ''
+  GeocoderStackName:
+    Type: String
+    Default: ''
+    Description: The geocoder stack whose VPC origin serves /geo. Empty leaves /geo out
 
 Conditions:
   HasWebAcl: !Not [!Equals [!Ref WebAclArn, '']]
+  HasGeocoder: !Not [!Equals [!Ref GeocoderStackName, '']]
 
 Resources:
   SSRLogGroup:
@@ -126,12 +131,12 @@ Resources:
       Name: !Sub 'coolture-${Environment}-viewer-request'
       AutoPublish: true
       FunctionConfig:
-        Comment: Strip /api, pass the viewer host to SSR
+        Comment: Strip /api or /geo, pass the viewer host to SSR
         Runtime: cloudfront-js-2.0
       FunctionCode: |
         function handler(event) {
           var request = event.request;
-          if (request.uri === '/api' || request.uri.startsWith('/api/')) {
+          if (/^\/(api|geo)(\/|$)/.test(request.uri)) {
             request.uri = request.uri.substring(4) || '/';
           } else if (request.headers.host) {
             request.headers['x-forwarded-host'] = { value: request.headers.host.value };
@@ -153,6 +158,26 @@ Resources:
           HeadersConfig:
             HeaderBehavior: whitelist
             Headers: [Authorization]
+          CookiesConfig:
+            CookieBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: all
+
+  # Query strings only: cookies and headers would split the cache per user and reach Photon for nothing.
+  GeocoderCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Condition: HasGeocoder
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'coolture-${Environment}-geocoder'
+        MinTTL: 0
+        DefaultTTL: 3600
+        MaxTTL: 86400
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          HeadersConfig:
+            HeaderBehavior: none
           CookiesConfig:
             CookieBehavior: none
           QueryStringsConfig:
@@ -190,6 +215,13 @@ Resources:
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
               OriginSSLProtocols: [TLSv1.2]
+          - !If
+            - HasGeocoder
+            - Id: geocoder
+              DomainName: !ImportValue {'Fn::Sub': '${GeocoderStackName}-InstancePrivateDnsName'}
+              VpcOriginConfig:
+                VpcOriginId: !ImportValue {'Fn::Sub': '${GeocoderStackName}-VpcOriginId'}
+            - !Ref AWS::NoValue
         DefaultCacheBehavior:
           TargetOriginId: lambda-ssr
           ViewerProtocolPolicy: redirect-to-https
@@ -213,6 +245,20 @@ Resources:
             FunctionAssociations:
               - EventType: viewer-request
                 FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
+          # Photon's answers say Cache-Control max-age=3600, so the same text typed twice reaches it once an hour.
+          - !If
+            - HasGeocoder
+            - PathPattern: /geo/*
+              TargetOriginId: geocoder
+              ViewerProtocolPolicy: https-only
+              Compress: true
+              AllowedMethods: [GET, HEAD]
+              CachePolicyId: !Ref GeocoderCachePolicy
+              ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+              FunctionAssociations:
+                - EventType: viewer-request
+                  FunctionARN: !GetAtt ViewerRequestFunction.FunctionMetadata.FunctionARN
+            - !Ref AWS::NoValue
           - {PathPattern: '*.js', TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6, ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03}
           - {PathPattern: '*.css', TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6, ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03}
           - {PathPattern: /media/*, TargetOriginId: s3-assets, ViewerProtocolPolicy: redirect-to-https, Compress: true, CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6, ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03}
