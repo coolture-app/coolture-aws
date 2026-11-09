@@ -27,6 +27,11 @@ mkdir -p "$out"
 host_out="$(cd "$out" && (pwd -W 2> /dev/null || pwd))"
 
 echo "==> packing Photon and the index"
+# A serving Photon keeps writing to its index, which breaks tar and could copy a torn index. It starts again afterwards.
+if docker compose --profile geo ps --status running --services | grep -qx photon; then
+    docker compose --profile geo stop photon
+    trap 'docker compose --profile geo start photon' EXIT
+fi
 docker compose --profile geo run --rm --no-deps -v "$host_out:/out" --entrypoint sh photon \
     -c 'cp /photon/photon.jar /out/ && tar czf /out/index.tar.gz -C /data photon_data'
 ls -lh "$out"
