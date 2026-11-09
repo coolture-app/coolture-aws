@@ -11,7 +11,9 @@ from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
+
+from images import Image
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +34,26 @@ UPPER = 'A-ZĄĆĘŁŃÓŚŹŻ'
 GLUED_WORDS = re.compile(rf'([{LOWER}]{{3}})([{UPPER}][{LOWER}])')
 GLUED_SENTENCES = re.compile(rf'([{LOWER}\d)]{{2}}[.!?:])([{UPPER}][{LOWER}])')
 NOT_A_VENUE = {'trójmiasto'}
+# The same photo comes in several sizes, as in /1200x0/4274285.webp and /0x500/4274285__kr.webp.
+PHOTO_ID = re.compile(r'/(\d+)(?:__\w+)?\.\w+$')
+# Lists of other events and articles, whose photos aren't this event's.
+OTHER_CONTENT = ['events-list', 'event__item', 'articles', 'SpectacleItem']
 TRICITY = ('Gdańsk', 'Gdynia', 'Sopot')
+
+# Paragraphs and their lines, as a post shows them.
+PARAGRAPH_TAGS = 'p, div, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote'
+LINE_EDGES = {'br', 'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'blockquote'}
+HEADING_MAX = 60
+SENTENCE_ENDS = ('.', '!', '?', '…', ':', ';')
+LIST_ITEM = re.compile(r'^([•·*\-–—>]|\d)')
+CUT_LINK = '\x00'
+# A link's label, such as "KUP BILET" or "Posłuchaj UMI", means nothing without the link. Links holding a name or an address stay.
+LINK_LABEL = re.compile(r'^(kup|kupuj|posłuchaj|zobacz|obejrzyj|przeczytaj|zapisz|wypełnij|sprawdź|zarezerwuj|rezerwuj|kliknij)\b',
+                        re.IGNORECASE)
+REPEATED_FACT = re.compile(r'^(kiedy|gdzie|termin|miejsce|data|godzina)\s*:', re.IGNORECASE)
+FACT = re.compile(r'^[^\W\d][\w ]{1,24}:\s*\S')
+# The site's own markup, left in some texts, such as [lead].
+SITE_MARKUP = re.compile(r'\[/?lead\]', re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -58,7 +79,7 @@ class EventPage:
     building_number: str | None
     postal_code: str | None
     hour: time | None
-    image_url: str | None = None
+    image_urls: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -75,14 +96,7 @@ class Event:
     description: str
     start: datetime
     end: datetime | None
-    image_url: str | None = None
-
-
-@dataclass(frozen=True)
-class Image:
-    content: bytes
-    mime_type: str
-    file_name: str
+    image_urls: tuple[str, ...] = ()
 
 
 def clean_text(value: str | None) -> str:
@@ -187,13 +201,91 @@ def _parse_moment(value: str) -> datetime | None:
         return None
 
 
+def _alone_on_its_line(tag: Tag) -> bool:
+    before = tag.previous_sibling
+    while isinstance(before, NavigableString) and not before.strip():
+        before = before.previous_sibling
+    after = tag.next_sibling
+    while isinstance(after, NavigableString) and not after.strip():
+        after = after.next_sibling
+    return all(node is None or isinstance(node, Tag) and node.name in LINE_EDGES for node in (before, after))
+
+
+def _is_list_item(line: str) -> bool:
+    return bool(LIST_ITEM.match(line))
+
+
+def _is_heading(line: str) -> bool:
+    letters = [c for c in line if c.isalpha()]
+    return (len(line) <= HEADING_MAX and not _is_list_item(line)
+            and (line.endswith(('?', ':')) or len(letters) >= 3 and all(c.isupper() for c in letters)))
+
+
+def _clean_line(raw: str) -> str:
+    line = clean_text(SITE_MARKUP.sub('', raw))
+    if CUT_LINK in line:
+        # "do kupienia online: KUP BILET" keeps the words before the link, without the colon that led to it.
+        line = line.replace(CUT_LINK, ' ').strip().rstrip(' :–-,')
+        line = clean_text(line)
+    return line
+
+
+def _paragraphs(text: str) -> list[list[str]]:
+    """Groups the lines, where a blank line or a heading starts a new paragraph and a list keeps together."""
+    paragraphs: list[list[str]] = []
+    blank = True
+    for raw in text.split('\n'):
+        line = _clean_line(raw)
+        if not line:
+            blank = blank or not raw.strip() or CUT_LINK in raw
+            continue
+        previous = paragraphs[-1][-1] if paragraphs else None
+        same_list = previous is not None and _is_list_item(previous) and _is_list_item(line)
+        if previous is None or (blank and not same_list) or _is_heading(line) or _is_heading(previous):
+            paragraphs.append([line])
+        elif (not previous.endswith(SENTENCE_ENDS) and line[0].islower()
+              and not _is_list_item(previous) and not _is_list_item(line)):
+            # The source's own wrapping, in the middle of a sentence.
+            paragraphs[-1][-1] = f'{previous} {line}'
+        else:
+            paragraphs[-1].append(line)
+        blank = False
+    return paragraphs
+
+
+def _without_repeated_facts(paragraphs: list[list[str]]) -> list[list[str]]:
+    # "Kiedy: …" and "Gdzie: …" at the start repeat the post's own start and address. "Bilety: …" and "Dla kogo: …" stay.
+    kept: list[list[str]] = []
+    at_start = True
+    for lines in paragraphs:
+        if at_start:
+            lines = [line for line in lines if not REPEATED_FACT.match(line)]
+            at_start = all(FACT.match(line) or _is_heading(line) for line in lines)
+        if lines:
+            kept.append(lines)
+    return kept
+
+
 def _page_text(body) -> str:
     for noise in body.select('.calendar-info-box, .imp__textInfo, .more_info, .articles'):
         noise.decompose()
-    for line_break in body.select('br, p, li, div, h2'):
-        line_break.insert_before('\n')
-        line_break.insert_after('\n')
-    text = '\n'.join(filter(None, map(clean_text, body.get_text().splitlines())))
+    for link in body.select('a'):
+        if LINK_LABEL.match(clean_text(link.get_text())):
+            link.replace_with(CUT_LINK)
+    for emphasis in [tag for tag in body.select('strong, b') if _alone_on_its_line(tag)]:
+        emphasis.insert_before('\n\n')
+        emphasis.insert_after('\n\n')
+    for item in body.select('li'):
+        bullet = '' if _is_list_item(clean_text(item.get_text())) else '• '
+        item.insert_before(f'\n{bullet}')
+        item.insert_after('\n')
+    for block in body.select(PARAGRAPH_TAGS):
+        block.insert_before('\n\n')
+        block.insert_after('\n\n')
+    for line_break in body.select('br'):
+        line_break.replace_with('\n')
+    paragraphs = _without_repeated_facts(_paragraphs(body.get_text()))
+    text = '\n\n'.join('\n'.join(lines) for lines in paragraphs)
     return GLUED_SENTENCES.sub(r'\1 \2', text)
 
 
@@ -204,9 +296,22 @@ def _description(page: BeautifulSoup, block: dict) -> str:
     return max(text, clean_description(_text(block, 'description')), key=len)
 
 
-def _image_url(page: BeautifulSoup) -> str | None:
+def _is_photo(url: str) -> bool:
+    return '/zdj/' in urlparse(url).path
+
+
+def _image_urls(page: BeautifulSoup) -> tuple[str, ...]:
+    """The og:image first, as the post's cover, then the gallery's full-size photos, each photo once."""
     meta = page.select_one('meta[property="og:image"][content]')
-    return meta['content'] if meta and '/zdj/' in urlparse(meta['content']).path else None
+    urls = [meta['content']] if meta else []
+    # A gallery item's img is a cropped thumbnail, and data-href the whole photo.
+    urls += [urljoin(SITE_URL, link['data-href']) for link in page.select('a.tinyGallery__item[data-href]')
+             if not link.find_parent(class_=OTHER_CONTENT)]
+    photos: dict[str, str] = {}
+    for url in filter(_is_photo, urls):
+        photo_id = PHOTO_ID.search(urlparse(url).path)
+        photos.setdefault(photo_id[1] if photo_id else url, url)
+    return tuple(photos.values())
 
 
 def parse_event_page(page_html: str) -> EventPage | None:
@@ -235,7 +340,7 @@ def parse_event_page(page_html: str) -> EventPage | None:
         postal_code=_text(address, 'postalCode') or None,
         # startDate is always midnight, and the name holds the hour.
         hour=parse_hour(_text(block, 'name')),
-        image_url=_image_url(soup),
+        image_urls=_image_urls(soup),
     )
 
 
@@ -282,7 +387,7 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
         description=page.description or _facts(item, venue),
         start=start,
         end=_ends_at(page.end, start) or _listed_end(item.end_hour, start),
-        image_url=page.image_url,
+        image_urls=page.image_urls,
     )
 
 
@@ -327,4 +432,4 @@ class Site:
             log.warning('Image unread url=%s error=%s', url, error)
             return None
         mime_type = response.headers.get('Content-Type', '').split(';')[0].strip().lower()
-        return Image(response.content, mime_type, PurePosixPath(urlparse(url).path).name)
+        return Image.read(response.content, mime_type, PurePosixPath(urlparse(url).path).name)

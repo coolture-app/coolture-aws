@@ -1,12 +1,14 @@
 import logging
 import time
+from collections.abc import Iterable
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
 
-from trojmiasto import Image, Site
+from images import Image
 
 log = logging.getLogger(__name__)
 
@@ -15,6 +17,8 @@ LEDGER_DIR = Path(__file__).parent
 PAGE_LIMIT = 100
 TIMEOUT_S = 40
 WRITE_PAUSE_S = 0.1
+# PostLimits.MAX_PHOTOS: POST /posts refuses more.
+MAX_PHOTOS = 8
 # Without it the local user takes the dev default, which the seed already owns. The API would turn a hyphen into this underscore.
 LOCAL_USER_NAME = 'coolture_bot'
 # A 200 can still hold the wrong thing, such as CloudFront's HTML when the URL lacks /api. Not JSON is a ValueError too.
@@ -25,16 +29,29 @@ class ApiError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class Outcome:
+    failure: str | None = None
+    photos: int = 0
+
+
 def _answer(response: requests.Response) -> str:
     return f'{response.status_code}: {" ".join(response.text[:300].split())}'
 
 
+def _stop_if_refused(response: requests.Response, request: str) -> None:
+    # A refused identity fails every later request the same way, so the run stops.
+    if response.status_code in (401, 403):
+        raise ApiError(f'{request} returned {_answer(response)}')
+
+
 class CooltureApi:
 
-    def __init__(self, session: requests.Session, base_url: str, token: str | None = None, user_id: str | None = None,
-                 storage: requests.Session | None = None) -> None:
+    def __init__(self, session: requests.Session, storage: requests.Session, base_url: str, token: str | None = None,
+                 user_id: str | None = None) -> None:
         self._session = session
-        self._storage = storage or requests.Session()
+        # Its own session, so the API's Authorization and X-User-Id headers never reach a presigned storage URL.
+        self._storage = storage
         self._base_url = base_url.rstrip('/')
         # GET /posts never returns a deleted post, so this remembers what would otherwise be posted again.
         self._ledger = LEDGER_DIR / f'.imported-{urlsplit(base_url).hostname}.txt'
@@ -86,45 +103,72 @@ class CooltureApi:
             except WRONG_SHAPE as error:
                 raise ApiError(f'GET /posts gave an unexpected body: {_answer(response)}') from error
 
-    def create_post(self, post: dict) -> str | None:
+    def create_post(self, post: dict, images: Iterable[Image] = ()) -> Outcome:
+        """Uploads the images, up to the API's limit, and sends the post with them.
+
+        The images are deleted again when the post is refused, or when something stops the run before it's sent.
+        """
+        media_ids: list[str] = []
         try:
-            response = self._session.post(f'{self._base_url}/posts', json=post, timeout=TIMEOUT_S)
+            for image in images:
+                # The API makes the EVENT_COVER photo the post's cover: the og:image, or the next if it can't be uploaded.
+                media_id = self._upload(image, 'EVENT_MEDIA' if media_ids else 'EVENT_COVER')
+                if media_id:
+                    media_ids.append(media_id)
+                if len(media_ids) == MAX_PHOTOS:
+                    break
+        except BaseException:
+            self._delete_media(media_ids)
+            raise
+        try:
+            response = self._session.post(f'{self._base_url}/posts', json={**post, 'mediaIds': media_ids} if media_ids else post,
+                                          timeout=TIMEOUT_S)
         except requests.Timeout as error:
-            # The post may have been saved, like after a 5xx, and the next run's list settles it.
-            return f'timed out: {error}'
+            # The post may have been saved, like after a 5xx, and the next run's list settles it. Its images stay with it.
+            return Outcome(f'timed out: {error}')
         time.sleep(WRITE_PAUSE_S)
-        if response.status_code in (401, 403):
-            raise ApiError(f'POST /posts returned {_answer(response)}')
         if 400 <= response.status_code < 500:
-            for media_id in post.get('mediaIds', []):
-                with suppress(requests.RequestException):
-                    self._session.delete(f'{self._base_url}/media/{media_id}', timeout=TIMEOUT_S)
+            self._delete_media(media_ids)
+        _stop_if_refused(response, 'POST /posts')
         if response.status_code != 201:
-            return _answer(response)
+            return Outcome(_answer(response))
         with self._ledger.open('a', encoding='utf-8') as ledger:
             ledger.write(f'{post["eventUrl"]}\n')
-        return None
+        return Outcome(photos=len(media_ids))
 
-    def attach_image(self, post: dict, image_url: str, site: Site) -> bool:
-        image = site.image(image_url)
-        if image is None:
-            return False
+    def _upload(self, image: Image, purpose: str) -> str | None:
+        """Gives the new media's id, or None when this image is left out."""
+        fields = {'purpose': purpose, 'mimeType': image.mime_type, 'sizeBytes': len(image.content),
+                  'fileName': image.file_name}
+        if image.width and image.height:
+            fields |= {'width': image.width, 'height': image.height}
         try:
-            post['mediaIds'] = [self._upload_image(image)]
+            response = self._session.post(f'{self._base_url}/media/uploads/init', json=fields, timeout=TIMEOUT_S)
+            _stop_if_refused(response, 'POST /media/uploads/init')
+            response.raise_for_status()
+            upload = response.json()
+            media_id = upload['mediaId']
         except (requests.RequestException, *WRONG_SHAPE) as error:
-            log.warning('Image not uploaded url=%s reason=%s', image_url, error)
-            return False
-        return True
+            log.warning('Image left out file=%s reason=%s', image.file_name, error)
+            return None
+        try:
+            self._storage.put(upload['uploadUrl'], data=image.content, headers=upload['requiredHeaders'],
+                              timeout=TIMEOUT_S).raise_for_status()
+            response = self._session.post(f'{self._base_url}/media/uploads/{media_id}/complete', timeout=TIMEOUT_S)
+            _stop_if_refused(response, f'POST /media/uploads/{media_id}/complete')
+            response.raise_for_status()
+        except (requests.RequestException, *WRONG_SHAPE) as error:
+            # Otherwise the media would stay PENDING for good.
+            self._delete_media([media_id])
+            log.warning('Image left out file=%s reason=%s', image.file_name, error)
+            return None
+        except BaseException:
+            self._delete_media([media_id])
+            raise
+        return media_id
 
-    def _upload_image(self, image: Image) -> str:
-        response = self._session.post(f'{self._base_url}/media/uploads/init', timeout=TIMEOUT_S, json={
-            'purpose': 'EVENT_COVER', 'mimeType': image.mime_type, 'sizeBytes': len(image.content), 'fileName': image.file_name})
-        if response.status_code in (401, 403):
-            raise ApiError(f'POST /media/uploads/init returned {_answer(response)}')
-        response.raise_for_status()
-        upload = response.json()
-        self._storage.put(upload['uploadUrl'], data=image.content, headers=upload['requiredHeaders'],
-                          timeout=TIMEOUT_S).raise_for_status()
-        self._session.post(f'{self._base_url}/media/uploads/{upload["mediaId"]}/complete',
-                           timeout=TIMEOUT_S).raise_for_status()
-        return upload['mediaId']
+    def _delete_media(self, media_ids: list[str]) -> None:
+        for media_id in media_ids:
+            # Cleaning up mustn't hide the error that led here, so a failed delete leaves only a PENDING row behind.
+            with suppress(requests.RequestException):
+                self._session.delete(f'{self._base_url}/media/{media_id}', timeout=TIMEOUT_S)

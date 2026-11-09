@@ -14,6 +14,7 @@ BUILDING_NUMBER_MAX = 16
 ADDRESS_MAX = 128
 POSTAL_CODE_MAX = 16
 SENTENCE_END = re.compile(r'[a-ząćęłńóśźż]{3}[.!?]\s')
+LINE_END = re.compile(r'\n')
 
 
 def utf16_len(text: str) -> int:
@@ -36,8 +37,10 @@ def cut_description(text: str) -> str:
     if utf16_len(text) <= DESCRIPTION_MAX:
         return text
     head = _head(text, DESCRIPTION_MAX)
-    end = max((match.end() - 1 for match in SENTENCE_END.finditer(head)), default=0)
-    return head[:end] if end >= DESCRIPTION_MAX // 2 else cut(text, DESCRIPTION_MAX)
+    # A sentence or a line ends there, so a list or a schedule isn't cut in the middle of an item.
+    ends = [match.end() - 1 for match in SENTENCE_END.finditer(head)] + [match.start() for match in LINE_END.finditer(head)]
+    end = max(ends, default=0)
+    return head[:end].rstrip() if end >= DESCRIPTION_MAX // 2 else cut(text, DESCRIPTION_MAX)
 
 
 def _iso(moment: datetime) -> str:

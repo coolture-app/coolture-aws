@@ -8,8 +8,9 @@ from datetime import date, datetime, time, timedelta, timezone
 import pytest
 import requests
 
-from api import ApiError
+from api import MAX_PHOTOS, ApiError, Outcome
 from geocoder import Geocoder, GeocoderUnavailable, Place
+from images import Image
 from scrape import DryRun, main, run
 from trojmiasto import EventPage, ListingItem, merge
 
@@ -32,6 +33,7 @@ class FakeSite:
         self.items = items
         self.pages = pages or {}
         self.opened = []
+        self.downloaded = []
 
     def listing_items(self):
         return iter(self.items)
@@ -39,6 +41,10 @@ class FakeSite:
     def event(self, listed):
         self.opened.append(listed.url)
         return merge(listed, self.pages.get(listed.url, page()))
+
+    def image(self, url):
+        self.downloaded.append(url)
+        return None if 'broken' in url else Image(url.encode(), 'image/webp', url.rsplit('/', 1)[-1], 4, 3)
 
 
 class FakeGeocoder:
@@ -60,21 +66,19 @@ class FakeGeocoder:
 
 
 class FakeApi:
-    def __init__(self, existing=(), failure=None):
+    def __init__(self, existing=(), failure=None, refuse_images=0):
         self.existing = set(existing)
         self.failure = failure
+        self.refuse_images = refuse_images
         self.created = []
 
     def existing_event_urls(self):
         return self.existing
 
-    def attach_image(self, post, image_url, site):
-        post['mediaIds'] = [image_url]
-        return True
-
-    def create_post(self, post):
-        self.created.append(post)
-        return self.failure
+    def create_post(self, post, images=()):
+        names = [image.file_name for image in images][self.refuse_images:]
+        self.created.append({**post, 'mediaIds': names} if names else post)
+        return Outcome(self.failure) if self.failure else Outcome(photos=len(names))
 
 
 def run_import(site, geocoder, api, limit=None, clock=lambda: NOW):
@@ -243,7 +247,7 @@ def test_dry_run_prints_an_emoji_through_a_code_page_pipe(monkeypatch):
     pipe = io.TextIOWrapper(io.BytesIO(), encoding='cp1250')
     monkeypatch.setattr(sys, 'stdout', pipe)
 
-    DryRun().create_post({'title': 'Koncert 😀'})
+    DryRun().create_post({'title': 'Koncert 😀'}, [])
 
     pipe.flush()
     assert json.loads(pipe.buffer.getvalue().decode('utf-8'))['title'] == 'Koncert 😀'
@@ -328,13 +332,23 @@ def test_a_missing_identity_is_one_clear_error(monkeypatch, caplog, scraper_args
     assert 'SCRAPER_USER_ID' in caplog.text
 
 
-def test_event_image_is_attached():
+def test_every_photo_of_the_event_is_sent_in_order():
     api = FakeApi()
+    urls = ('https://img.test/cover.webp', 'https://img.test/1.webp', 'https://img.test/2.webp')
 
-    stats = run_import(FakeSite([item(1)], {item(1).url: page(image_url='http://img')}), FakeGeocoder(), api)
+    stats = run_import(FakeSite([item(1)], {item(1).url: page(image_urls=urls)}), FakeGeocoder(), api)
 
-    assert api.created[0]['mediaIds'] == ['http://img']
-    assert stats['with_image'] == 1
+    assert api.created[0]['mediaIds'] == ['cover.webp', '1.webp', '2.webp']
+    assert (stats['with_image'], stats['photos']) == (1, 3)
+
+
+def test_a_photo_that_cannot_be_downloaded_is_left_out():
+    api = FakeApi()
+    urls = ('https://img.test/broken.webp', 'https://img.test/1.webp')
+
+    run_import(FakeSite([item(1)], {item(1).url: page(image_urls=urls)}), FakeGeocoder(), api)
+
+    assert api.created[0]['mediaIds'] == ['1.webp']
 
 
 def test_event_with_no_image_is_posted_without_one():
@@ -346,7 +360,40 @@ def test_event_with_no_image_is_posted_without_one():
     assert stats['with_image'] == 0
 
 
-def test_dry_run_names_the_image(capsys):
-    run_import(FakeSite([item(1)], {item(1).url: page(image_url='http://img')}), FakeGeocoder(), DryRun())
+def test_a_post_whose_images_were_all_refused_does_not_count_as_with_image():
+    api = FakeApi(refuse_images=1)
 
-    assert json.loads(capsys.readouterr().out)['imageUrl'] == 'http://img'
+    stats = run_import(FakeSite([item(1)], {item(1).url: page(image_urls=('https://img.test/1.webp',))}),
+                       FakeGeocoder(), api)
+
+    assert (stats['created'], stats['with_image']) == (1, 0)
+
+
+def test_a_rejected_post_does_not_count_as_with_image():
+    api = FakeApi(failure='400: nope')
+
+    stats = run_import(FakeSite([item(1)], {item(1).url: page(image_urls=('https://img.test/1.webp',))}),
+                       FakeGeocoder(), api)
+
+    assert (stats['rejected'], stats['with_image'], stats['photos']) == (1, 0, 0)
+
+
+def test_dry_run_prints_what_it_would_upload(capsys):
+    site = FakeSite([item(1)], {item(1).url: page(image_urls=('https://img.test/1.webp',))})
+
+    stats = run_import(site, FakeGeocoder(), DryRun())
+
+    assert json.loads(capsys.readouterr().out)['images'] == [
+        {'fileName': '1.webp', 'mimeType': 'image/webp', 'sizeBytes': len(b'https://img.test/1.webp'),
+         'width': 4, 'height': 3}]
+    assert stats['with_image'] == 1
+
+
+def test_dry_run_stops_downloading_at_the_api_limit(capsys):
+    urls = tuple(f'https://img.test/{number}.webp' for number in range(MAX_PHOTOS + 2))
+    site = FakeSite([item(1)], {item(1).url: page(image_urls=urls)})
+
+    run_import(site, FakeGeocoder(), DryRun())
+
+    assert len(json.loads(capsys.readouterr().out)['images']) == MAX_PHOTOS
+    assert len(site.downloaded) == MAX_PHOTOS
