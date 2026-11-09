@@ -16,9 +16,18 @@ public record MediaResourceDto(
     MediaStatus status,
     String url,
     Instant createdAt,
-    Instant deletedAt
+    Instant deletedAt,
+    /** Pixels. Null when unknown: media from before V11, or not an image. */
+    Integer width,
+    Integer height
 ) {
+    /** Without a size, for media whose size isn't read, such as avatars. */
+    public MediaResourceDto(UUID id, MediaPurpose purpose, String mimeType, Long sizeBytes, MediaStatus status,
+                            String url, Instant createdAt, Instant deletedAt) {
+        this(id, purpose, mimeType, sizeBytes, status, url, createdAt, deletedAt, null, null);
+    }
+
     public MediaResourceDto withUrl(String newUrl) {
-        return new MediaResourceDto(id, purpose, mimeType, sizeBytes, status, newUrl, createdAt, deletedAt);
+        return new MediaResourceDto(id, purpose, mimeType, sizeBytes, status, newUrl, createdAt, deletedAt, width, height);
     }
 }

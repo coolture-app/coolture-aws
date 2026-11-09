@@ -39,7 +39,9 @@ class MediaServiceTest {
                 MediaPurpose.EVENT_COVER,
                 "image/jpeg",
                 102400L,
-                "cover.jpg"
+                "cover.jpg",
+                1080,
+                1350
         );
 
         when(s3Storage.presignPut(any(), eq("image/jpeg"), eq(102400L))).thenReturn(
@@ -66,6 +68,8 @@ class MediaServiceTest {
         assertEquals(CALLER_ID, saved.ownerId());
         assertEquals(MediaPurpose.EVENT_COVER, saved.purpose());
         assertEquals(MediaStatus.PENDING, saved.status());
+        assertEquals(1080, saved.width());
+        assertEquals(1350, saved.height());
     }
 
     @Test
@@ -74,7 +78,9 @@ class MediaServiceTest {
                 MediaPurpose.EVENT_COVER,
                 "application/pdf",
                 102400L,
-                "document.pdf"
+                "document.pdf",
+                null,
+                null
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.initUpload(CALLER_ID, request));
@@ -93,6 +99,8 @@ class MediaServiceTest {
                 102400L,
                 MediaStatus.PENDING,
                 Instant.now(),
+                null,
+                null,
                 null
         );
 
@@ -116,7 +124,9 @@ class MediaServiceTest {
                 MediaPurpose.EVENT_COVER,
                 "image/png",
                 10L * 1024 * 1024 + 1,
-                "huge.png"
+                "huge.png",
+                null,
+                null
         );
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.initUpload(CALLER_ID, request));
@@ -131,7 +141,9 @@ class MediaServiceTest {
                 MediaPurpose.EVENT_COVER,
                 "video/mp4",
                 100L * 1024 * 1024,
-                "clip.mp4"
+                "clip.mp4",
+                null,
+                null
         );
         when(s3Storage.presignPut(any(), eq("video/mp4"), eq(100L * 1024 * 1024))).thenReturn(
                 new S3StorageService.PresignedPutResult("http://u", "PUT", Instant.now(), Map.of()));
@@ -175,6 +187,8 @@ class MediaServiceTest {
                 102400L,
                 MediaStatus.PENDING,
                 Instant.now(),
+                null,
+                null,
                 null
         );
     }
@@ -191,6 +205,8 @@ class MediaServiceTest {
                 102400L,
                 MediaStatus.UPLOADED,
                 Instant.now(),
+                null,
+                null,
                 null
         );
 
@@ -220,6 +236,8 @@ class MediaServiceTest {
                 102400L,
                 MediaStatus.UPLOADED,
                 Instant.now(),
+                null,
+                null,
                 null
         );
 
@@ -245,7 +263,9 @@ class MediaServiceTest {
                 102400L,
                 MediaStatus.DELETED,
                 Instant.now(),
-                Instant.now()
+                Instant.now(),
+                null,
+                null
         );
 
         when(repository.findById(MEDIA_ID)).thenReturn(Optional.of(record));
@@ -265,6 +285,8 @@ class MediaServiceTest {
                 102400L,
                 MediaStatus.UPLOADED,
                 Instant.now(),
+                null,
+                null,
                 null
         );
 
@@ -289,7 +311,9 @@ class MediaServiceTest {
                 102400L,
                 MediaStatus.DELETED,
                 Instant.now(),
-                Instant.now()
+                Instant.now(),
+                null,
+                null
         );
 
         when(repository.findByIdAndOwnerId(MEDIA_ID, CALLER_ID)).thenReturn(Optional.of(record));
@@ -311,6 +335,8 @@ class MediaServiceTest {
                 102400L,
                 MediaStatus.UPLOADED,
                 Instant.now(),
+                null,
+                null,
                 null
         );
 

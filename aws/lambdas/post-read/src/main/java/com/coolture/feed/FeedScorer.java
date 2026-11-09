@@ -14,8 +14,17 @@ public final class FeedScorer {
     private static final double MILLIS_PER_DAY = Duration.ofDays(1).toMillis();
     private static final double POPULARITY_SCALE = StrictMath.log(1.0 + FeedConfig.POPULARITY_CAP);
 
-    /** Null similarity means no vector for the viewer or the post, or vectors of different models. Null meters means no location or an online post. */
-    public record Facts(UUID id, Instant startsAt, int engagement, Double similarity, Double meters) {}
+    /**
+     * Null similarity means no vector for the viewer or the post, or vectors of different models. Null meters means no
+     * location or an online post. endsAt is the event's end (its own, or the default length); null means not ended.
+     */
+    public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters) {
+
+        /** An event that hasn't ended, as every event in the plain feed. */
+        public Facts(UUID id, Instant startsAt, int engagement, Double similarity, Double meters) {
+            this(id, startsAt, null, engagement, similarity, meters);
+        }
+    }
 
     /** The parts before weighting, kept so that explanations can be added later, and the weighted total. */
     public record Score(double affinity, double proximity, double time, double popularity, double jitter, double total) {}
@@ -31,7 +40,7 @@ public final class FeedScorer {
         double proximity = facts.meters() == null
             ? FeedConfig.NEUTRAL
             : StrictMath.exp(-facts.meters() / FeedConfig.PROXIMITY_SCALE_METERS);
-        double time = time(facts.startsAt(), asOf);
+        double time = time(facts.startsAt(), facts.endsAt(), asOf);
         double popularity = StrictMath.min(StrictMath.log(1.0 + StrictMath.max(facts.engagement(), 0)) / POPULARITY_SCALE, 1.0);
         double jitter = jitter(facts.id(), seed);
 
@@ -53,8 +62,20 @@ public final class FeedScorer {
         return StrictMath.max(0, StrictMath.min(scaled, 1));
     }
 
-    private static double time(Instant startsAt, Instant asOf) {
-        double days = StrictMath.max(Duration.between(asOf, startsAt).toMillis() / MILLIS_PER_DAY, 0);
+    /**
+     * How far the event is from asOf, in days: until its start, 0 while it runs, and since its end once it ended, so an
+     * ended event, shown when past events are on, fades like a far one and a long exhibition doesn't.
+     */
+    private static double time(Instant startsAt, Instant endsAt, Instant asOf) {
+        Duration away;
+        if (startsAt.isAfter(asOf)) {
+            away = Duration.between(asOf, startsAt);
+        } else if (endsAt != null && endsAt.isBefore(asOf)) {
+            away = Duration.between(endsAt, asOf);
+        } else {
+            away = Duration.ZERO;
+        }
+        double days = away.toMillis() / MILLIS_PER_DAY;
         return StrictMath.exp(-days / FeedConfig.TIME_SCALE_DAYS);
     }
 

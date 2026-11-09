@@ -1,6 +1,7 @@
 package com.coolture.feed;
 
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.pagination.CursorPage;
 
 import java.sql.SQLException;
@@ -45,13 +46,22 @@ public class FeedService {
         this.seeds = seeds;
     }
 
-    /** The location is used only on the first page. Later pages take it from the cursor. */
+    /** The plain feed, with no filters. */
     public FeedPage getFeed(UUID viewer, String rawCursor, int limit, Double latitude, Double longitude) throws SQLException {
+        return getFeed(viewer, rawCursor, limit, latitude, longitude, PostFeedFilters.none());
+    }
+
+    /**
+     * The location is used for proximity only on the first page. Later pages take it from the cursor. The filters are
+     * sent with every page, as with /posts, and narrow which posts are ranked.
+     */
+    public FeedPage getFeed(UUID viewer, String rawCursor, int limit, Double latitude, Double longitude,
+                            PostFeedFilters filters) throws SQLException {
         int effectiveLimit = clampLimit(limit);
         Optional<FeedCursor> cursor = FeedCursor.decode(rawCursor);
 
         if (cursor.isPresent() && !cursor.get().ranked()) {
-            return upcomingPage(viewer, cursor.get().t(), cursor.get().st(), cursor.get().id(), effectiveLimit);
+            return upcomingPage(viewer, filters, cursor.get().t(), cursor.get().st(), cursor.get().id(), effectiveLimit);
         }
 
         Session session = cursor
@@ -60,10 +70,10 @@ public class FeedService {
 
         List<Ranked> ranked;
         try {
-            ranked = rank(viewer, session, effectiveLimit + 1);
+            ranked = rank(viewer, session, filters, effectiveLimit + 1);
         } catch (SQLException | RuntimeException e) {
             System.err.println("Feed ranking failed, using the upcoming order: " + e);
-            return upcomingPage(viewer, session.asOf(), null, null, effectiveLimit);
+            return upcomingPage(viewer, filters, session.asOf(), null, null, effectiveLimit);
         }
 
         CursorPage<Ranked> page = CursorPage.of(ranked, effectiveLimit, last -> FeedCursor
@@ -73,8 +83,8 @@ public class FeedService {
         return new FeedPage(FeedMode.RANKED, loadInOrder(viewer, page.items()), page.page());
     }
 
-    private List<Ranked> rank(UUID viewer, Session session, int count) throws SQLException {
-        List<FeedScorer.Facts> candidates = repository.findCandidates(viewer, session.asOf(), session.latitude(), session.longitude());
+    private List<Ranked> rank(UUID viewer, Session session, PostFeedFilters filters, int count) throws SQLException {
+        List<FeedScorer.Facts> candidates = repository.findCandidates(viewer, session.asOf(), session.latitude(), session.longitude(), filters);
 
         List<Ranked> ranked = new ArrayList<>(candidates.size());
         for (FeedScorer.Facts facts : candidates) {
@@ -99,8 +109,9 @@ public class FeedService {
         return ids.stream().filter(cards::containsKey).map(cards::get).toList();
     }
 
-    private FeedPage upcomingPage(UUID viewer, Instant asOf, Instant afterStartsAt, UUID afterId, int limit) throws SQLException {
-        List<PostCardDto> rows = repository.findUpcoming(viewer, asOf, afterStartsAt, afterId, limit + 1);
+    private FeedPage upcomingPage(UUID viewer, PostFeedFilters filters, Instant asOf, Instant afterStartsAt, UUID afterId,
+                                  int limit) throws SQLException {
+        List<PostCardDto> rows = repository.findUpcoming(viewer, asOf, filters, afterStartsAt, afterId, limit + 1);
         CursorPage<PostCardDto> page = CursorPage.of(rows, limit,
             last -> FeedCursor.upcoming(asOf, last.startsAt(), last.id()).encode());
         return new FeedPage(FeedMode.UPCOMING, page.items(), page.page());

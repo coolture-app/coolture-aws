@@ -50,7 +50,9 @@ public class MediaService {
                 request.sizeBytes(),
                 MediaStatus.PENDING,
                 Instant.now(),
-                null
+                null,
+                request.width(),
+                request.height()
         );
 
         mediaRepository.insert(record);
@@ -99,7 +101,9 @@ public class MediaService {
                 MediaStatus.UPLOADED,
                 url,
                 media.createdAt(),
-                null
+                null,
+                media.width(),
+                media.height()
         );
     }
 

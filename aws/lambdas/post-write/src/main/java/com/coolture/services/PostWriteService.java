@@ -12,6 +12,7 @@ import com.coolture.dto.ReactionRequest;
 import com.coolture.dto.UpdatePostRequest;
 import com.coolture.common.messaging.EmbeddingRequestPublisher;
 import com.coolture.repository.PostWriteRepository;
+import com.coolture.common.validation.PostLimits;
 
 import java.sql.SQLException;
 import java.time.Instant;
@@ -215,6 +216,10 @@ public class PostWriteService {
 
     private void validateMedia(List<UUID> mediaIds, UUID coverMediaId) {
         if (mediaIds == null || mediaIds.isEmpty()) return;
+
+        if (mediaIds.size() > PostLimits.MAX_PHOTOS) {
+            throw new IllegalArgumentException("A post can have at most " + PostLimits.MAX_PHOTOS + " photos");
+        }
 
         if (new HashSet<>(mediaIds).size() != mediaIds.size()) {
             throw new IllegalArgumentException("mediaIds must be unique");

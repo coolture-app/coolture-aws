@@ -34,5 +34,14 @@ public record PostCardDto(
     Instant deletedAt,
     MediaResourceDto coverMedia,
     ReactionType myReaction,
-    ParticipationType myParticipation
-) {}
+    ParticipationType myParticipation,
+    /** Every photo, cover first, at most PostLimits.MAX_PHOTOS. Null when the post has none. */
+    List<MediaResourceDto> photos
+) {
+    public PostCardDto withPhotos(List<MediaResourceDto> newPhotos) {
+        return new PostCardDto(id, author, location, title, description, eventUrl, startsAt, endsAt, tags,
+            positiveReactionCount, negativeReactionCount, participantCount, commentsCount, type, status, visibility,
+            createdAt, lastModifiedAt, deletedAt, coverMedia, myReaction, myParticipation,
+            newPhotos == null || newPhotos.isEmpty() ? null : newPhotos);
+    }
+}

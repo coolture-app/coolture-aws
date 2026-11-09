@@ -102,7 +102,9 @@ class PostReadDbTest {
         stmt.execute("DELETE FROM comments WHERE author_id IN " + users);
         stmt.execute("DELETE FROM post_reactions WHERE user_id IN " + users);
         stmt.execute("DELETE FROM post_participations WHERE user_id IN " + users);
+        stmt.execute("DELETE FROM post_media WHERE post_id IN (SELECT id FROM posts WHERE author_id IN " + users + ")");
         stmt.execute("DELETE FROM posts WHERE author_id IN " + users);
+        stmt.execute("DELETE FROM media WHERE id::text LIKE 'a0000000-%'");
         stmt.execute("DELETE FROM user_relations WHERE source_user_id IN " + users);
         stmt.execute("DELETE FROM event_locations WHERE id::text LIKE 'a0000000-%'");
         stmt.execute("DELETE FROM users WHERE id::text LIKE 'a0000000-%'");
@@ -146,10 +148,15 @@ class PostReadDbTest {
     }
 
     private List<PostCardDto> walkFeed(FeedService service, UUID viewer, int limit, Double latitude, Double longitude, FeedMode mode) throws SQLException {
+        return walkFeed(service, viewer, limit, latitude, longitude, PostFeedFilters.none(), mode);
+    }
+
+    private List<PostCardDto> walkFeed(FeedService service, UUID viewer, int limit, Double latitude, Double longitude,
+                                       PostFeedFilters filters, FeedMode mode) throws SQLException {
         List<PostCardDto> cards = new ArrayList<>();
         String cursor = null;
         do {
-            FeedPage page = service.getFeed(viewer, cursor, limit, latitude, longitude);
+            FeedPage page = service.getFeed(viewer, cursor, limit, latitude, longitude, filters);
             assertEquals(mode, page.mode());
             cards.addAll(page.items());
             cursor = page.page().nextCursor();
@@ -188,8 +195,8 @@ class PostReadDbTest {
     @Test
     void feed_aPostCreatedAfterAsOf_appearsOnlyInALaterSession() throws SQLException {
         Instant now = Instant.now();
-        Set<UUID> thisSession = ids(feedRepository.findCandidates(ME, now, null, null));
-        Set<UUID> laterSession = ids(feedRepository.findCandidates(ME, now.plus(Duration.ofHours(2)), null, null));
+        Set<UUID> thisSession = ids(feedRepository.findCandidates(ME, now, null, null, PostFeedFilters.none()));
+        Set<UUID> laterSession = ids(feedRepository.findCandidates(ME, now.plus(Duration.ofHours(2)), null, null, PostFeedFilters.none()));
 
         laterSession.removeAll(thisSession);
         assertEquals(1, laterSession.size());
@@ -202,15 +209,15 @@ class PostReadDbTest {
     @Test
     void feed_theFallback_appliesExactlyTheSameRules() throws SQLException {
         assertEquals(ruleTitles(walkFeed(feedService, ME, 100, null, null, FeedMode.RANKED)),
-            ruleTitles(feedRepository.findUpcoming(ME, Instant.now(), null, null, 1000)));
+            ruleTitles(feedRepository.findUpcoming(ME, Instant.now(), PostFeedFilters.none(), null, null, 1000)));
         assertEquals(ruleTitles(walkFeed(feedService, null, 100, null, null, FeedMode.RANKED)),
-            ruleTitles(feedRepository.findUpcoming(null, Instant.now(), null, null, 1000)));
+            ruleTitles(feedRepository.findUpcoming(null, Instant.now(), PostFeedFilters.none(), null, null, 1000)));
     }
 
     @Test
     void feed_aPostVectorFromAnotherModel_isNeutral() throws SQLException {
         Instant now = Instant.now();
-        List<FeedScorer.Facts> candidates = feedRepository.findCandidates(ME, now, null, null);
+        List<FeedScorer.Facts> candidates = feedRepository.findCandidates(ME, now, null, null, PostFeedFilters.none());
         FeedScorer.Facts otherModel = candidates.stream().filter(f -> f.id().equals(OTHER_MODEL_POST)).findFirst().orElseThrow();
 
         assertNull(otherModel.similarity());
@@ -267,24 +274,120 @@ class PostReadDbTest {
 
     @Test
     void map_appliesBlocksAndThePastWindow() throws SQLException {
-        assertEquals(Set.of("map_open"),
-            marks(postRepository.findPostMarks(filters(null, false, null, null), AROUND_THE_FIXTURES, ME)));
-        assertEquals(Set.of("map_open", "map_ended_last_year"),
-            marks(postRepository.findPostMarks(filters(null, true, null, null), AROUND_THE_FIXTURES, ME)));
-        assertEquals(Set.of("map_open", "map_ended_last_year"),
-            marks(postRepository.findPostMarks(filters(null, false, Instant.now().minus(Duration.ofDays(500)), null), AROUND_THE_FIXTURES, ME)));
+        assertEquals(Set.of("map_open", "map_mine"),
+            marks(postRepository.findPostMarks(filters(null, false, null, null), AROUND_THE_FIXTURES, ME, false)));
+        assertEquals(Set.of("map_open", "map_mine", "map_ended_last_year"),
+            marks(postRepository.findPostMarks(filters(null, true, null, null), AROUND_THE_FIXTURES, ME, false)));
+        assertEquals(Set.of("map_open", "map_mine", "map_ended_last_year"),
+            marks(postRepository.findPostMarks(filters(null, false, Instant.now().minus(Duration.ofDays(500)), null), AROUND_THE_FIXTURES, ME, false)));
     }
 
     @Test
     void map_guest_hasNoBlocks() throws SQLException {
-        assertEquals(Set.of("map_open", "map_by_i_blocked", "map_by_blocked_me"),
-            marks(postRepository.findPostMarks(filters(null, false, null, null), AROUND_THE_FIXTURES, null)));
+        assertEquals(Set.of("map_open", "map_mine", "map_by_i_blocked", "map_by_blocked_me"),
+            marks(postRepository.findPostMarks(filters(null, false, null, null), AROUND_THE_FIXTURES, null, false)));
+    }
+
+    // ===== The same filters on the feed, the map and NEAREST =====
+
+    private static final List<String> DISTANCES = List.of("close", "mid", "far");
+
+    /** Around the fixtures' centre, (54.35, 18.65): close is there, mid about 650 m away, far about 6.5 km. */
+    private static PostFeedFilters around(String sortBy, Double radiusKm) {
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, 54.35, 18.65, radiusKm,
+            null, null, null, 20, sortBy, false);
+    }
+
+    private static PostFeedFilters searching(String q) {
+        return new PostFeedFilters(q, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, null, false);
+    }
+
+    /** The distance word of each near_ post, in order. */
+    private static List<String> distances(List<String> titles) {
+        return titles.stream().filter(t -> t.startsWith("near_")).map(t -> t.split("_")[1]).toList();
+    }
+
+    private static List<String> titles(List<PostCardDto> cards) {
+        return cards.stream().map(PostCardDto::title).toList();
+    }
+
+    @Test
+    void feed_aRadius_keepsOnlyThePostsInsideIt() throws SQLException {
+        assertEquals(Set.of("close", "mid"),
+            new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, around(null, 1.0), FeedMode.RANKED)))));
+        assertEquals(Set.of("close", "mid", "far"),
+            new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, around(null, 10.0), FeedMode.RANKED)))));
+    }
+
+    @Test
+    void feed_aSearch_narrowsTheRankedPosts_andStillHidesMine() throws SQLException {
+        List<String> found = titles(walkFeed(feedService, ME, 7, null, null, searching("near_far"), FeedMode.RANKED));
+        assertEquals(8, found.size());
+        assertTrue(found.stream().allMatch(t -> t.startsWith("near_far_")));
+
+        assertEquals(Set.of(), new HashSet<>(titles(walkFeed(feedService, ME, 7, null, null, searching("map_mine"), FeedMode.RANKED))));
+    }
+
+    @Test
+    void feed_includePast_letsEndedEventsIn_andKeepsHidingWhatIsMine() throws SQLException {
+        assertEquals(union(PUBLIC_LIVE, Set.of("friends_by_followed"), ENDED_RECENTLY, ENDED_LONG_AGO),
+            ruleTitles(walkFeed(feedService, ME, 100, null, null, filters(null, true, null, null), FeedMode.RANKED)));
+    }
+
+    @Test
+    void feed_theFallback_appliesTheSameFilters() throws SQLException {
+        PostFeedFilters filters = around(null, 1.0);
+        assertEquals(new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, filters, FeedMode.RANKED)))),
+            new HashSet<>(distances(titles(feedRepository.findUpcoming(ME, Instant.now(), filters, null, null, 1000)))));
+    }
+
+    @Test
+    void map_aRadius_andExcludeMine_matchTheFeed() throws SQLException {
+        assertEquals(Set.of("map_open"),
+            marks(postRepository.findPostMarks(filters(null, false, null, null), AROUND_THE_FIXTURES, ME, true)));
+        assertEquals(Set.of("map_open", "map_mine", "map_by_i_blocked", "map_by_blocked_me"),
+            marks(postRepository.findPostMarks(filters(null, false, null, null), AROUND_THE_FIXTURES, null, true)),
+            "a guest has nothing of their own to leave out");
+
+        Set<String> inside = postRepository.findPostMarks(around(null, 1.0), AROUND_THE_FIXTURES, ME, false).stream()
+            .map(PostMarkDto::title).filter(t -> t.startsWith("near_")).map(t -> t.split("_")[1]).collect(Collectors.toSet());
+        assertEquals(Set.of("close", "mid"), inside);
+    }
+
+    @Test
+    void nearest_walksEveryPlacedPostOnce_nearestFirst() throws SQLException {
+        PostFeedFilters filters = around("NEAREST", null);
+        List<PostCardDto> everything = postRepository.findFeed(filters, PostSort.NEAREST, ME, null, 1_000_000);
+        List<PostCardDto> walked = walkPosts(ME, filters, 7);
+
+        assertEquals(everything.stream().map(PostCardDto::id).toList(), walked.stream().map(PostCardDto::id).toList());
+        assertTrue(walked.stream().allMatch(c -> c.location() != null), "only posts with a place");
+        List<String> order = distances(titles(walked));
+        assertEquals(24, order.size());
+        assertEquals(order.stream().sorted(java.util.Comparator.comparingInt(DISTANCES::indexOf)).toList(), order);
+    }
+
+    @Test
+    void nearest_worksForAGuest() throws SQLException {
+        assertEquals(24, distances(titles(walkPosts(null, around("NEAREST", null), 7))).size());
+    }
+
+    @Test
+    void cards_carryEveryPhoto_coverFirst_atMostTheLimit() throws SQLException {
+        PostCardDto card = card(walkPosts(ME, filters("RECENT", false, null, null), 100), "ten_photos");
+
+        assertEquals(com.coolture.common.validation.PostLimits.MAX_PHOTOS, card.photos().size());
+        assertEquals(UUID.fromString("a0000000-0000-0000-0001-000000000010"), card.photos().get(0).id());
+        assertEquals(UUID.fromString("a0000000-0000-0000-0001-000000000001"), card.photos().get(1).id());
+        assertEquals(800, card.photos().get(0).width());
+        assertNull(card(walkPosts(ME, filters("RECENT", false, null, null), 100), "future_public").photos());
     }
 
     // ===== Walks =====
 
     @ParameterizedTest
-    @EnumSource(PostSort.class)
+    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = "NEAREST")
     void walkingASort_showsEveryPostOnceInOrder(PostSort sort) throws SQLException {
         for (boolean includePast : List.of(false, true)) {
             PostFeedFilters filters = filters(sort.name(), includePast, null, null);
@@ -306,14 +409,14 @@ class PostReadDbTest {
         List<UUID> walked = walkFeed(feedService, viewer, 7, latitude, longitude, FeedMode.RANKED).stream().map(PostCardDto::id).toList();
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
-        assertEquals(ids(feedRepository.findCandidates(viewer, Instant.now(), latitude, longitude)), new HashSet<>(walked));
+        assertEquals(ids(feedRepository.findCandidates(viewer, Instant.now(), latitude, longitude, PostFeedFilters.none())), new HashSet<>(walked));
     }
 
     @Test
     void walkingTheFallback_showsTheSamePostsOnce() throws SQLException {
         FeedRepository rankingDown = new FeedRepository() {
             @Override
-            public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude) throws SQLException {
+            public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
                 throw new SQLException("ranking is down");
             }
         };
@@ -322,6 +425,6 @@ class PostReadDbTest {
         List<UUID> walked = walkFeed(fallback, ME, 7, null, null, FeedMode.UPCOMING).stream().map(PostCardDto::id).toList();
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
-        assertEquals(ids(feedRepository.findCandidates(ME, Instant.now(), null, null)), new HashSet<>(walked));
+        assertEquals(ids(feedRepository.findCandidates(ME, Instant.now(), null, null, PostFeedFilters.none())), new HashSet<>(walked));
     }
 }

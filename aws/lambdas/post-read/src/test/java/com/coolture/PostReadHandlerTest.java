@@ -32,6 +32,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -306,7 +307,7 @@ class PostReadHandlerTest {
         UUID callerId = UUID.randomUUID();
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed",
             Map.of("limit", "10", "cursor", "abc", "latitude", "54.35", "longitude", "18.65"));
-        when(feedService.getFeed(callerId, "abc", 10, 54.35, 18.65))
+        when(feedService.getFeed(eq(callerId), eq("abc"), eq(10), eq(54.35), eq(18.65), any()))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(), new PaginationMeta(10, false, null)));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
@@ -323,7 +324,7 @@ class PostReadHandlerTest {
     @Test
     void getHomeFeed_whenNoIdentity_thenCallsFeedServiceAsGuest() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed");
-        when(feedService.getFeed(isNull(), isNull(), eq(20), isNull(), isNull()))
+        when(feedService.getFeed(isNull(), isNull(), eq(20), isNull(), isNull(), any()))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(), new PaginationMeta(20, false, null)));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
@@ -425,7 +426,7 @@ class PostReadHandlerTest {
         );
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/map", query);
 
-        when(postReadService.getMapMarks(any(), any(), any())).thenReturn(List.of());
+        when(postReadService.getMapMarks(any(), any(), any(), anyBoolean())).thenReturn(List.of());
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
@@ -433,7 +434,7 @@ class PostReadHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            verify(postReadService).getMapMarks(any(), any(), any());
+            verify(postReadService).getMapMarks(any(), any(), any(), anyBoolean());
         }
     }
 
