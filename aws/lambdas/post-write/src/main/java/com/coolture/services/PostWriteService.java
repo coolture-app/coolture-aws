@@ -3,6 +3,7 @@ package com.coolture.services;
 import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.PostDetailDto;
+import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.dto.CountryCodeRequest;
@@ -16,12 +17,17 @@ import com.coolture.common.validation.PostLimits;
 
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 public class PostWriteService {
+
+    private static final Set<MediaPurpose> POST_PURPOSES = EnumSet.of(MediaPurpose.EVENT_COVER, MediaPurpose.EVENT_MEDIA);
 
     private final PostWriteRepository repository;
     private final EmbeddingRequestPublisher embeddingPublisher;
@@ -44,8 +50,10 @@ public class PostWriteService {
         validateDateRange(req.startsAt(), req.endsAt());
         validateMedia(req.mediaIds(), req.coverMediaId());
 
-        repository.validateMediaOwnership(authorId, req.mediaIds());
-        PostDetailDto created = repository.createPost(authorId, req);
+        Map<UUID, MediaPurpose> purposes = repository.validateMediaOwnership(authorId, req.mediaIds());
+        UUID cover = coverOf(req.mediaIds(), req.coverMediaId(), purposes);
+        PostDetailDto created = repository.createPost(authorId,
+            Objects.equals(cover, req.coverMediaId()) ? req : req.withCoverMediaId(cover));
         embeddingPublisher.requestPost(created.id());
         return created;
     }
@@ -71,12 +79,15 @@ public class PostWriteService {
         Instant newEndsAt = req.endsAt() != null ? req.endsAt() : existing.endsAt();
         validateDateRange(newStartsAt, newEndsAt);
 
+        UpdatePostRequest toSave = req;
         if (req.mediaIds() != null) {
             validateMedia(req.mediaIds(), req.coverMediaId());
-            repository.validateMediaOwnership(callerId, req.mediaIds());
+            Map<UUID, MediaPurpose> purposes = repository.validateMediaOwnership(callerId, req.mediaIds());
+            UUID cover = coverOf(req.mediaIds(), req.coverMediaId(), purposes);
+            toSave = Objects.equals(cover, req.coverMediaId()) ? req : req.withCoverMediaId(cover);
         }
 
-        PostDetailDto updated = repository.updatePost(postId, callerId, existing, req);
+        PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave);
         if (embeddedContentChanged(existing, updated)) {
             embeddingPublisher.requestPost(updated.id());
         }
@@ -212,6 +223,25 @@ public class PostWriteService {
         if (endsAt != null && startsAt != null && !endsAt.isAfter(startsAt)) {
             throw new IllegalArgumentException("endsAt must be strictly after startsAt");
         }
+    }
+
+    /**
+     * A post holds only event photos. Its cover is the one the client names, else the first uploaded as EVENT_COVER,
+     * else the first photo.
+     */
+    static UUID coverOf(List<UUID> mediaIds, UUID coverMediaId, Map<UUID, MediaPurpose> purposes) {
+        if (mediaIds == null || mediaIds.isEmpty()) return coverMediaId;
+        for (UUID id : mediaIds) {
+            MediaPurpose purpose = purposes.get(id);
+            if (purpose != null && !POST_PURPOSES.contains(purpose)) {
+                throw new IllegalArgumentException("Media " + id + " is a " + purpose + ", not an event photo");
+            }
+        }
+        if (coverMediaId != null) return coverMediaId;
+        return mediaIds.stream()
+            .filter(id -> purposes.get(id) == MediaPurpose.EVENT_COVER)
+            .findFirst()
+            .orElse(mediaIds.get(0));
     }
 
     private void validateMedia(List<UUID> mediaIds, UUID coverMediaId) {

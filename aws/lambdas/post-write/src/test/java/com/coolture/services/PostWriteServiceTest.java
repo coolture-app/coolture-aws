@@ -3,6 +3,7 @@ package com.coolture.services;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.GeoPointDto;
+import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.PostVisibility;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -132,6 +134,76 @@ class PostWriteServiceTest {
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.createPost(authorId, req));
         assertTrue(ex.getMessage().contains("coverMediaId must be present in mediaIds"));
+    }
+
+    private static CreatePostRequest onlinePostWith(List<UUID> mediaIds, UUID cover) {
+        return new CreatePostRequest(
+            "Online Event", "Description", "https://example.com",
+            Instant.now(), Instant.now().plusSeconds(3600),
+            List.of("talk"), PostType.ONLINE, PostVisibility.PUBLIC,
+            null, mediaIds, cover
+        );
+    }
+
+    @Test
+    void createPost_withoutACover_makesTheEventCoverMediaTheCover() throws SQLException {
+        UUID authorId = UUID.randomUUID();
+        UUID photo = UUID.randomUUID();
+        UUID poster = UUID.randomUUID();
+        CreatePostRequest req = onlinePostWith(List.of(photo, poster), null);
+        when(repository.validateMediaOwnership(authorId, req.mediaIds()))
+            .thenReturn(Map.of(photo, MediaPurpose.EVENT_MEDIA, poster, MediaPurpose.EVENT_COVER));
+
+        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
+
+        service.createPost(authorId, req);
+
+        verify(repository).createPost(authorId, req.withCoverMediaId(poster));
+    }
+
+    @Test
+    void createPost_withoutAnEventCoverMedia_makesTheFirstPhotoTheCover() throws SQLException {
+        UUID authorId = UUID.randomUUID();
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        CreatePostRequest req = onlinePostWith(List.of(first, second), null);
+        when(repository.validateMediaOwnership(authorId, req.mediaIds()))
+            .thenReturn(Map.of(first, MediaPurpose.EVENT_MEDIA, second, MediaPurpose.EVENT_MEDIA));
+
+        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
+
+        service.createPost(authorId, req);
+
+        verify(repository).createPost(authorId, req.withCoverMediaId(first));
+    }
+
+    @Test
+    void createPost_keepsTheCoverTheClientNames() throws SQLException {
+        UUID authorId = UUID.randomUUID();
+        UUID chosen = UUID.randomUUID();
+        UUID poster = UUID.randomUUID();
+        CreatePostRequest req = onlinePostWith(List.of(chosen, poster), chosen);
+        when(repository.validateMediaOwnership(authorId, req.mediaIds()))
+            .thenReturn(Map.of(chosen, MediaPurpose.EVENT_MEDIA, poster, MediaPurpose.EVENT_COVER));
+
+        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
+
+        service.createPost(authorId, req);
+
+        verify(repository).createPost(authorId, req);
+    }
+
+    @Test
+    void createPost_whenAPhotoIsAProfileImage_throwsIllegalArgumentException() throws SQLException {
+        UUID authorId = UUID.randomUUID();
+        UUID avatar = UUID.randomUUID();
+        CreatePostRequest req = onlinePostWith(List.of(avatar), null);
+        when(repository.validateMediaOwnership(authorId, req.mediaIds()))
+            .thenReturn(Map.of(avatar, MediaPurpose.PROFILE_IMAGE));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.createPost(authorId, req));
+        assertTrue(ex.getMessage().contains("not an event photo"));
+        verify(repository, never()).createPost(any(), any());
     }
 
     @Test

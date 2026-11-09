@@ -37,4 +37,9 @@ public record UpdatePostRequest(
     List<UUID> mediaIds,
 
     UUID coverMediaId
-) {}
+) {
+    public UpdatePostRequest withCoverMediaId(UUID cover) {
+        return new UpdatePostRequest(title, description, eventUrl, startsAt, endsAt, tags, type, visibility, location,
+            mediaIds, cover);
+    }
+}

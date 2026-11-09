@@ -10,6 +10,7 @@ import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostMediaDto;
+import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.PostVisibility;
@@ -26,7 +27,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -96,17 +99,18 @@ public class PostWriteRepository {
         return Optional.empty();
     }
 
-    public void validateMediaOwnership(UUID callerId, List<UUID> mediaIds) throws SQLException {
-        if (mediaIds == null || mediaIds.isEmpty()) return;
+    /** Checks the caller owns each media and none is deleted, and gives each one's purpose. */
+    public Map<UUID, MediaPurpose> validateMediaOwnership(UUID callerId, List<UUID> mediaIds) throws SQLException {
+        if (mediaIds == null || mediaIds.isEmpty()) return Map.of();
 
-        String sql = "SELECT id, owner_id, status FROM media WHERE id = ANY(?)";
+        String sql = "SELECT id, owner_id, status, purpose FROM media WHERE id = ANY(?)";
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             Array array = conn.createArrayOf("uuid", mediaIds.toArray());
             stmt.setArray(1, array);
 
             try (ResultSet rs = stmt.executeQuery()) {
-                List<UUID> foundIds = new java.util.ArrayList<>();
+                Map<UUID, MediaPurpose> purposes = new HashMap<>();
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject("id");
                     UUID ownerId = (UUID) rs.getObject("owner_id");
@@ -118,14 +122,16 @@ public class PostWriteRepository {
                     if (!callerId.equals(ownerId)) {
                         throw new SecurityException("You do not own media " + id);
                     }
-                    foundIds.add(id);
+                    String purpose = rs.getString("purpose");
+                    purposes.put(id, purpose == null ? null : MediaPurpose.valueOf(purpose));
                 }
 
                 for (UUID requestedId : mediaIds) {
-                    if (!foundIds.contains(requestedId)) {
+                    if (!purposes.containsKey(requestedId)) {
                         throw new IllegalArgumentException("Media not found: " + requestedId);
                     }
                 }
+                return purposes;
             }
         }
     }

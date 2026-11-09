@@ -45,4 +45,9 @@ public record CreatePostRequest(
     List<UUID> mediaIds,
 
     UUID coverMediaId
-) {}
+) {
+    public CreatePostRequest withCoverMediaId(UUID cover) {
+        return new CreatePostRequest(title, description, eventUrl, startsAt, endsAt, tags, type, visibility, location,
+            mediaIds, cover);
+    }
+}
