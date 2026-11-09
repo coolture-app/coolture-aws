@@ -9,18 +9,40 @@ in a place is sent as `OFFLINE`. If it can't be located it's left out, because a
 
 ## Running it
 
-```bash
-python3 -m venv scraper/.venv                         # python on Windows
-source scraper/.venv/bin/activate                     # source scraper/.venv/Scripts/activate on Windows
-python -m pip install -r scraper/requirements-dev.txt
+The `make` targets run it in the repository's `.venv`, which they create on first use.
 
-python scraper/scrape.py --dry-run --limit 20         # prints the posts as JSON lines, uploads and writes nothing
+```bash
+make scrape-snapshot                                  # saves ~120 events of every category to scraper/snapshot, no API needed
+make seed                                             # loads the snapshot into the local stack, see README.md "Run locally"
 
 make local                                            # in another terminal
-make scrape                                           # imports as the local bot user
+make scrape                                           # imports live as the local bot user
 make scrape ARGS='--limit 20'
+make scrape ARGS='--dry-run --limit 20'               # prints the posts as JSON lines, uploads and writes nothing
 make test-scraper
 ```
+
+## Snapshot and seed
+
+A local stack gets its events from a snapshot, so nobody waits for a live scrape after every `make reset-db`.
+
+- **`scrape.py --snapshot DIR`** (`make scrape-snapshot`) saves posts as `posts.jsonl` and their photos under `images/`,
+  instead of sending them. The listing comes sorted by category, so the first 60 would all be concerts. Instead every
+  top category gets a quota by power allocation, the square root of how many events it lists (Bankier, 1988), which
+  gives big categories more without drowning the small ones: of 120, 24 concerts, 19 shows, 16 parties, 15 exhibitions,
+  13 films, 12 sport, 8 occasional, 7 fairs and 6 food on 2026-11-09. Within a category, events are taken one per day
+  before a second of any day, so they spread over the 30 days. `--all` saves the whole listing. A run adds to what's
+  there and writes `complete` at the end, so one that stopped goes on where it was. A category with too few events
+  ahead, such as exhibitions that already opened, is logged with what it got.
+- **`seed.py events`** (`make seed-events`) waits for the API, then loads the posts not yet there as the bot, four at
+  a time. Every date moves forward by the same whole number of days on the Warsaw clock, the fewest that put every
+  start at least two hours ahead, so the snapshot's days keep their order and each event its hour.
+- **`seed.py reactions`** (`make seed-reactions`) ranks the bot's posts by cosine distance between each post's
+  embedding and the mean of a demo user's interest embeddings. The user likes the posts ranked 4, 7, 10, 13 and 16,
+  marks 5 and 11 as interesting, and dislikes the two farthest. The closest three stay unreacted, because reacted posts
+  leave the feed. A user who has any reaction or participation already is skipped, so a second run adds nothing.
+
+The snapshot is gitignored, like the ledger, because scraped text and photos stay out of the public repository.
 
 We estimate a whole import of about 400 events at about 40 minutes locally: the site and Nominatim each get at most one request a second, and a
 local write took a median of 3.3 s. Later runs skip the events already imported, without opening their pages. Each post then reaches

@@ -106,3 +106,10 @@ def test_a_post_is_not_sent_again_after_a_timeout(stub, pauses):
         http_session().post(stub.url, json={}, timeout=0.2)
 
     assert stub.requests == 1
+
+
+def test_a_get_that_timed_out_is_sent_again_when_timeouts_are_retried(stub, pauses):
+    stub.answers = [(None, {}), (200, {})]
+
+    assert http_session(retry_timeouts=True).get(stub.url, timeout=0.2).status_code == 200
+    assert stub.requests == 2
