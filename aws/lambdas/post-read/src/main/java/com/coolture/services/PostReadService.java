@@ -41,6 +41,9 @@ public class PostReadService {
         validateReactionFilter(filters.reactionType(), callerId);
 
         PostSort sort = PostSort.parse(filters.sortBy());
+        if (sort.needsPosition() && (filters.latitude() == null || filters.longitude() == null)) {
+            throw new IllegalArgumentException("sortBy NEAREST needs latitude and longitude");
+        }
         PostsCursor keyset = PostsCursor.decode(cursor, sort).orElse(null);
 
         int effectiveLimit = clampLimit(limit);
@@ -54,10 +57,10 @@ public class PostReadService {
             .orElseThrow(() -> new IllegalArgumentException("Post not found: " + postId));
     }
 
-    public List<PostMarkDto> getMapMarks(UUID callerId, PostFeedFilters filters, MapBoundsDto bounds) throws SQLException {
+    public List<PostMarkDto> getMapMarks(UUID callerId, PostFeedFilters filters, MapBoundsDto bounds, boolean excludeMine) throws SQLException {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
-        return repository.findPostMarks(filters, bounds, callerId);
+        return repository.findPostMarks(filters, bounds, callerId, excludeMine);
     }
 
     public CursorPage<EventLocationDto> listEventLocations(String cursor, int limit) throws SQLException {

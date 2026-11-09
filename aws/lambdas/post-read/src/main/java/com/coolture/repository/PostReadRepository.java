@@ -35,28 +35,14 @@ public class PostReadRepository {
     public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit) throws SQLException {
         // UPCOMING never shows an ended event. The other sorts hide only long-ended ones, and can show those too.
         boolean upcoming = sort == PostSort.UPCOMING;
-        String sql = PostSql.CARD_SELECT + """
-            WHERE p.deleted_at IS NULL
-              AND (?::varchar IS NULL OR LOWER(p.title) LIKE LOWER('%' || ?::varchar || '%') OR LOWER(p.description) LIKE LOWER('%' || ?::varchar || '%'))
-              AND (?::varchar[] IS NULL OR p.tags && ?::varchar[])
-              AND (?::uuid IS NULL OR p.author_id = ?::uuid)
-              AND (?::varchar IS NULL OR p.status = ?::varchar)
-              AND (?::varchar IS NULL OR p.visibility = ?::varchar)
-            """
+        String sql = PostSql.CARD_SELECT
+            + "WHERE p.deleted_at IS NULL\n"
+            + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.VISIBLE + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + (upcoming ? PostSql.NOT_ENDED : PostSql.NOT_LONG_ENDED) + "\n"
-            + """
-              AND (?::varchar IS NULL OR p.type = ?::varchar)
-              AND (?::timestamptz IS NULL OR p.starts_at >= ?::timestamptz)
-              AND (?::timestamptz IS NULL OR p.starts_at <= ?::timestamptz)
-              AND (?::double precision IS NULL OR ?::double precision IS NULL OR ?::double precision IS NULL
-                   OR (el.coordinates IS NOT NULL AND ST_DWithin(el.coordinates, ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography, ?::double precision)))
-              AND (?::varchar[] IS NULL
-                   OR EXISTS (SELECT 1 FROM post_participations pp WHERE pp.post_id = p.id AND pp.user_id = ?::uuid AND pp.type = ANY(?::varchar[])))
-              AND (?::varchar IS NULL
-                   OR EXISTS (SELECT 1 FROM post_reactions pr WHERE pr.post_id = p.id AND pr.user_id = ?::uuid AND pr.type::varchar = ?::varchar))
-            """
+            + (sort.needsPosition() ? "  AND el.coordinates IS NOT NULL\n" : "")
+            + "  AND " + PARTICIPATION_AND_REACTION + "\n"
             + (cursor != null ? "  AND " + sort.keysetSql() + "\n" : "")
             + "ORDER BY " + sort.orderSql() + "\n"
             + "LIMIT ?";
@@ -70,28 +56,12 @@ public class PostReadRepository {
             b.bindUUID(callerId)
              .bindUUID(callerId);
 
-            // Text search filter
-            b.bindStringFilterTriple(f.q());
+            PostFilterSql.bind(b, f, callerId);
 
-            // Tags filter
-            String[] tagsArr = (f.tags() != null && !f.tags().isEmpty()) ? f.tags().toArray(new String[0]) : null;
-            b.bindVarcharArrayFilterPair(tagsArr);
-
-            // Author filter
-            b.bindUUIDFilterPair(f.authorId());
-
-            // Status filter
-            String statusStr = f.status() != null ? f.status().name() : null;
-            b.bindStringFilterPair(statusStr);
-
-            // Visibility filter
-            String visibilityFilter = f.visibility() != null ? f.visibility().name() : (callerId == null ? PostVisibility.PUBLIC.name() : null);
-            b.bindStringFilterPair(visibilityFilter);
+            // Visible, then blocks
             b.bindNullableUUID(callerId)
-             .bindNullableUUID(callerId);
-
-            // Blocks
-            b.bindNullableUUID(callerId)
+             .bindNullableUUID(callerId)
+             .bindNullableUUID(callerId)
              .bindNullableUUID(callerId);
 
             // Past events
@@ -99,49 +69,42 @@ public class PostReadRepository {
                 b.bindBoolean(f.showsAllPastEvents());
             }
 
-            // Type filter
-            String typeStr = f.type() != null ? f.type().name() : null;
-            b.bindStringFilterPair(typeStr);
+            bindParticipationAndReaction(b, f, callerId);
 
-            // Date range filters
-            b.bindTimestampFilterPair(f.startsFrom());
-            b.bindTimestampFilterPair(f.startsTo());
-
-            // Geo filter
-            Double radiusMeters = f.radiusKm() != null ? f.radiusKm() * 1000.0 : null;
-            boolean hasGeo = f.latitude() != null && f.longitude() != null && radiusMeters != null;
-            b.bindDouble(hasGeo ? f.latitude() : null)
-             .bindDouble(hasGeo ? f.longitude() : null)
-             .bindDouble(hasGeo ? radiusMeters : null)
-             .bindDouble(hasGeo ? f.longitude() : null)
-             .bindDouble(hasGeo ? f.latitude() : null)
-             .bindDouble(hasGeo ? radiusMeters : null);
-
-            // Participation filter
-            boolean hasPart = f.participationTypes() != null && !f.participationTypes().isEmpty() && callerId != null;
-            String[] partArr = hasPart ? f.participationTypes().toArray(new String[0]) : null;
-            b.bindVarcharArray(partArr)
-             .bindNullableUUID(hasPart ? callerId : null)
-             .bindVarcharArray(partArr);
-
-            // Reaction filter
-            boolean hasReaction = f.reactionType() != null && callerId != null;
-            b.bindString(hasReaction ? f.reactionType() : null)
-             .bindNullableUUID(hasReaction ? callerId : null)
-             .bindString(hasReaction ? f.reactionType() : null);
-
-            // Cursor
             if (cursor != null) {
-                cursor.bindKeyset(b);
+                cursor.bindKeyset(b, f.latitude(), f.longitude());
+            }
+            if (sort.needsPosition()) {
+                b.bindDouble(f.longitude())
+                 .bindDouble(f.latitude());
             }
 
-            // Limit
             b.bindInt(limit);
 
             try (ResultSet rs = stmt.executeQuery()) {
-                return mapPostCardList(rs);
+                return MediaQueries.withPhotos(conn, mapPostCardList(rs));
             }
         }
+    }
+
+    /** My Events: the viewer's participations or reactions of the given types. Bind with bindParticipationAndReaction. */
+    private static final String PARTICIPATION_AND_REACTION = """
+        (?::varchar[] IS NULL
+               OR EXISTS (SELECT 1 FROM post_participations pp WHERE pp.post_id = p.id AND pp.user_id = ?::uuid AND pp.type = ANY(?::varchar[])))
+          AND (?::varchar IS NULL
+               OR EXISTS (SELECT 1 FROM post_reactions pr WHERE pr.post_id = p.id AND pr.user_id = ?::uuid AND pr.type::varchar = ?::varchar))""";
+
+    private static void bindParticipationAndReaction(ParamBinder b, PostFeedFilters f, UUID callerId) throws SQLException {
+        boolean hasPart = f.participationTypes() != null && !f.participationTypes().isEmpty() && callerId != null;
+        String[] partArr = hasPart ? f.participationTypes().toArray(new String[0]) : null;
+        b.bindVarcharArray(partArr)
+         .bindNullableUUID(hasPart ? callerId : null)
+         .bindVarcharArray(partArr);
+
+        boolean hasReaction = f.reactionType() != null && callerId != null;
+        b.bindString(hasReaction ? f.reactionType() : null)
+         .bindNullableUUID(hasReaction ? callerId : null)
+         .bindString(hasReaction ? f.reactionType() : null);
     }
 
     public Optional<PostDetailDto> findById(UUID postId, UUID callerId) throws SQLException {
@@ -222,7 +185,9 @@ public class PostReadRepository {
         return Optional.empty();
     }
 
-    public List<PostMarkDto> findPostMarks(PostFeedFilters f, MapBoundsDto bounds, UUID callerId) throws SQLException {
+    /** With excludeMine, the same posts the feed would show this viewer: none of their own, reacted to or attended. */
+    public List<PostMarkDto> findPostMarks(PostFeedFilters f, MapBoundsDto bounds, UUID callerId, boolean excludeMine) throws SQLException {
+        boolean hidesMine = excludeMine && callerId != null;
         String sql = """
             SELECT p.id, p.title, p.description, p.positive_reaction_count,
                    ST_Y(el.coordinates::geometry) AS latitude,
@@ -240,61 +205,34 @@ public class PostReadRepository {
             ) cover_m ON true
             WHERE p.deleted_at IS NULL
               AND el.coordinates IS NOT NULL
-              AND (?::varchar IS NULL OR LOWER(p.title) LIKE LOWER('%' || ?::varchar || '%') OR LOWER(p.description) LIKE LOWER('%' || ?::varchar || '%'))
-              AND (?::varchar[] IS NULL OR p.tags && ?::varchar[])
-              AND (?::uuid IS NULL OR p.author_id = ?::uuid)
-              AND (?::varchar IS NULL OR p.status = ?::varchar)
-              AND (?::varchar IS NULL OR p.visibility = ?::varchar)
             """
+            + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.VISIBLE + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + PostSql.NOT_LONG_ENDED + "\n"
-            + """
-              AND (?::varchar IS NULL OR p.type = ?::varchar)
-              AND (?::timestamptz IS NULL OR p.starts_at >= ?::timestamptz)
-              AND (?::timestamptz IS NULL OR p.starts_at <= ?::timestamptz)
-              AND (el.coordinates::geometry && ST_MakeEnvelope(?, ?, ?, ?, 4326))
-              AND (?::varchar[] IS NULL OR EXISTS (SELECT 1 FROM post_participations pp WHERE pp.post_id = p.id AND pp.user_id = ?::uuid AND pp.type = ANY(?::varchar[])))
-              AND (?::varchar IS NULL OR EXISTS (SELECT 1 FROM post_reactions pr WHERE pr.post_id = p.id AND pr.user_id = ?::uuid AND pr.type::varchar = ?::varchar))
-        """;
+            + (hidesMine ? "  AND " + PostSql.NOT_MINE + "\n" : "")
+            + "  AND (el.coordinates::geometry && ST_MakeEnvelope(?, ?, ?, ?, 4326))\n"
+            + "  AND " + PARTICIPATION_AND_REACTION;
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn);
 
-            // Text search
-            b.bindStringFilterTriple(f.q());
+            PostFilterSql.bind(b, f, callerId);
 
-            // Tags
-            String[] tagsArr = (f.tags() != null && !f.tags().isEmpty()) ? f.tags().toArray(new String[0]) : null;
-            b.bindVarcharArrayFilterPair(tagsArr);
-
-            // Author
-            b.bindUUIDFilterPair(f.authorId());
-
-            // Status
-            b.bindStringFilterPair(f.status() != null ? f.status().name() : null);
-
-            // Visibility
-            String visibilityFilter = f.visibility() != null ? f.visibility().name() : (callerId == null ? PostVisibility.PUBLIC.name() : null);
-            b.bindStringFilterPair(visibilityFilter);
+            // Visible, then blocks
             b.bindNullableUUID(callerId)
-             .bindNullableUUID(callerId);
-
-            // Blocks
-            b.bindNullableUUID(callerId)
+             .bindNullableUUID(callerId)
+             .bindNullableUUID(callerId)
              .bindNullableUUID(callerId);
 
             // Past events
             b.bindBoolean(f.showsAllPastEvents());
 
-            // Type
-            b.bindStringFilterPair(f.type() != null ? f.type().name() : null);
-
-            // Date range
-            b.bindTimestampFilterPair(f.startsFrom());
-            b.bindTimestampFilterPair(f.startsTo());
+            if (hidesMine) {
+                PostSql.bindNotMine(b, callerId);
+            }
 
             // Bounds
             b.bindDouble(bounds.leftUpper().longitude())
@@ -302,18 +240,7 @@ public class PostReadRepository {
              .bindDouble(bounds.rightBottom().longitude())
              .bindDouble(bounds.leftUpper().latitude());
 
-            // Participation filter
-            boolean hasPart = f.participationTypes() != null && !f.participationTypes().isEmpty() && callerId != null;
-            String[] partArr = hasPart ? f.participationTypes().toArray(new String[0]) : null;
-            b.bindVarcharArray(partArr)
-             .bindNullableUUID(hasPart ? callerId : null)
-             .bindVarcharArray(partArr);
-
-            // Reaction filter
-            boolean hasReaction = f.reactionType() != null && callerId != null;
-            b.bindString(hasReaction ? f.reactionType() : null)
-             .bindNullableUUID(hasReaction ? callerId : null)
-             .bindString(hasReaction ? f.reactionType() : null);
+            bindParticipationAndReaction(b, f, callerId);
 
             List<PostMarkDto> list = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {

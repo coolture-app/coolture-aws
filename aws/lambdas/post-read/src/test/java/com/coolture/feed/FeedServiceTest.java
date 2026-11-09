@@ -1,6 +1,7 @@
 package com.coolture.feed;
 
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostFeedFilters;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
@@ -38,7 +39,7 @@ class FeedServiceTest {
         final List<UUID> viewers = new ArrayList<>();
 
         @Override
-        public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude) throws SQLException {
+        public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
             asOfs.add(asOf);
             latitudes.add(latitude);
             viewers.add(viewer);
@@ -48,7 +49,7 @@ class FeedServiceTest {
         }
 
         @Override
-        public List<PostCardDto> findUpcoming(UUID viewer, Instant asOf, Instant afterStartsAt, UUID afterId, int limit) throws SQLException {
+        public List<PostCardDto> findUpcoming(UUID viewer, Instant asOf, PostFeedFilters filters, Instant afterStartsAt, UUID afterId, int limit) throws SQLException {
             asOfs.add(asOf);
             if (upcomingFailure != null) throw upcomingFailure;
             Comparator<FeedScorer.Facts> soonest = Comparator.comparing(FeedScorer.Facts::startsAt).thenComparing(FeedScorer.Facts::id);
@@ -70,7 +71,7 @@ class FeedServiceTest {
 
     private static PostCardDto card(FeedScorer.Facts f) {
         return new PostCardDto(f.id(), null, null, "t", null, null, f.startsAt(), null, List.of(),
-            f.engagement(), 0, 0, 0, null, null, null, START, null, null, null, null, null);
+            f.engagement(), 0, 0, 0, null, null, null, START, null, null, null, null, null, null);
     }
 
     private static List<FeedScorer.Facts> posts(int count) {
@@ -284,7 +285,7 @@ class FeedServiceTest {
         List<FeedScorer.Facts> all = repository.candidates;
         FakeRepository broken = new FakeRepository() {
             @Override
-            public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude) {
+            public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) {
                 return List.of(new FeedScorer.Facts(UUID.randomUUID(), null, 0, null, null));
             }
         };

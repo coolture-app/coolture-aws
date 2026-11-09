@@ -37,6 +37,12 @@ public record PostFeedFilters(
             participationTypes, reactionType, cursor, limit, sortBy, false);
     }
 
+    /** No filter at all, as the plain home feed. */
+    public static PostFeedFilters none() {
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, null, false);
+    }
+
     /** A chosen date is explicit, so it also turns the past-events window off. */
     public boolean showsAllPastEvents() {
         return includePast || startsFrom != null || startsTo != null;
