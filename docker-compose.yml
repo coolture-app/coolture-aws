@@ -1,3 +1,6 @@
+# A fixed project name, so every clone and worktree drives the same containers instead of clashing on their names.
+name: coolture-aws
+
 x-queue: &queue
   SQS_ENDPOINT_URL: http://sqs:9324
   SCORES_QUEUE_URL: http://sqs:9324/000000000000/coolture-recommendation-events
@@ -20,10 +23,11 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U coolture_admin -d coolture"]
-      interval: 5s
+      # Over TCP: the socket also answers while the image's first-run setup is still going, which made migrate retry.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U coolture_admin -d coolture"]
+      interval: 2s
       timeout: 5s
-      retries: 5
+      retries: 30
 
   # Applies migrations/ with the same runner as on AWS, then db/local-dev-seed.sql. Safe to re-run.
   migrate:

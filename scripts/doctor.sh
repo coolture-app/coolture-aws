@@ -88,29 +88,33 @@ elif [[ -n "$free_gb" ]]; then
     ok "${free_gb} GB free"
 fi
 
+clash=''
 if has docker && docker info > /dev/null 2>&1; then
     for name in coolture-postgres coolture-s3garage; do
         project="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2> /dev/null)"
-        if [[ -n "$project" && "$project" != coolture-aws ]]; then
-            bad "container $name belongs to compose project '$project', so make up would clash with it. Stop it (data stays): docker compose -p $project down"
+        if [[ -n "$project" && "$project" != coolture-aws && "$clash" != "$project" ]]; then
+            clash="$project"
+            bad "containers of an older compose project '$project' hold this stack's names and ports, so make up would clash. Stop them (data stays): docker compose -p $project down"
         fi
     done
 fi
 
 port_open() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null; }
 running() { docker compose ps --status running --services 2> /dev/null | grep -qx "$1"; }
-for entry in 5430:postgres:PostgreSQL 3900:s3garage:Garage; do
-    IFS=: read -r port service label <<< "$entry"
-    if port_open "$port" && ! running "$service"; then
-        bad "port $port ($label) is taken by something else. Stop it, or another copy of this stack"
-    fi
-done
+if [[ -z "$clash" ]]; then
+    for entry in 5430:postgres:PostgreSQL 3900:s3garage:Garage; do
+        IFS=: read -r port service label <<< "$entry"
+        if port_open "$port" && ! running "$service"; then
+            bad "port $port ($label) is taken by something else. Stop it, or another copy of this stack"
+        fi
+    done
+fi
 
 echo
 echo "Now"
 
 if has docker && docker info > /dev/null 2>&1; then
-    services="$(docker compose ps --status running --services 2> /dev/null | tr '\n' ' ')"
+    services="$(docker compose ps --status running --services 2> /dev/null | xargs)"
     if [[ -n "$services" ]]; then ok "running: $services"; else warn "nothing running. Start with: make dev"; fi
 fi
 
