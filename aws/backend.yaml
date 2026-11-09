@@ -242,7 +242,11 @@ Resources:
       CorsConfiguration:
         AllowOrigins: !Split [',', !Ref CorsAllowedOrigins]
         AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
-        AllowHeaders: [authorization, content-type]
+        # The local stack also takes the dev identity headers that the frontend's development build sends.
+        AllowHeaders: !If
+          - IsAWS
+          - [authorization, content-type]
+          - [authorization, content-type, x-user-id, x-user-name, x-user-role, x-anonymous]
         AllowCredentials: true
         MaxAge: 600
       DefaultRouteSettings:

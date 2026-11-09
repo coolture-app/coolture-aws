@@ -1,0 +1,11 @@
+# The tools the local stack needs, at the versions it's tested with. `mise install` in this folder gets them all and
+# sets JAVA_HOME. Optional: tools installed another way work too. Docker, Git and make aren't here; see README.md.
+[tools]
+java = "temurin-21"
+maven = "3.9"
+python = "3.13"
+# mise installs Python tools, such as the SAM CLI, with uv.
+uv = "latest"
+aws-sam = "1.171"
+# For ../coolture-frontend and make deploy-frontend.
+node = "24"

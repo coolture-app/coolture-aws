@@ -5,6 +5,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -60,6 +61,38 @@ class SecurityContextTest {
         Optional<String> groups = SecurityContext.getClaim(event, "cognito:groups");
         assertTrue(groups.isPresent());
         assertEquals("COOLTURE_ADMIN", groups.get());
+    }
+
+    @Test
+    void getGroups_whenDevFallbackEnabledWithUserIdHeaderOnly_returnsNoGroups() {
+        SecurityContext.setDevFallbackOverride(true);
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("X-User-Id", UUID.randomUUID().toString()))
+            .build();
+
+        assertTrue(SecurityContext.getGroups(event).isEmpty());
+        assertThrows(SecurityException.class, () -> SecurityContext.requireAdmin(event));
+    }
+
+    @Test
+    void getGroups_whenDevFallbackEnabledWithUserIdAndRoleHeaders_returnsTheRole() {
+        SecurityContext.setDevFallbackOverride(true);
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("X-User-Id", UUID.randomUUID().toString(), "X-User-Role", "COOLTURE_ADMIN"))
+            .build();
+
+        assertEquals(List.of("COOLTURE_ADMIN"), SecurityContext.getGroups(event));
+    }
+
+    @Test
+    void getUsername_whenDevFallbackEnabledWithUserIdHeaderOnly_isNotTheDevUsers() {
+        SecurityContext.setDevFallbackOverride(true);
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("X-User-Id", UUID.randomUUID().toString()))
+            .build();
+
+        assertTrue(SecurityContext.getUsername(event).isEmpty());
+        assertTrue(SecurityContext.getEmail(event).isEmpty());
     }
 
     @Test

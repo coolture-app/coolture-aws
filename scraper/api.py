@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from collections.abc import Iterable
 from contextlib import suppress
@@ -13,13 +14,15 @@ from images import Image
 log = logging.getLogger(__name__)
 
 LEDGER_DIR = Path(__file__).parent
+# seed.py loads posts from several threads, each with its own CooltureApi, into one ledger.
+LEDGER_LOCK = threading.Lock()
 
 PAGE_LIMIT = 100
 TIMEOUT_S = 40
 WRITE_PAUSE_S = 0.1
 # PostLimits.MAX_PHOTOS: POST /posts refuses more.
 MAX_PHOTOS = 8
-# Without it the local user takes the dev default, which the seed already owns. The API would turn a hyphen into this underscore.
+# The local API names a new X-User-Id user after it. The API would turn a hyphen into this underscore.
 LOCAL_USER_NAME = 'coolture_bot'
 # A 200 can still hold the wrong thing, such as CloudFront's HTML when the URL lacks /api. Not JSON is a ValueError too.
 WRONG_SHAPE = (KeyError, TypeError, AttributeError, ValueError)
@@ -131,7 +134,7 @@ class CooltureApi:
         _stop_if_refused(response, 'POST /posts')
         if response.status_code != 201:
             return Outcome(_answer(response))
-        with self._ledger.open('a', encoding='utf-8') as ledger:
+        with LEDGER_LOCK, self._ledger.open('a', encoding='utf-8') as ledger:
             ledger.write(f'{post["eventUrl"]}\n')
         return Outcome(photos=len(media_ids))
 

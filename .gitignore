@@ -17,3 +17,4 @@ __pycache__/
 .agents
 aws/lambdas/ssr/dist/
 scraper/.imported-*
+scraper/snapshot/
