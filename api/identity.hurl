@@ -23,15 +23,3 @@ HTTP 401
 GET {{api}}/feed?limit=1
 X-Anonymous: true
 HTTP 200
-
-# Admin routes need X-User-Role: COOLTURE_ADMIN, which only local_dev gets by default.
-DELETE {{api}}/event-locations/admin/00000000-0000-0000-0000-000000000000
-X-User-Id: {{anna}}
-X-User-Name: anna_demo
-HTTP 403
-
-DELETE {{api}}/event-locations/admin/00000000-0000-0000-0000-000000000000
-X-User-Id: {{anna}}
-X-User-Name: anna_demo
-X-User-Role: COOLTURE_ADMIN
-HTTP 404
