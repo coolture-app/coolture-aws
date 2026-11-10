@@ -19,9 +19,12 @@ public final class PostFilterSql {
     /** A point from a longitude and a latitude, in that order. */
     public static final String POINT = "ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography";
 
-    /** Bind with {@link #bind}. */
+    /**
+     * Bind with {@link #bind}. Search reads the place too, so "Sopot" finds events held there. The newline between the
+     * fields keeps a search from matching across two of them.
+     */
     public static final String MATCHES = """
-        (?::varchar IS NULL OR LOWER(p.title) LIKE LOWER('%' || ?::varchar || '%') OR LOWER(p.description) LIKE LOWER('%' || ?::varchar || '%'))
+        (?::varchar IS NULL OR concat_ws(chr(10), p.title, p.description, el.city, el.venue_name) ILIKE '%' || ?::varchar || '%')
           AND (?::varchar[] IS NULL OR p.tags && ?::varchar[])
           AND (?::uuid IS NULL OR p.author_id = ?::uuid)
           AND (?::varchar IS NULL OR p.status = ?::varchar)
@@ -34,7 +37,7 @@ public final class PostFilterSql {
         , ?::double precision)))""";
 
     public static void bind(ParamBinder b, PostFeedFilters f, UUID viewer) throws SQLException {
-        b.bindStringFilterTriple(blankToNull(f.q()));
+        b.bindStringFilterPair(blankToNull(f.q()));
 
         String[] tags = f.tags() != null && !f.tags().isEmpty() ? f.tags().toArray(new String[0]) : null;
         b.bindVarcharArrayFilterPair(tags);

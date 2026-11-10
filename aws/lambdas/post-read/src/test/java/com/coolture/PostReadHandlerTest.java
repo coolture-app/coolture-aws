@@ -387,18 +387,6 @@ class PostReadHandlerTest {
     }
 
     @Test
-    void handleRequest_whenCountryCodes_returns200WithList() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/dicts/country-codes");
-        when(postReadService.listCountryCodes()).thenReturn(List.of(new com.coolture.common.dto.CountryCodeDto("POL")));
-
-        APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-        assertEquals(200, response.getStatusCode());
-        org.junit.jupiter.api.Assertions.assertTrue(response.getBody().contains("POL"));
-        verify(postReadService).listCountryCodes();
-    }
-
-    @Test
     void handleRequest_whenPostById_returns200WithDetail() throws Exception {
         UUID postId = UUID.randomUUID();
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/" + postId, null, Map.of("id", postId.toString()));
@@ -439,17 +427,17 @@ class PostReadHandlerTest {
     }
 
     @Test
-    void handleRequest_whenEventLocations_returns200WithPage() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/event-locations", Map.of("limit", "10"));
+    void handleRequest_whenMapBoundsUseAnotherSpelling_returns400() {
+        Map<String, String> query = Map.of("maxLat", "54.5", "minLng", "18.0", "minLat", "54.0", "maxLng", "19.0");
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/map", query);
 
-        var emptyPage = CursorPage.<com.coolture.common.dto.EventLocationDto>of(
-            List.of(), 10, com.coolture.common.dto.EventLocationDto::id, com.coolture.common.dto.EventLocationDto::createdAt
-        );
-        when(postReadService.listEventLocations(any(), eq(10))).thenReturn(emptyPage);
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
 
-        APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
-        assertEquals(200, response.getStatusCode());
-        verify(postReadService).listEventLocations(any(), eq(10));
+            assertEquals(400, response.getStatusCode());
+        }
     }
+
 }

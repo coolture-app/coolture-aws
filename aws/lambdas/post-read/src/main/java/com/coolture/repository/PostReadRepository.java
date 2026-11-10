@@ -3,8 +3,6 @@ package com.coolture.repository;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
-import com.coolture.common.dto.CountryCodeDto;
-import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
 import com.coolture.common.dto.MediaResourceDto;
@@ -22,7 +20,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -191,7 +188,8 @@ public class PostReadRepository {
             SELECT p.id, p.title, p.description, p.positive_reaction_count,
                    ST_Y(el.coordinates::geometry) AS latitude,
                    ST_X(el.coordinates::geometry) AS longitude,
-                   cover_m.object_key AS cover_url
+                   cover_m.object_key AS cover_url,
+                   el.venue_name, el.city
             FROM posts p
             JOIN event_locations el ON el.id = p.event_location_id
             LEFT JOIN LATERAL (
@@ -250,7 +248,9 @@ public class PostReadRepository {
                         rs.getString("description"),
                         MediaUrls.presign(rs.getString("cover_url")),
                         rs.getInt("positive_reaction_count"),
-                        new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude"))
+                        new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
+                        rs.getString("venue_name"),
+                        rs.getString("city")
                     ));
                 }
             }
@@ -267,60 +267,4 @@ public class PostReadRepository {
         return list;
     }
 
-    public List<EventLocationDto> findEventLocations(Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
-        String sql = """
-            SELECT id, country_code, venue_name, building_num, street, postal_code, city,
-                   ST_Y(coordinates::geometry) AS latitude,
-                   ST_X(coordinates::geometry) AS longitude,
-                   created_at
-            FROM event_locations
-            WHERE (?::timestamptz IS NULL
-                   OR created_at < ?::timestamptz
-                   OR (created_at = ?::timestamptz AND id < ?::uuid))
-            ORDER BY created_at DESC, id DESC
-            LIMIT ?
-        """;
-
-        List<EventLocationDto> list = new ArrayList<>();
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            new ParamBinder(stmt, conn)
-                .bindCursorParams(cursorCreatedAt, cursorId)
-                .bindInt(limit);
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    list.add(new EventLocationDto(
-                        (UUID) rs.getObject("id"),
-                        rs.getString("country_code"),
-                        rs.getString("venue_name"),
-                        rs.getString("building_num"),
-                        rs.getString("street"),
-                        rs.getString("postal_code"),
-                        rs.getString("city"),
-                        new GeoPointDto(
-                            rs.getDouble("latitude"),
-                            rs.getDouble("longitude")
-                        ),
-                        mapInstant(rs, "created_at")
-                    ));
-                }
-            }
-        }
-        return list;
-    }
-
-    public List<CountryCodeDto> findAllCountryCodes() throws SQLException {
-        String sql = "SELECT code FROM country_codes ORDER BY code ASC";
-        List<CountryCodeDto> list = new ArrayList<>();
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-            while (rs.next()) {
-                list.add(new CountryCodeDto(rs.getString("code")));
-            }
-        }
-        return list;
-    }
 }

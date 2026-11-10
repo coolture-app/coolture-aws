@@ -330,6 +330,29 @@ class PostReadDbTest {
     }
 
     @Test
+    void aSearch_readsTheCityAndThePlacesName_inEveryList() throws SQLException {
+        for (String q : List.of("fixturowo", "HALA FIXTUROWA")) {
+            List<String> feed = titles(walkFeed(feedService, ME, 7, null, null, searching(q), FeedMode.RANKED));
+            List<String> posts = titles(postRepository.findFeed(searching(q), PostSort.RECENT, ME, null, 100));
+            List<String> marks = postRepository.findPostMarks(searching(q), AROUND_THE_FIXTURES, ME, false).stream()
+                .map(PostMarkDto::title).toList();
+
+            for (List<String> found : List.of(feed, posts, marks)) {
+                assertEquals(8, found.size(), q);
+                assertTrue(found.stream().allMatch(t -> t.startsWith("near_far_")), q);
+            }
+        }
+    }
+
+    @Test
+    void mapMarks_carryThePlace() throws SQLException {
+        PostMarkDto far = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, ME, false).get(0);
+
+        assertEquals("Hala Fixturowa", far.venueName());
+        assertEquals("Fixturowo", far.city());
+    }
+
+    @Test
     void feed_includePast_letsEndedEventsIn_andKeepsHidingWhatIsMine() throws SQLException {
         assertEquals(union(PUBLIC_LIVE, Set.of("friends_by_followed"), ENDED_RECENTLY, ENDED_LONG_AGO),
             ruleTitles(walkFeed(feedService, ME, 100, null, null, filters(null, true, null, null), FeedMode.RANKED)));

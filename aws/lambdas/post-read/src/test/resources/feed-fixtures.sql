@@ -96,9 +96,9 @@ INSERT INTO posts (author_id, event_location_id, title, starts_at, type) VALUES
   ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000100', 'map_mine', now() + interval '2 days', 'OFFLINE');
 
 -- Places at three distances from (54.35, 18.65), for the radius filter and NEAREST, with ties at each distance.
-INSERT INTO event_locations (id, coordinates) VALUES
-  ('a0000000-0000-0000-0000-000000000101', ST_SetSRID(ST_MakePoint(18.66, 54.35), 4326)::geography),
-  ('a0000000-0000-0000-0000-000000000102', ST_SetSRID(ST_MakePoint(18.70, 54.40), 4326)::geography);
+INSERT INTO event_locations (id, city, venue_name, coordinates) VALUES
+  ('a0000000-0000-0000-0000-000000000101', NULL, NULL, ST_SetSRID(ST_MakePoint(18.66, 54.35), 4326)::geography),
+  ('a0000000-0000-0000-0000-000000000102', 'Fixturowo', 'Hala Fixturowa', ST_SetSRID(ST_MakePoint(18.70, 54.40), 4326)::geography);
 
 INSERT INTO posts (author_id, event_location_id, title, starts_at, type)
 SELECT 'a0000000-0000-0000-0000-000000000002', l.loc::uuid, 'near_' || l.name || '_' || g, now() + interval '3 days', 'OFFLINE'
