@@ -307,7 +307,7 @@ components:
         coverMediaUrl: {type: string}
         positiveReactionCount: {type: integer}
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
-        venueName: {type: string, description: The place's name for the popup, as in EventLocation.}
+        venueName: {type: string}
         city: {type: string}
     UserSummary:
       type: object
