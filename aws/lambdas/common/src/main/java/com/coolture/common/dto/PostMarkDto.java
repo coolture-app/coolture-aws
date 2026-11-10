@@ -11,5 +11,7 @@ public record PostMarkDto(
     String description,
     String coverMediaUrl,
     int positiveReactionCount,
-    GeoPointDto coordinates
+    GeoPointDto coordinates,
+    String venueName,
+    String city
 ) {}

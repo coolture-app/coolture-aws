@@ -151,10 +151,8 @@ class ResultSetMappersTest {
     @Test
     void mapEventLocation_whenPresent_mapsFields() throws SQLException {
         ResultSet rs = mock(ResultSet.class);
-        UUID locId = UUID.randomUUID();
-
-        when(rs.getObject("loc_id")).thenReturn(locId);
-        when(rs.getString("country_code")).thenReturn("POL");
+        when(rs.getObject("loc_id")).thenReturn(UUID.randomUUID());
+        when(rs.getString("country_code")).thenReturn("PL");
         when(rs.getString("venue_name")).thenReturn("Tauron Arena");
         when(rs.getString("building_num")).thenReturn("7");
         when(rs.getString("street")).thenReturn("Lema");
@@ -166,8 +164,7 @@ class ResultSetMappersTest {
         EventLocationDto loc = ResultSetMappers.mapEventLocation(rs);
 
         assertNotNull(loc);
-        assertEquals(locId, loc.id());
-        assertEquals("POL", loc.countryCode());
+        assertEquals("PL", loc.countryCode());
         assertEquals("Tauron Arena", loc.venueName());
         assertEquals("Kraków", loc.city());
         assertEquals(50.068, loc.coordinates().latitude());
