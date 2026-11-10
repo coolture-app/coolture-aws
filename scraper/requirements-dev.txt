@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest>=8,<9
+# The Lambda runtime has it; only lambda_handler.py and its tests need it.
+boto3>=1.40,<2

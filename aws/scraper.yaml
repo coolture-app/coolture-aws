@@ -1,0 +1,161 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Coolture scraper - imports new trojmiasto.pl events as the bot, at a random moment in every 6 hours
+
+# Before the schedule is turned on, the bot's Cognito user needs a permanent password, kept in BotSecret. Steps in
+# scraper/README.md, "On a schedule".
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  BackendStackName:
+    Type: String
+    Default: coolture-backend-dev
+  GeocoderStackName:
+    Type: String
+    Default: coolture-geocoder-dev
+  UserPoolId:
+    Type: String
+  UserPoolClientId:
+    Type: String
+  ScheduleEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  EndDate:
+    Type: String
+    Default: ''
+    Description: When the schedule stops for good, such as 2027-06-30T00:00:00Z. Empty runs it until it's turned off
+
+Conditions:
+  IsEnabled: !Equals [!Ref ScheduleEnabled, 'true']
+  HasEndDate: !Not [!Equals [!Ref EndDate, '']]
+
+Resources:
+  LedgerBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'coolture-${Environment}-scraper-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Created empty: the bot's password is set by hand, as {"username": "...", "password": "..."}.
+  BotSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'coolture-${Environment}-scraper-bot'
+      Description: The scraper bot's Cognito username and permanent password
+
+  ScraperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-scraper'
+      RetentionInDays: 30
+
+  ScraperFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-scraper'
+      CodeUri: ../scraper/
+      Handler: lambda_handler.handler
+      Runtime: python3.13
+      Architectures: [arm64]
+      MemorySize: 512
+      Timeout: 900
+      # With the schedule's window, runs never overlap. This also holds a run started by hand to one at a time.
+      ReservedConcurrentExecutions: 1
+      LoggingConfig:
+        LogGroup: !Ref ScraperLogGroup
+      # A failed run waits for the next one, which goes on where it stopped.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 3600
+      Environment:
+        Variables:
+          API_URL: !Sub
+            - 'https://${Domain}/${Environment}'
+            - Domain: !ImportValue {'Fn::Sub': '${BackendStackName}-ApiDomain'}
+          GEOCODER_URL: !ImportValue {'Fn::Sub': '${GeocoderStackName}-ProxyUrl'}
+          BOT_SECRET: !Ref BotSecret
+          ORIGIN_VERIFY_SECRET: !Sub 'coolture-${Environment}-origin-verify'
+          USER_POOL_ID: !Ref UserPoolId
+          USER_POOL_CLIENT_ID: !Ref UserPoolClientId
+          LEDGER_BUCKET: !Ref LedgerBucket
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                - !Ref BotSecret
+                - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:coolture-${Environment}-origin-verify-*'
+            - Effect: Allow
+              Action: cognito-idp:AdminInitiateAuth
+              Resource: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}'
+            - Effect: Allow
+              Action: [s3:GetObject, s3:PutObject]
+              Resource: !Sub '${LedgerBucket.Arn}/*'
+            # Without it a missing ledger reads as 403 instead of NoSuchKey.
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt LedgerBucket.Arn
+            - Effect: Allow
+              Action: lambda:InvokeFunctionUrl
+              Resource: !ImportValue {'Fn::Sub': '${GeocoderStackName}-ProxyFunctionArn'}
+              Condition:
+                StringEquals:
+                  lambda:FunctionUrlAuthType: AWS_IAM
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: scheduler.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: start-scraper
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ScraperFunction.Arn
+
+  # A random moment in every 6 hours, so the runs never fall on the same times. The window stops 30 minutes short of
+  # the next slot, so two runs of up to 15 minutes can't overlap and post the same event twice.
+  Schedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub 'coolture-${Environment}-scraper'
+      ScheduleExpression: rate(6 hours)
+      FlexibleTimeWindow:
+        Mode: FLEXIBLE
+        MaximumWindowInMinutes: 330
+      EndDate: !If [HasEndDate, !Ref EndDate, !Ref AWS::NoValue]
+      State: !If [IsEnabled, ENABLED, DISABLED]
+      Target:
+        Arn: !GetAtt ScraperFunction.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 0
+
+Outputs:
+  FunctionName:
+    Value: !Ref ScraperFunction
+  BotSecretArn:
+    Value: !Ref BotSecret
+  LedgerBucketName:
+    Value: !Ref LedgerBucket

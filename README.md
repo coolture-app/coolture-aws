@@ -126,13 +126,15 @@ changed.
 ```
 aws/
 ├── auth.yaml, backend.yaml,    # Stacks: Cognito; API Gateway, Lambdas, Aurora, media bucket, embedding queues;
-│   geocoder.yaml,              #   the Photon instance; SSR Lambda, static files, CloudFront;
-│   frontend.yaml, waf.yaml     #   the IP allow-list in front of CloudFront
+│   geocoder.yaml,              #   the Photon instance and its proxy; the scheduled scraper;
+│   scraper.yaml,               #   SSR Lambda, static files, CloudFront; the IP allow-list in front of CloudFront
+│   frontend.yaml, waf.yaml
 └── lambdas/
     ├── common/                 # Shared Maven module in every Java Lambda: DB pool, DTOs, security, S3, paging
     ├── post-read/, post-write/ # Posts, the feed, the map, event locations. post-read holds the contract
     ├── comment-read/, comment-write/, media/, user/
     ├── authorizer/             # Python: lets a route take a Cognito token optionally
+    ├── geo-proxy/              # Python: lets the scheduled scraper, outside the VPC, ask Photon inside it
     ├── migrations/             # Python: applies migrations/ on AWS, and locally in make up
     └── ssr/                    # Server rendering of the frontend
 api/                            # Request flows (Hurl) and the seed users' ids
@@ -168,8 +170,8 @@ Account-level stacks live in the separate management stack (`~/Projects/aws/mana
 - `account`: IAM roles and groups. Deploy as `AWS_PROFILE=deployer CFN_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/cloudformation-execution scripts/deploy.sh dev`.
 
 Deploy in this order, because later stacks import earlier ones' exports, and delete in reverse:
-`make deploy-auth` → `make deploy-backend` → `make deploy-embeddings` → `make deploy-geocoder` → `make deploy-waf` →
-`make deploy-frontend`, or `make deploy-all`.
+`make deploy-auth` → `make deploy-backend` → `make deploy-embeddings` → `make deploy-geocoder` → `make deploy-scraper` →
+`make deploy-waf` → `make deploy-frontend`, or `make deploy-all`.
 
 | Stack | Template | Imports from |
 |---|---|---|
@@ -177,6 +179,7 @@ Deploy in this order, because later stacks import earlier ones' exports, and del
 | `coolture-backend-<env>` | `aws/backend.yaml` | networking (VPC, subnets), auth (authorizers, Cognito) |
 | `coolture-embeddings-<env>` | `recommender/embedding-workers/template.yaml` | networking, backend (queue ARN, DB endpoint, security group) |
 | `coolture-geocoder-<env>` | `aws/geocoder.yaml` | networking (VPC, subnets) |
+| `coolture-scraper-<env>` | `aws/scraper.yaml` | backend (API domain), geocoder (proxy URL), auth (pool and client ids, passed by `deploy.sh`) |
 | `coolture-waf-<env>` (us-east-1) | `aws/waf.yaml` | |
 | `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API domain), geocoder (VPC origin, if deployed), waf (web ACL ARN, passed by `deploy.sh`) |
 
@@ -212,5 +215,13 @@ make deploy-frontend          # adds /geo to CloudFront, now that the geocoder s
 ```
 
 To refresh the data, run `make geo-index` and `make geo-publish` again, every few months or before a release. The instance
-loads a new index on reboot and keeps its ARN, which the VPC origin points at. To remove the geocoder, deploy the
-frontend without it first: `NO_GEOCODER=1 make deploy-frontend`, then `make delete-geocoder`.
+loads a new index on reboot and keeps its ARN, which the VPC origin points at. To remove the geocoder, remove what
+imports it first: `make delete-scraper` and `NO_GEOCODER=1 make deploy-frontend`, then `make delete-geocoder`.
+
+A proxy Lambda inside the VPC, behind an IAM-signed function URL, lets the scheduled scraper ask Photon too.
+
+### The scheduled scraper
+
+`make deploy-scraper` adds a Lambda outside the VPC that imports new trojmiasto.pl events as the bot at a random moment
+in every 6 hours, with its schedule off until the bot has a password. Turning it on is in
+[scraper/README.md](scraper/README.md#on-a-schedule).
