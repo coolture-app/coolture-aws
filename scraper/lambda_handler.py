@@ -7,8 +7,10 @@ boto3 and botocore come with the Lambda runtime, so only this file imports them.
 import json
 import logging
 import os
+import random
 from collections import Counter
 from datetime import timedelta
+from urllib.parse import urlsplit, urlunsplit
 
 import boto3
 import requests
@@ -25,6 +27,8 @@ log = logging.getLogger('scraper')
 
 # Time left after the deadline for the post being sent, with its photos, and for the totals.
 MARGIN = timedelta(minutes=3)
+# At least a second between the site's pages, and never a steady beat, so the runs don't look like a timer.
+SITE_PAUSE_S = (1.0, 3.0)
 
 
 class S3Ledger:
@@ -67,6 +71,10 @@ class SignedForLambdaUrl(requests.auth.AuthBase):
         self._region = region
 
     def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
+        # requests writes a space as +, which botocore signs as it is, while SigV4 and AWS take %20. A literal + is
+        # already %2B.
+        parts = urlsplit(request.url)
+        request.url = urlunsplit(parts._replace(query=parts.query.replace('+', '%20')))
         signed = AWSRequest(method=request.method, url=request.url, data=request.body)
         SigV4Auth(self._credentials.get_frozen_credentials(), 'lambda', self._region).add_auth(signed)
         request.headers.update(dict(signed.headers))
@@ -105,11 +113,12 @@ def handler(event, context) -> dict:
     geocoder_session = http_session(retry_timeouts=True)
     geocoder_session.auth = SignedForLambdaUrl(session.get_credentials(), session.region_name)
 
+    site = Site(http_session(retry_timeouts=True), pause=lambda: random.uniform(*SITE_PAUSE_S))
+
     stats: Counter = Counter()
     stop_at = utc_now() + timedelta(milliseconds=context.get_remaining_time_in_millis()) - MARGIN
     try:
-        run(Site(http_session(retry_timeouts=True)), Geocoder(geocoder_session, env['GEOCODER_URL']), api, stats,
-            None, stop_at=stop_at)
+        run(site, Geocoder(geocoder_session, env['GEOCODER_URL']), api, stats, None, stop_at=stop_at)
     finally:
         log.info('Done: %s', dict(stats))
     return dict(stats)

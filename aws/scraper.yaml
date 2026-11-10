@@ -112,6 +112,10 @@ Resources:
               Condition:
                 StringEquals:
                   lambda:FunctionUrlAuthType: AWS_IAM
+            # Function URLs made since October 2025 need this too.
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !ImportValue {'Fn::Sub': '${GeocoderStackName}-ProxyFunctionArn'}
 
   SchedulerRole:
     Type: AWS::IAM::Role

@@ -4,6 +4,8 @@ from datetime import timedelta
 
 import pytest
 import requests
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 from botocore.credentials import Credentials
 from botocore.exceptions import ClientError
 
@@ -58,6 +60,22 @@ def test_geocoder_requests_are_signed_for_a_lambda_url():
     assert request.headers['Authorization'].startswith('AWS4-HMAC-SHA256 Credential=AKID/')
     assert '/eu-north-1/lambda/aws4_request' in request.headers['Authorization']
     assert 'X-Amz-Date' in request.headers
+
+
+def test_a_space_is_sent_and_signed_as_percent_20_which_aws_expects():
+    request = requests.Request('GET', 'https://abc.lambda-url.eu-north-1.on.aws/api',
+                               params={'q': 'Klub Żak, Gdańsk', 'tag': 'a+b'}).prepare()
+    expected = AWSRequest(method='GET', url='https://abc.lambda-url.eu-north-1.on.aws/api'
+                                            '?q=Klub%20%C5%BBak%2C%20Gda%C5%84sk&tag=a%2Bb')
+
+    SignedForLambdaUrl(Credentials('AKID', 'SECRET'), 'eu-north-1')(request)
+
+    assert request.url == expected.url
+    signer = SigV4Auth(Credentials('AKID', 'SECRET'), 'lambda', 'eu-north-1')
+    expected.context['timestamp'] = request.headers['X-Amz-Date']
+    expected.headers['X-Amz-Date'] = request.headers['X-Amz-Date']
+    assert request.headers['Authorization'].endswith(
+        signer.signature(signer.string_to_sign(expected, signer.canonical_request(expected)), expected))
 
 
 class FakeCognito:
@@ -126,4 +144,6 @@ def test_a_run_goes_through_the_api_as_the_bot_and_stops_in_time(monkeypatch):
     assert api._session.headers['X-Origin-Verify'] == 'origin'
     assert isinstance(geocoder._session.auth, SignedForLambdaUrl)
     assert limit is None
+    pauses = [site._pause() for _ in range(20)]
+    assert all(1.0 <= pause <= 3.0 for pause in pauses) and len(set(pauses)) > 1
     assert before + timedelta(minutes=15) - MARGIN <= stop_at <= after + timedelta(minutes=15) - MARGIN
