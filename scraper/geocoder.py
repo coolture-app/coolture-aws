@@ -66,37 +66,27 @@ class Geocoder:
 
     def _search(self, path: str, query: dict, exact: bool) -> Place | None:
         key = (path, *sorted(query.items()))
-        return self._remembered(key, lambda: self._request(path, query, exact))
+        return self._remembered(key, lambda: self._first(path, {**query, 'countrycode': 'PL', 'bbox': REGION}, exact))
 
     def _remembered(self, key: tuple, ask: Callable[[], Place | str | None]) -> Place | str | None:
         if key not in self._answers:
             self._answers[key] = ask()
         return self._answers[key]
 
-    def _request(self, path: str, query: dict, exact: bool) -> Place | None:
-        features = self._get(path, {**query, 'countrycode': 'PL', 'bbox': REGION})
-        if not features:
-            return None
-        try:
-            longitude, latitude = features[0]['geometry']['coordinates']
-            postcode = features[0]['properties'].get('postcode')
-            return Place(float(latitude), float(longitude), postcode, exact)
-        except WRONG_SHAPE as error:
-            raise GeocoderUnavailable(f'Photon gave an unexpected answer query={query} error={error!r}') from error
-
     def _reverse(self, place: Place) -> str | None:
-        features = self._get('reverse', {'lat': place.latitude, 'lon': place.longitude})
-        try:
-            return features[0]['properties'].get('postcode') if features else None
-        except WRONG_SHAPE as error:
-            raise GeocoderUnavailable(f'Photon gave an unexpected answer path=reverse error={error!r}') from error
+        found = self._first('reverse', {'lat': place.latitude, 'lon': place.longitude}, exact=False)
+        return found.postal_code if found else None
 
-    def _get(self, path: str, params: dict) -> list:
+    def _first(self, path: str, params: dict, exact: bool) -> Place | None:
         try:
             response = self._session.get(f'{self._base_url}/{path}', timeout=20,
                                          params={**params, 'limit': 1, 'lang': 'default'})
             response.raise_for_status()
             features = response.json()['features']
+            if features == []:
+                return None
+            longitude, latitude = features[0]['geometry']['coordinates']
+            return Place(float(latitude), float(longitude), features[0]['properties'].get('postcode'), exact)
         except requests.ConnectionError as error:
             raise GeocoderUnavailable(f'Photon is not answering at {self._base_url}. Locally: make geo-index once, '
                                       f'then make up. error={error}') from error
@@ -104,6 +94,3 @@ class Geocoder:
             raise GeocoderUnavailable(f'Photon request failed path={path} params={params} error={error}') from error
         except WRONG_SHAPE as error:
             raise GeocoderUnavailable(f'Photon gave an unexpected answer path={path} error={error!r}') from error
-        if not isinstance(features, list):
-            raise GeocoderUnavailable(f'Photon gave an unexpected answer path={path} features={features!r}')
-        return features
