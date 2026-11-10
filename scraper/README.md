@@ -54,13 +54,39 @@ A throttled request is tried 3 more times, waiting what the server's `Retry-Afte
 the API or the geocoder then ends the run with one error, the totals and exit 1. What's already imported stays, and
 the next run goes on from there. A post that timed out counts as `rejected`, because it may have been saved, and the next run's list settles it.
 
+## On a schedule
+
+On AWS the scraper runs by itself, as the Lambda `coolture-<env>-scraper` (`aws/scraper.yaml`, entry point
+`lambda_handler.py`). EventBridge Scheduler starts it at a random moment in every 6 hours, so it never asks the site at
+the same times, and the site's pages are a random 1 to 3 seconds apart. Each run imports what the app doesn't have yet,
+by event URL, and stops in time for the Lambda's 15 minutes. The next run goes on from there, so the first runs catch up
+on the whole listing over a few hours.
+
+It runs outside the VPC, because it needs the site. So it calls API Gateway directly with the `X-Origin-Verify` secret
+instead of going through CloudFront, signs in as the bot with Cognito's admin flow, asks the geocoder through a small
+proxy Lambda inside the VPC, and keeps its ledger in S3 instead of a local file.
+
+To turn it on, once `make deploy-scraper` has run (`<pool>` is the auth stack's `UserPoolId` output):
+
+```bash
+aws cognito-idp admin-create-user --user-pool-id <pool> --username <bot email> --message-action SUPPRESS \
+    --user-attributes Name=email,Value=<bot email> Name=email_verified,Value=true
+aws cognito-idp admin-set-user-password --user-pool-id <pool> --username <bot email> --password '<password>' --permanent
+aws secretsmanager put-secret-value --secret-id coolture-dev-scraper-bot \
+    --secret-string '{"username": "<bot email>", "password": "<password>"}'
+SCRAPER_SCHEDULE=true SCRAPER_END_DATE=2027-06-30T00:00:00Z make deploy-scraper   # the end date is optional
+make scrape-aws                                                                   # one run now, to check it
+```
+
+`SCRAPER_SCHEDULE=false make deploy-scraper` turns it off. The schedule stops by itself at `SCRAPER_END_DATE`.
+
 ## Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SCRAPER_API_URL` | `http://localhost:3000` | The API. On AWS it ends in `/api` |
 | `SCRAPER_USER_ID` | set by `make scrape` | Bot identity on the local stack, sent as `X-User-Id` with `X-User-Name: coolture_bot`. A bot user created earlier keeps its old name until `make reset-db` |
-| `SCRAPER_API_TOKEN` | | Bot identity on AWS: a Cognito id token, which lasts an hour |
+| `SCRAPER_API_TOKEN` | | Bot identity on AWS for a run from a machine: a Cognito id token, which lasts an hour |
 | `SCRAPER_GEOCODER_URL` | `http://localhost:2322` | Photon, the local container by default |
 
 ## What it reads

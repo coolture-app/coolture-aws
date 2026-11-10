@@ -68,6 +68,8 @@ Resources:
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
+        # The scheduled scraper's bot signs in with it. It needs AWS credentials, so a browser can't use it.
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
       PreventUserExistenceErrors: ENABLED
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid, email, profile]
@@ -123,6 +125,8 @@ Resources:
           AUTH_MODE: required
 
 Outputs:
+  UserPoolId:
+    Value: !Ref UserPool
   UserPoolClientId:
     Value: !Ref UserPoolClient
   HostedUiUrl:

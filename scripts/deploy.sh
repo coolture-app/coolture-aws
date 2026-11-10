@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ALL_STACKS=(auth backend embeddings geocoder waf frontend)
+ALL_STACKS=(auth backend embeddings geocoder scraper waf frontend)
 WAF_REGION=us-east-1
 EMBED_INTERESTS_MAX_ATTEMPTS=3
 
@@ -11,7 +11,8 @@ Usage: $0 [dev|staging|prod] [stack...]
 
 Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (default: all)
 Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url), USER_EMBEDDING_SCHEDULE=true,
-  FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack)
+  FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack),
+  SCRAPER_SCHEDULE=true|false and SCRAPER_END_DATE=2027-06-30T00:00:00Z (both keep their deployed values when unset)
 EOF
 }
 
@@ -55,6 +56,7 @@ template_for() {
         backend) echo aws/backend.yaml ;;
         embeddings) echo recommender/embedding-workers/template.yaml ;;
         geocoder) echo aws/geocoder.yaml ;;
+        scraper) echo aws/scraper.yaml ;;
         waf) echo aws/waf.yaml ;;
         frontend) echo aws/frontend.yaml ;;
     esac
@@ -110,6 +112,12 @@ overrides_for() {
             ;;
         geocoder)
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK CloudFrontPrefixListId=$(cloudfront_prefix_list)"
+            ;;
+        scraper)
+            local auth="coolture-auth-$ENVIRONMENT" enabled end_date
+            enabled="${SCRAPER_SCHEDULE:-$(stack_param scraper ScheduleEnabled 2> /dev/null || true)}"
+            end_date="${SCRAPER_END_DATE-$(stack_param scraper EndDate 2> /dev/null || true)}"
+            echo "Environment=$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT GeocoderStackName=coolture-geocoder-$ENVIRONMENT UserPoolId=$(stack_output "$auth" UserPoolId) UserPoolClientId=$(stack_output "$auth" UserPoolClientId) ScheduleEnabled=${enabled:-false} EndDate=\"$end_date\""
             ;;
         frontend)
             local web_acl
@@ -210,6 +218,10 @@ deploy_stack() {
     if [[ "$stack" == geocoder ]] && ! aws s3api head-object \
         --bucket "$(stack_output "coolture-geocoder-$ENVIRONMENT" IndexBucketName)" --key photon/index.tar.gz > /dev/null 2>&1; then
         echo "The geocoder has no index yet: make geo-index, then make geo-publish ENV=$ENVIRONMENT"
+    fi
+    if [[ "$stack" == scraper ]] && ! aws secretsmanager get-secret-value \
+        --secret-id "coolture-$ENVIRONMENT-scraper-bot" --query VersionId --output text > /dev/null 2>&1; then
+        echo "The scraper's bot has no password yet, so keep its schedule off. See \"On a schedule\" in scraper/README.md"
     fi
 }
 

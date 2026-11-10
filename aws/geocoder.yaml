@@ -1,4 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
 Description: Coolture geocoder - Photon for the post form's place search, reached only through CloudFront at /geo
 
 # Before the first deploy, the networking stack needs an internet gateway attached to the VPC: CloudFront VPC origins
@@ -77,6 +78,54 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
+
+  # The scheduled scraper runs outside the VPC to reach trojmiasto.pl, so it asks Photon through this.
+  ProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Coolture geocoder proxy Lambda
+      VpcId: !ImportValue {'Fn::Sub': '${BaseStackName}-VpcId'}
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 2322
+          ToPort: 2322
+          DestinationSecurityGroupId: !Ref SecurityGroup
+
+  ProxyIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 2322
+      ToPort: 2322
+      SourceSecurityGroupId: !Ref ProxySecurityGroup
+
+  ProxyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-geocoder-proxy'
+      RetentionInDays: 7
+
+  ProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-geocoder-proxy'
+      CodeUri: lambdas/geo-proxy/src/
+      Handler: app.handler
+      Runtime: python3.13
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 15
+      LoggingConfig:
+        LogGroup: !Ref ProxyLogGroup
+      VpcConfig:
+        SubnetIds: !Split [',', !ImportValue {'Fn::Sub': '${BaseStackName}-PrivateSubnetIds'}]
+        SecurityGroupIds: [!Ref ProxySecurityGroup]
+      Environment:
+        Variables:
+          PHOTON_URL: !Sub 'http://${Instance.PrivateIp}:2322'
+      FunctionUrlConfig:
+        AuthType: AWS_IAM
 
   Instance:
     Type: AWS::EC2::Instance
@@ -161,3 +210,11 @@ Outputs:
     Value: !GetAtt Instance.PrivateDnsName
     Export:
       Name: !Sub '${AWS::StackName}-InstancePrivateDnsName'
+  ProxyUrl:
+    Value: !GetAtt ProxyFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-ProxyUrl'
+  ProxyFunctionArn:
+    Value: !GetAtt ProxyFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ProxyFunctionArn'

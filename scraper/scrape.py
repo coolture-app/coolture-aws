@@ -72,7 +72,9 @@ class DryRun:
 
 
 def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Counter, limit: int | None,
-        clock: Callable[[], datetime] = utc_now) -> None:
+        clock: Callable[[], datetime] = utc_now, stop_at: datetime | None = None) -> None:
+    """Imports what the API doesn't have yet. `stop_at` ends the run between two events, as a Lambda's time runs out;
+    the next run goes on, because it skips what this one created."""
     existing = sink.existing_event_urls()
 
     for item in site.listing_items():
@@ -81,6 +83,9 @@ def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Count
             stats['already_imported'] += 1
             continue
         if limit is not None and stats['created'] >= limit:
+            break
+        if stop_at is not None and clock() >= stop_at:
+            stats['stopped_for_time'] += 1
             break
         import_item(item, site, geocoder, sink, stats, clock)
 

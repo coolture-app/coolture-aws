@@ -128,9 +128,9 @@ build: build-common ## Build backend lambdas
 	fi; \
 	sam build --template-file aws/backend.yaml --parallel --cached && echo "$$sum" > .aws-sam/common.sha1
 
-test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding workers, migrations, authorizer
+test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding workers, migrations, authorizer, geocoder proxy
 	@for dir in recommender/embedding-workers/post-embedding recommender/embedding-workers/user-embedding \
-			aws/lambdas/migrations aws/lambdas/authorizer; do \
+			aws/lambdas/migrations aws/lambdas/authorizer aws/lambdas/geo-proxy; do \
 		echo "$$dir"; (cd $$dir && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests) || exit 1; \
 	done
 
@@ -226,6 +226,13 @@ deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="auth bac
 deploy-geocoder: ## Deploy the geocoder instance and its CloudFront VPC origin (dev) - ~$7/month, needs an internet gateway in the VPC
 	@scripts/deploy.sh dev geocoder
 
+deploy-scraper: ## Deploy the scheduled scraper (dev; SCRAPER_SCHEDULE=true to run it, SCRAPER_END_DATE to stop it) - needs auth, backend, geocoder
+	@scripts/deploy.sh dev scraper
+
+scrape-aws: ## Start one run of the scheduled scraper on AWS now, without waiting for the schedule (ENV=dev)
+	@aws lambda invoke --function-name coolture-$(or $(ENV),dev)-scraper --invocation-type Event --cli-binary-format raw-in-base64-out \
+		--payload '{}' /dev/null > /dev/null && echo "Started. Its log: aws logs tail /aws/lambda/coolture-$(or $(ENV),dev)-scraper --follow"
+
 deploy-waf: ## Deploy CloudFront WAF web ACL + allowed-IP sets to us-east-1 (dev) - ~$8/month + $0.60 per 1M requests
 	@scripts/deploy.sh dev waf
 
@@ -238,7 +245,10 @@ delete-embeddings: ## Delete embedding workers stack
 delete-backend: ## Delete backend stack (delete embeddings first: it imports backend outputs)
 	@sam delete --stack-name coolture-backend-dev --no-prompts
 
-delete-geocoder: ## Delete geocoder stack (first NO_GEOCODER=1 make deploy-frontend: the frontend imports its VPC origin)
+delete-scraper: ## Delete the scheduled scraper's stack (its ledger bucket must be emptied first)
+	@sam delete --stack-name coolture-scraper-dev --no-prompts
+
+delete-geocoder: ## Delete geocoder stack (first delete-scraper, and NO_GEOCODER=1 make deploy-frontend: both import it)
 	@sam delete --stack-name coolture-geocoder-dev --no-prompts
 
 delete-frontend: ## Delete frontend stack

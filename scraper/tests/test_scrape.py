@@ -236,6 +236,17 @@ def test_limit_stops_after_that_many_new_posts():
     assert len(api.created) == 2
 
 
+def test_a_deadline_ends_the_run_between_two_events():
+    api, stats = FakeApi(), Counter()
+    moments = iter([NOW, NOW + timedelta(minutes=5), NOW + timedelta(minutes=13), NOW + timedelta(minutes=14)])
+
+    run(FakeSite([item(1), item(2), item(3)]), FakeGeocoder(), api, stats, None, lambda: next(moments),
+        stop_at=NOW + timedelta(minutes=12))
+
+    assert len(api.created) == 1
+    assert stats['stopped_for_time'] == 1
+
+
 def test_dry_run_prints_posts_and_needs_no_api(capsys):
     stats = run_import(FakeSite([item(1)]), FakeGeocoder(), DryRun())
 

@@ -574,3 +574,12 @@ def test_image_is_downloaded_with_its_size():
 
 def test_missing_image_gives_nothing():
     assert Site(FakeImageSession(404), sleep=lambda _: None).image(PHOTO) is None
+
+
+def test_every_site_request_waits_a_second():
+    pauses = []
+    session = FakeListingSession([listing_html(1, 2), listing_html(2, 3)])
+
+    list(Site(session, sleep=pauses.append).listing_items())
+
+    assert pauses == [1.0, 1.0, 1.0]

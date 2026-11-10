@@ -393,12 +393,14 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
 
 class Site:
 
-    def __init__(self, session: requests.Session, sleep: Callable[[float], None] = clock.sleep) -> None:
+    def __init__(self, session: requests.Session, sleep: Callable[[float], None] = clock.sleep,
+                 pause: Callable[[], float] = lambda: SITE_PAUSE_S) -> None:
         self._session = session
         self._sleep = sleep
+        self._pause = pause
 
     def _get(self, url: str, params: dict | None = None) -> requests.Response:
-        self._sleep(SITE_PAUSE_S)
+        self._sleep(self._pause())
         response = self._session.get(url, params=params, timeout=30)
         response.raise_for_status()
         return response

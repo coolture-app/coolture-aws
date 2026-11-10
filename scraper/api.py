@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlsplit
 
 import requests
@@ -32,6 +33,34 @@ class ApiError(RuntimeError):
     pass
 
 
+class Ledger(Protocol):
+    """The event URLs imported into one API. GET /posts never returns a deleted post, so this remembers what would
+    otherwise be posted again."""
+
+    def read(self) -> set[str]: ...
+
+    def replace(self, urls: set[str]) -> None: ...
+
+    def add(self, url: str) -> None: ...
+
+
+class FileLedger:
+    """A ledger on this machine, so a run from another machine knows only what the API lists."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def read(self) -> set[str]:
+        return set(self._path.read_text(encoding='utf-8').splitlines()) if self._path.exists() else set()
+
+    def replace(self, urls: set[str]) -> None:
+        self._path.write_text(''.join(f'{url}\n' for url in sorted(urls)), encoding='utf-8')
+
+    def add(self, url: str) -> None:
+        with LEDGER_LOCK, self._path.open('a', encoding='utf-8') as ledger:
+            ledger.write(f'{url}\n')
+
+
 @dataclass(frozen=True)
 class Outcome:
     failure: str | None = None
@@ -51,13 +80,12 @@ def _stop_if_refused(response: requests.Response, request: str) -> None:
 class CooltureApi:
 
     def __init__(self, session: requests.Session, storage: requests.Session, base_url: str, token: str | None = None,
-                 user_id: str | None = None) -> None:
+                 user_id: str | None = None, ledger: Ledger | None = None) -> None:
         self._session = session
         # Its own session, so the API's Authorization and X-User-Id headers never reach a presigned storage URL.
         self._storage = storage
         self._base_url = base_url.rstrip('/')
-        # GET /posts never returns a deleted post, so this remembers what would otherwise be posted again.
-        self._ledger = LEDGER_DIR / f'.imported-{urlsplit(base_url).hostname}.txt'
+        self._ledger = ledger or FileLedger(LEDGER_DIR / f'.imported-{urlsplit(base_url).hostname}.txt')
         if token:
             session.headers['Authorization'] = f'Bearer {token}'
         elif user_id:
@@ -79,15 +107,9 @@ class CooltureApi:
     def existing_event_urls(self) -> set[str]:
         listed = self._listed_urls(self._me())
         # A database with none of our posts is a new one, for example after make reset-db, so the old list doesn't apply.
-        remembered = self._read_ledger() if listed else set()
-        self._write_ledger(listed | remembered)
+        remembered = self._ledger.read() if listed else set()
+        self._ledger.replace(listed | remembered)
         return listed | remembered
-
-    def _read_ledger(self) -> set[str]:
-        return set(self._ledger.read_text(encoding='utf-8').splitlines()) if self._ledger.exists() else set()
-
-    def _write_ledger(self, urls: set[str]) -> None:
-        self._ledger.write_text(''.join(f'{url}\n' for url in sorted(urls)), encoding='utf-8')
 
     def _listed_urls(self, author_id: str) -> set[str]:
         urls: set[str] = set()
@@ -134,8 +156,7 @@ class CooltureApi:
         _stop_if_refused(response, 'POST /posts')
         if response.status_code != 201:
             return Outcome(_answer(response))
-        with LEDGER_LOCK, self._ledger.open('a', encoding='utf-8') as ledger:
-            ledger.write(f'{post["eventUrl"]}\n')
+        self._ledger.add(post['eventUrl'])
         return Outcome(photos=len(media_ids))
 
     def _upload(self, image: Image) -> str | None:
