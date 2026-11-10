@@ -33,13 +33,13 @@ class PacedRetry(Retry):
     RETRY_AFTER_STATUS_CODES = frozenset({429})
 
     def get_backoff_time(self) -> float:
-        # urllib3 sends the first retry at once, which would break the one-a-second limit of the site and Nominatim.
+        # urllib3 sends the first retry at once, which would break the site's limit of one request a second.
         return max(super().get_backoff_time(), self.backoff_factor)
 
 
 def http_session(retry_timeouts: bool = False) -> requests.Session:
     # read=False keeps a POST from being sent again after a timeout, and lets the timeout arrive as requests.Timeout.
-    # The site and Nominatim only get GETs, which are safe to send again, and one slow answer shouldn't end a run.
+    # The site and the geocoder only get GETs, which are safe to send again, and one slow answer shouldn't end a run.
     retry = PacedRetry(total=3, connect=2, read=2 if retry_timeouts else False, status_forcelist={429}, backoff_factor=2,
                        allowed_methods=None, respect_retry_after_header=True, retry_after_max=RETRY_AFTER_MAX_S,
                        raise_on_status=False)
@@ -174,7 +174,7 @@ def main() -> int:
 
     stats: Counter = Counter()
     try:
-        geocoder = Geocoder(http_session(retry_timeouts=True), os.getenv('SCRAPER_NOMINATIM_URL', DEFAULT_URL))
+        geocoder = Geocoder(http_session(retry_timeouts=True), os.getenv('SCRAPER_GEOCODER_URL', DEFAULT_URL))
         if args.snapshot:
             run_snapshot(Site(http_session(retry_timeouts=True)), geocoder, Snapshot(args.snapshot), stats, None if args.all else args.size)
             return _exit_code(stats)

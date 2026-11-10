@@ -1,5 +1,4 @@
 import re
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -7,13 +6,15 @@ import requests
 
 from trojmiasto import Event
 
-DEFAULT_URL = 'https://nominatim.openstreetmap.org'
-# The public service allows one request per second.
-PAUSE_S = 1.0
-# Pomerania, as west, north, east, south. A name matched outside it is another place with the same name.
-REGION = '16.5,55.0,20.0,53.3'
-WRONG_SHAPE = (KeyError, AttributeError, TypeError, ValueError)
-STREET_PREFIX = re.compile(r'^(ul\.|ulica\s)\s*', re.IGNORECASE)
+# Our Photon: the container make up starts once make geo-index has built its index, the same index the app uses on AWS.
+DEFAULT_URL = 'http://localhost:2322'
+# Pomerania, as west, south, east, north. A name matched outside it is another place with the same name.
+REGION = '16.5,53.3,20.0,55.0'
+# Stops share venues' names ("Ergo Arena 04") and would be taken for the venue.
+EXCLUDED = ('osm.highway.bus_stop', 'osm.public_transport', 'osm.amenity.shelter')
+# Photon's structured search answers 400 to "35/38" or "27-31/M.30". The leading number finds the building.
+HOUSE_NUMBER = re.compile(r'\d+[a-zA-Z]?')
+WRONG_SHAPE = (KeyError, IndexError, AttributeError, TypeError, ValueError)
 
 
 class GeocoderUnavailable(RuntimeError):
@@ -30,68 +31,66 @@ class Place:
 
 class Geocoder:
 
-    def __init__(self, session: requests.Session, base_url: str = DEFAULT_URL, pause_s: float = PAUSE_S,
-                 sleep: Callable[[float], None] = time.sleep) -> None:
+    def __init__(self, session: requests.Session, base_url: str = DEFAULT_URL) -> None:
         self._session = session
         self._base_url = base_url.rstrip('/')
-        self._pause_s = pause_s
-        self._sleep = sleep
         self._answers: dict[tuple, Place | str | None] = {}
 
     def locate(self, event: Event) -> Place | None:
+        """The street address, else the venue, else the city centre. The address goes first even when only its street is
+        found, because a venue's name matches loosely: "Good Time" found a clinic 2.6 km away."""
         city = event.city
         if not city:
             return None
 
         queries = []
         if event.street:
-            # "5 ul. Morska" finds nothing where "5 Morska" does. "pl." and "al." stay, as they can be part of the name.
-            street = STREET_PREFIX.sub('', event.street)
-            address = f'{event.building_number} {street}' if event.building_number else street
-            queries.append({'street': address, 'city': city, 'country': 'Polska'})
+            query = {'street': event.street, 'city': city}
+            number = HOUSE_NUMBER.match(event.building_number or '')
+            if number:
+                query['housenumber'] = number.group()
+            queries.append(('structured', query))
         if event.venue:
-            queries.append({'q': f'{event.venue}, {city}'})
+            queries.append(('api', {'q': f'{event.venue}, {city}', 'exclude': EXCLUDED}))
 
-        for query in queries:
-            place = self._search(query, exact=True)
+        for path, query in queries:
+            place = self._search(path, query, exact=True)
             if place is not None:
                 return place
-        return self._search({'city': city, 'country': 'Polska'}, exact=False)
+        return self._search('api', {'q': city, 'layer': 'city'}, exact=False)
 
     def postcode_at(self, place: Place) -> str | None:
         # A city has no postal code of its own, so this takes the one at its centre.
         key = ('reverse', place.latitude, place.longitude)
         return self._remembered(key, lambda: self._reverse(place))
 
-    def _search(self, query: dict, exact: bool) -> Place | None:
-        key = ('search', *sorted(query.items()))
-        return self._remembered(key, lambda: self._request(query, exact))
+    def _search(self, path: str, query: dict, exact: bool) -> Place | None:
+        key = (path, *sorted(query.items()))
+        return self._remembered(key, lambda: self._first(path, {**query, 'countrycode': 'PL', 'bbox': REGION}, exact))
 
     def _remembered(self, key: tuple, ask: Callable[[], Place | str | None]) -> Place | str | None:
         if key not in self._answers:
             self._answers[key] = ask()
         return self._answers[key]
 
-    def _request(self, query: dict, exact: bool) -> Place | None:
-        hits = self._get('search', {**query, 'limit': 1, 'countrycodes': 'pl', 'viewbox': REGION, 'bounded': 1})
-        if not hits:
-            return None
-        try:
-            hit = hits[0]
-            return Place(float(hit['lat']), float(hit['lon']), hit.get('address', {}).get('postcode'), exact)
-        except WRONG_SHAPE as error:
-            raise GeocoderUnavailable(f'Nominatim gave an unexpected answer query={query} error={error!r}') from error
-
     def _reverse(self, place: Place) -> str | None:
-        found = self._get('reverse', {'lat': place.latitude, 'lon': place.longitude})
-        return found.get('address', {}).get('postcode') if isinstance(found, dict) else None
+        found = self._first('reverse', {'lat': place.latitude, 'lon': place.longitude}, exact=False)
+        return found.postal_code if found else None
 
-    def _get(self, path: str, params: dict) -> list | dict:
-        self._sleep(self._pause_s)
+    def _first(self, path: str, params: dict, exact: bool) -> Place | None:
         try:
             response = self._session.get(f'{self._base_url}/{path}', timeout=20,
-                                         params={**params, 'format': 'jsonv2', 'addressdetails': 1})
+                                         params={**params, 'limit': 1, 'lang': 'default'})
             response.raise_for_status()
-            return response.json()
+            features = response.json()['features']
+            if features == []:
+                return None
+            longitude, latitude = features[0]['geometry']['coordinates']
+            return Place(float(latitude), float(longitude), features[0]['properties'].get('postcode'), exact)
+        except requests.ConnectionError as error:
+            raise GeocoderUnavailable(f'Photon is not answering at {self._base_url}. Locally: make geo-index once, '
+                                      f'then make up. error={error}') from error
         except requests.RequestException as error:
-            raise GeocoderUnavailable(f'Nominatim request failed path={path} params={params} error={error}') from error
+            raise GeocoderUnavailable(f'Photon request failed path={path} params={params} error={error}') from error
+        except WRONG_SHAPE as error:
+            raise GeocoderUnavailable(f'Photon gave an unexpected answer path={path} error={error!r}') from error

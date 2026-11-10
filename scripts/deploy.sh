@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ALL_STACKS=(auth backend embeddings waf frontend)
+ALL_STACKS=(auth backend embeddings geocoder waf frontend)
 WAF_REGION=us-east-1
 EMBED_INTERESTS_MAX_ATTEMPTS=3
 
@@ -11,7 +11,7 @@ Usage: $0 [dev|staging|prod] [stack...]
 
 Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (default: all)
 Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url), USER_EMBEDDING_SCHEDULE=true,
-  FRONTEND_DIR (default ../coolture-frontend)
+  FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack)
 EOF
 }
 
@@ -54,6 +54,7 @@ template_for() {
         auth) echo aws/auth.yaml ;;
         backend) echo aws/backend.yaml ;;
         embeddings) echo recommender/embedding-workers/template.yaml ;;
+        geocoder) echo aws/geocoder.yaml ;;
         waf) echo aws/waf.yaml ;;
         frontend) echo aws/frontend.yaml ;;
     esac
@@ -66,6 +67,19 @@ region_for() {
 stack_output() {
     aws cloudformation describe-stacks --stack-name "$1" --region "${3:-$AWS_DEFAULT_REGION}" \
         --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" --output text
+}
+
+cloudfront_prefix_list() {
+    aws ec2 describe-managed-prefix-lists --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing \
+        --query 'PrefixLists[0].PrefixListId' --output text
+}
+
+geocoder_stack() {
+    local name="coolture-geocoder-$ENVIRONMENT" origin
+    [[ "${NO_GEOCODER:-}" == 1 ]] && return 0
+    origin="$(stack_output "$name" VpcOriginId 2> /dev/null)" || return 0
+    [[ -n "$origin" && "$origin" != None ]] && echo "$name"
+    return 0
 }
 
 frontend_url() {
@@ -94,12 +108,15 @@ overrides_for() {
         embeddings)
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT UserEmbeddingScheduleEnabled=${USER_EMBEDDING_SCHEDULE:-false}"
             ;;
+        geocoder)
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK CloudFrontPrefixListId=$(cloudfront_prefix_list)"
+            ;;
         frontend)
             local web_acl
             web_acl="$(stack_output "coolture-waf-$ENVIRONMENT" WebAclArn "$WAF_REGION" 2> /dev/null)" || web_acl=""
             [[ "$web_acl" == None ]] && web_acl=""
             [[ -z "$web_acl" ]] && echo "WARNING: no coolture-waf-$ENVIRONMENT stack in $WAF_REGION - frontend deploys without WAF" >&2
-            echo "Environment=$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT WebAclArn=\"$web_acl\""
+            echo "Environment=$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT WebAclArn=\"$web_acl\" GeocoderStackName=\"$(geocoder_stack)\""
             ;;
     esac
 }
@@ -189,6 +206,10 @@ deploy_stack() {
 
     if [[ "$stack" == embeddings ]]; then
         embed_interests
+    fi
+    if [[ "$stack" == geocoder ]] && ! aws s3api head-object \
+        --bucket "$(stack_output "coolture-geocoder-$ENVIRONMENT" IndexBucketName)" --key photon/index.tar.gz > /dev/null 2>&1; then
+        echo "The geocoder has no index yet: make geo-index, then make geo-publish ENV=$ENVIRONMENT"
     fi
 }
 

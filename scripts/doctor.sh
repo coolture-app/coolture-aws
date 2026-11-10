@@ -104,7 +104,7 @@ fi
 port_open() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null || (exec 3<> "/dev/tcp/::1/$1") 2> /dev/null; }
 running() { docker compose ps --status running --services 2> /dev/null | grep -qx "$1"; }
 if [[ -z "$clash" ]]; then
-    for entry in 5430:postgres:PostgreSQL 3900:s3garage:Garage; do
+    for entry in 5430:postgres:PostgreSQL 3900:s3garage:Garage 2322:photon:Photon; do
         IFS=: read -r port service label <<< "$entry"
         if port_open "$port" && ! running "$service"; then
             bad "port $port ($label) is taken by something else. Stop it, or another copy of this stack"
@@ -122,6 +122,13 @@ fi
 
 if port_open 3000; then ok "API on http://localhost:3000"; else warn "API not running (make local, or make dev)"; fi
 if port_open 4200; then ok "frontend on http://localhost:4200"; else warn "frontend not running (npm start in ../coolture-frontend)"; fi
+if ! has docker || ! docker volume inspect coolture-geocoder-index > /dev/null 2>&1; then
+    warn "no geocoder index, so no place suggestions and no scraping. make geo-index builds it (about 40 minutes, once)"
+elif port_open 2322; then
+    ok "geocoder on http://localhost:2322"
+else
+    warn "geocoder not running (make up starts it)"
+fi
 
 if [[ -f "$SNAPSHOT_DIR/posts.jsonl" ]]; then
     events="$(grep -c . "$SNAPSHOT_DIR/posts.jsonl")"
