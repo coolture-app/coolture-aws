@@ -1,6 +1,7 @@
 import html
 import json
 import logging
+import random
 import re
 import time as clock
 from collections.abc import Callable, Iterator
@@ -20,7 +21,8 @@ log = logging.getLogger(__name__)
 SITE_URL = 'https://www.trojmiasto.pl'
 LISTING_URL = f'{SITE_URL}/imprezy/dni,30dni.html'
 LISTING_PAGE_PARAMETER = 'strona'
-SITE_PAUSE_S = 1.0
+# At least a second between requests, and never a steady beat, so the runs don't look like a timer.
+SITE_PAUSE_S = (1.0, 3.0)
 WARSAW = ZoneInfo('Europe/Warsaw')
 NO_HOUR = time(12, 0)
 
@@ -393,12 +395,14 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
 
 class Site:
 
-    def __init__(self, session: requests.Session, sleep: Callable[[float], None] = clock.sleep) -> None:
+    def __init__(self, session: requests.Session, sleep: Callable[[float], None] = clock.sleep,
+                 pause: Callable[[], float] = lambda: random.uniform(*SITE_PAUSE_S)) -> None:
         self._session = session
         self._sleep = sleep
+        self._pause = pause
 
     def _get(self, url: str, params: dict | None = None) -> requests.Response:
-        self._sleep(SITE_PAUSE_S)
+        self._sleep(self._pause())
         response = self._session.get(url, params=params, timeout=30)
         response.raise_for_status()
         return response
