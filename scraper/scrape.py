@@ -132,17 +132,16 @@ def import_item(item: ListingItem, site: Site, geocoder: Geocoder, sink: Cooltur
         stats['already_started'] += 1
         return False
 
-    place, postal_code = None, None
+    place = None
     if not event.online:
         place = geocoder.locate(event)
-        postal_code = place and (event.postal_code or place.postal_code or geocoder.postcode_at(place))
-        if not postal_code:
+        if place is None:
             # Left out rather than sent as ONLINE, which would hide it from the proximity signal.
             stats['no_location'] += 1
             log.warning('Left out, no location url=%s address=%s', item.url, (event.venue, event.street, event.city))
             return False
 
-    post = to_post(event, place, postal_code)
+    post = to_post(event, place)
     stats['online' if event.online else 'exact_location' if place.exact else 'city_location'] += 1
     # Downloaded one at a time as the sink asks, so it stops at the API's limit without fetching the rest.
     images = (image for image in map(site.image, event.image_urls) if image is not None)

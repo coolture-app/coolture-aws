@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from geocoder import Place
 from trojmiasto import Event
 
-COUNTRY = 'POL'
+COUNTRY = 'PL'
 
 TITLE_MAX = 128
 DESCRIPTION_MAX = 1000
@@ -47,13 +47,15 @@ def _iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
-def _location(event: Event, place: Place, postal_code: str) -> dict:
+def _location(event: Event, place: Place) -> dict:
     location = {
         'countryCode': COUNTRY,
         'city': cut(event.city, ADDRESS_MAX),
-        'postalCode': cut(postal_code, POSTAL_CODE_MAX),
         'coordinates': {'latitude': place.latitude, 'longitude': place.longitude},
     }
+    postal_code = event.postal_code or place.postal_code
+    if postal_code:
+        location['postalCode'] = cut(postal_code, POSTAL_CODE_MAX)
     if event.venue:
         location['venueName'] = cut(event.venue, VENUE_MAX)
     if event.street:
@@ -63,7 +65,7 @@ def _location(event: Event, place: Place, postal_code: str) -> dict:
     return location
 
 
-def to_post(event: Event, place: Place | None, postal_code: str | None) -> dict:
+def to_post(event: Event, place: Place | None) -> dict:
     post = {
         'title': cut(event.title, TITLE_MAX),
         'description': cut_description(event.description),
@@ -75,6 +77,6 @@ def to_post(event: Event, place: Place | None, postal_code: str | None) -> dict:
     }
     if event.end is not None:
         post['endsAt'] = _iso(event.end)
-    if place is not None and postal_code:
-        post['location'] = _location(event, place, postal_code)
+    if place is not None:
+        post['location'] = _location(event, place)
     return post

@@ -17,7 +17,7 @@ def event(**overrides):
 
 
 def test_offline_post_matches_create_post_request():
-    assert to_post(event(), PLACE, '81-350') == {
+    assert to_post(event(), PLACE) == {
         'title': 'Koncert',
         'description': 'Opis wydarzenia.',
         'eventUrl': 'https://www.trojmiasto.pl/imprezy/x-imp1.html',
@@ -26,7 +26,7 @@ def test_offline_post_matches_create_post_request():
         'type': 'OFFLINE',
         'visibility': 'PUBLIC',
         'location': {
-            'countryCode': 'POL',
+            'countryCode': 'PL',
             'city': 'Gdańsk',
             'postalCode': '81-350',
             'coordinates': {'latitude': 54.35, 'longitude': 18.65},
@@ -37,52 +37,59 @@ def test_offline_post_matches_create_post_request():
     }
 
 
+def test_a_place_with_no_postal_code_is_sent_without_one():
+    post = to_post(event(postal_code=None), Place(54.35, 18.65, None, exact=False))
+
+    assert 'postalCode' not in post['location']
+
+
 def test_start_is_warsaw_time_in_summer_too():
     summer = event(start=datetime(2027, 7, 1, 19, 0, tzinfo=WARSAW))
 
-    assert to_post(summer, PLACE, '81-350')['startsAt'] == '2027-07-01T17:00:00Z'
+    assert to_post(summer, PLACE)['startsAt'] == '2027-07-01T17:00:00Z'
 
 
 def test_end_is_sent_in_utc():
-    post = to_post(event(end=datetime(2026, 11, 5, 21, 0, tzinfo=WARSAW)), PLACE, '81-350')
+    post = to_post(event(end=datetime(2026, 11, 5, 21, 0, tzinfo=WARSAW)), PLACE)
 
     assert post['endsAt'] == '2026-11-05T20:00:00Z'
 
 
 def test_no_end_is_not_sent():
-    assert 'endsAt' not in to_post(event(), PLACE, '81-350')
+    assert 'endsAt' not in to_post(event(), PLACE)
 
 
 def test_online_post_has_no_location():
-    post = to_post(event(online=True), None, None)
+    post = to_post(event(online=True), None)
 
     assert post['type'] == 'ONLINE'
     assert 'location' not in post
 
 
 def test_values_a_venue_has_not_given_are_left_out_of_the_location():
-    post = to_post(event(venue=None, street=None, building_number=None), PLACE, '81-350')
+    post = to_post(event(venue=None, street=None, building_number=None), PLACE)
 
     assert set(post['location']) == {'countryCode', 'city', 'postalCode', 'coordinates'}
 
 
 def test_the_post_keeps_the_street_as_published():
-    assert to_post(event(street='ul. Morska'), PLACE, '81-350')['location']['street'] == 'ul. Morska'
+    assert to_post(event(street='ul. Morska'), PLACE)['location']['street'] == 'ul. Morska'
 
 
 def test_no_tag_when_there_is_no_category():
-    assert to_post(event(category=None), PLACE, '81-350')['tags'] == []
+    assert to_post(event(category=None), PLACE)['tags'] == []
 
 
 def test_category_with_a_comma_gives_separate_tags():
-    assert to_post(event(category='sport, rekreacja'), PLACE, '81-350')['tags'] == ['sport', 'rekreacja']
+    assert to_post(event(category='sport, rekreacja'), PLACE)['tags'] == ['sport', 'rekreacja']
 
 
 def test_long_values_stay_within_the_api_limits():
     long_event = event(title='słowo ' * 60, category='kategoria ' * 10, city='miasto ' * 40, venue='nazwa ' * 30,
-                       street='ulica ' * 40, building_number='1' * 30, description='zdanie ' * 400)
+                       street='ulica ' * 40, building_number='1' * 30, postal_code='8' * 30,
+                       description='zdanie ' * 400)
 
-    post = to_post(long_event, PLACE, '8' * 30)
+    post = to_post(long_event, PLACE)
 
     assert len(post['title']) <= 128
     assert len(post['description']) <= DESCRIPTION_MAX
@@ -144,7 +151,7 @@ def test_a_cut_does_not_split_an_emoji():
 
 
 def test_a_title_of_128_code_points_and_129_units_fits_after_the_cut():
-    post = to_post(event(title='a' * 127 + '😀'), PLACE, '81-350')
+    post = to_post(event(title='a' * 127 + '😀'), PLACE)
 
     assert utf16_len(post['title']) <= TITLE_MAX
 
@@ -171,7 +178,7 @@ def test_a_description_with_emoji_is_cut_at_a_sentence_end():
 
 
 def test_postal_code_and_building_number_stay_within_the_limits():
-    post = to_post(event(building_number='1' * 15 + '😀'), PLACE, '8' * 15 + '😀')
+    post = to_post(event(building_number='1' * 15 + '😀', postal_code='8' * 15 + '😀'), PLACE)
 
     assert utf16_len(post['location']['buildingNum']) <= 16
     assert utf16_len(post['location']['postalCode']) <= 16
@@ -186,5 +193,5 @@ def test_description_with_no_sentence_end_is_cut_at_a_word():
 
 
 def test_start_keeps_its_time_zone_through_the_post():
-    assert to_post(event(), PLACE, '81-350')['startsAt'].endswith('Z')
+    assert to_post(event(), PLACE)['startsAt'].endswith('Z')
     assert event().start.astimezone(timezone.utc).hour == 18

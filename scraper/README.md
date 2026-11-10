@@ -97,7 +97,7 @@ make scrape-aws                                                                 
 | Description | The longer of the page's `.text-contents` and the schema.org `Event` block, whose text stops at the first quotation mark. The page's text is laid out as plain paragraphs, see below |
 | Street, postal code, online or not | The schema.org `Event` block. Theatre pages on `/kultura/` have none, so only the venue is known |
 | Coordinates | Photon: the street address, then the venue, then the city centre, limited to Pomerania |
-| Missing postal code | Photon's reverse lookup at those coordinates, only when neither the page nor the search has one |
+| Missing postal code | Photon's answer to the search. A place with no postal code is still sent |
 | Photos | The page's `og:image` first, as the cover, then each `a.tinyGallery__item`'s `data-href`, the largest the site serves (1920 px wide when it has it, else `0x500`), never the `img` inside it. Only photos under `/zdj/`, each photo id once, and none from the lists of other events and articles on the page |
 
 Run totals are logged at the end. `exact_location` and `city_location` show how many posts have a precise point, and `no_location`
