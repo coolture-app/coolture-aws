@@ -261,7 +261,7 @@ def test_a_geocoder_failure_keeps_the_totals_and_creates_nothing_more():
             return response
 
     stats, api = Counter(), FakeApi()
-    geocoder = Geocoder(Throttled(), 'http://nominatim.test', sleep=lambda _: None)
+    geocoder = Geocoder(Throttled(), 'http://photon.test')
 
     with pytest.raises(GeocoderUnavailable):
         run(FakeSite([item(1), item(2)]), geocoder, api, stats, None, lambda: NOW)
@@ -281,7 +281,7 @@ def scraper_args(monkeypatch, caplog):
 
 @pytest.mark.parametrize('error', [
     ApiError('GET /posts returned 500'),
-    GeocoderUnavailable('Nominatim request failed'),
+    GeocoderUnavailable('Photon request failed'),
     requests.ConnectionError('refused'),
     requests.Timeout('slow'),
     requests.exceptions.JSONDecodeError('Expecting value', '<html>', 0),

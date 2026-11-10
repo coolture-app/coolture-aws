@@ -123,7 +123,7 @@ fi
 if port_open 3000; then ok "API on http://localhost:3000"; else warn "API not running (make local, or make dev)"; fi
 if port_open 4200; then ok "frontend on http://localhost:4200"; else warn "frontend not running (npm start in ../coolture-frontend)"; fi
 if ! has docker || ! docker volume inspect coolture-geocoder-index > /dev/null 2>&1; then
-    warn "no geocoder index, so the post form has no place suggestions. make geo-index builds it (about 40 minutes, once)"
+    warn "no geocoder index, so no place suggestions and no scraping. make geo-index builds it (about 40 minutes, once)"
 elif port_open 2322; then
     ok "geocoder on http://localhost:2322"
 else

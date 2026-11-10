@@ -31,6 +31,7 @@ repositories on WSL's own disk (`~/...`), not under `/mnt/c`, or builds are slow
 ### 2. Start it
 
 ```bash
+make geo-index                # once, first: the geocoder's index of Poland, about 40 minutes and 4 GB of memory
 make dev                      # terminal 1: database, storage, migrations, build, then the API on :3000
 make seed                     # terminal 2: realistic data. It waits for the API, so start it right away
 cd ../coolture-frontend && npm install && npm start    # terminal 3: http://localhost:4200
@@ -46,10 +47,10 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 The first run takes about 30 minutes. Later runs take a minute and add nothing. How the snapshot is picked and loaded
 is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
 
-**Place search in the post form** needs the geocoder, Photon, with an index of Poland. Build it once with
-`make geo-index`: about 40 minutes, 4 GB of memory and 3 GB of disk, so not while `make seed` builds its image. Then
-`make up` starts it on `:2322` with the AWS instance's 1 GB of memory, and `ng serve` sends the app's `/geo` to it, as
-CloudFront does on AWS. Without it the form works, with no suggestions. `make geo-index` again refreshes the data.
+**The geocoder**, Photon with an index of Poland, serves the post form's place search and locates the scraper's
+events. `make geo-index` builds it once, with 3 GB of disk, alone because of the memory. Then `make up` starts it on
+`:2322` with the AWS instance's 1 GB, and `ng serve` sends the app's `/geo` to it, as CloudFront does on AWS. Without it
+the form works with no suggestions, and the scraper stops and says so. `make geo-index` again refreshes the data.
 
 ### 3. Act as someone
 

@@ -57,7 +57,7 @@ up: ## Start PostgreSQL (migrated and seeded) and Garage
 		exit 1; fi
 	@if docker volume inspect $(GEOCODER_INDEX) > /dev/null 2>&1; then \
 		docker compose --profile geo up -d --build photon && echo "Geocoder on http://localhost:2322"; \
-	else echo "No geocoder index, so the post form has no place suggestions. make geo-index builds it (about 40 minutes, once)"; fi
+	else echo "No geocoder index, so no place suggestions and no scraping. make geo-index builds it (about 40 minutes, once)"; fi
 
 stop: stop-lambdas ## Stop the API, the workers and all local services; data stays
 	@$(COMPOSE_ALL) down
@@ -148,10 +148,16 @@ api-docs: ## Browse the API contracts and try requests on http://localhost:8081 
 test-scraper: $(VENV_PY) ## Run the scraper's unit tests
 	@cd scraper && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests
 
-scrape: $(VENV_PY) ## Import trojmiasto.pl events live through the local API, needs `make local` (ARGS="--limit 20")
+# Finding out at the first event would leave a run half done.
+require-geocoder:
+	@curl -fs -m 5 -o /dev/null "$${SCRAPER_GEOCODER_URL:-http://localhost:2322}/status" || { \
+		echo "The scraper locates events with the geocoder, which isn't answering at $${SCRAPER_GEOCODER_URL:-http://localhost:2322}."; \
+		echo "make geo-index builds it once (about 40 minutes), make up starts it."; exit 1; }
+
+scrape: $(VENV_PY) require-geocoder ## Import trojmiasto.pl events live through the local API, needs `make local` (ARGS="--limit 20")
 	@SCRAPER_USER_ID=$${SCRAPER_USER_ID:-00000000-0000-0000-0000-00000000b07a} $(VENV_PY) scraper/scrape.py $(ARGS)
 
-scrape-snapshot: $(VENV_PY) ## Save about 120 events of every category, with photos, to scraper/snapshot (~12 min once; ALL=1 for all)
+scrape-snapshot: $(VENV_PY) require-geocoder ## Save about 120 events of every category, with photos, to scraper/snapshot (~12 min once; ALL=1 for all)
 	@$(VENV_PY) scraper/scrape.py --snapshot $(SNAPSHOT_DIR) $(if $(ALL),--all,$(if $(SIZE),--size $(SIZE)))
 
 $(SNAPSHOT_DIR)/complete:
