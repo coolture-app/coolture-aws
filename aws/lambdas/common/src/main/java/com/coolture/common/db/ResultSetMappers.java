@@ -15,6 +15,7 @@ import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.storage.MediaUrls;
 
 import java.sql.Array;
 import java.sql.ResultSet;
@@ -64,7 +65,7 @@ public final class ResultSetMappers {
                 rs.getString("avatar_mime_type"),
                 rs.getObject("avatar_size_bytes") != null ? rs.getLong("avatar_size_bytes") : null,
                 mapEnum(rs, "avatar_status", MediaStatus.class),
-                null,
+                MediaUrls.presign(rs.getString("avatar_object_key")),
                 mapInstant(rs, "avatar_created_at"),
                 mapInstant(rs, "avatar_deleted_at")
             );
@@ -96,7 +97,7 @@ public final class ResultSetMappers {
             rs.getString("cover_mime_type"),
             rs.getObject("cover_size_bytes") != null ? rs.getLong("cover_size_bytes") : null,
             mapEnum(rs, "cover_status", MediaStatus.class),
-            null,
+            MediaUrls.presign(rs.getString("cover_object_key")),
             mapInstant(rs, "cover_created_at"),
             mapInstant(rs, "cover_deleted_at")
         );
@@ -139,7 +140,7 @@ public final class ResultSetMappers {
             rs.getString("mime_type"),
             rs.getObject("size_bytes") != null ? rs.getLong("size_bytes") : null,
             mapEnum(rs, "status", MediaStatus.class),
-            null,
+            MediaUrls.presign(rs.getString("object_key")),
             mapInstant(rs, "created_at"),
             mapInstant(rs, "deleted_at")
         );

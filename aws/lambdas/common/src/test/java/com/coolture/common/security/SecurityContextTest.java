@@ -225,8 +225,8 @@ class SecurityContextTest {
     }
 
     @Test
-    void getUserId_fromAuthorizationHeader_whenNoAuthorizerContext() {
-        SecurityContext.setDevFallbackOverride(false);
+    void getUserId_fromAuthorizationHeader_whenDevFallbackEnabled() {
+        SecurityContext.setDevFallbackOverride(true);
         UUID expected = UUID.randomUUID();
         long futureExp = java.time.Instant.now().getEpochSecond() + 3600;
         String payloadJson = "{\"sub\":\"" + expected + "\",\"exp\":" + futureExp + "}";
@@ -259,7 +259,22 @@ class SecurityContextTest {
     }
 
     @Test
-    void requireAdmin_fromAuthorizationHeader_whenAdminGroupPresent_doesNotThrow() {
+    void getUserIdOptional_fromUnverifiedAuthorizationHeader_whenFallbackDisabled_returnsEmpty() {
+        SecurityContext.setDevFallbackOverride(false);
+        long futureExp = java.time.Instant.now().getEpochSecond() + 3600;
+        String payloadJson = "{\"sub\":\"" + UUID.randomUUID() + "\",\"exp\":" + futureExp + "}";
+        String encodedPayload = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(payloadJson.getBytes());
+        String token = "header." + encodedPayload + ".sig";
+
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+            .withHeaders(Map.of("Authorization", "Bearer " + token))
+            .build();
+
+        assertTrue(SecurityContext.getUserIdOptional(event).isEmpty());
+    }
+
+    @Test
+    void requireAdmin_fromForgedAuthorizationHeader_whenFallbackDisabled_throwsSecurityException() {
         SecurityContext.setDevFallbackOverride(false);
         long futureExp = java.time.Instant.now().getEpochSecond() + 3600;
         String payloadJson = "{\"sub\":\"" + UUID.randomUUID() + "\",\"cognito:groups\":[\"COOLTURE_ADMIN\"],\"exp\":" + futureExp + "}";
@@ -270,6 +285,48 @@ class SecurityContextTest {
             .withHeaders(Map.of("Authorization", "Bearer " + token))
             .build();
 
+        SecurityException ex = assertThrows(SecurityException.class, () -> SecurityContext.requireAdmin(event));
+        assertEquals("Admin access required", ex.getMessage());
+    }
+
+    @Test
+    void getUserIdOptional_fromLambdaAuthorizerContext_returnsUUID() {
+        SecurityContext.setDevFallbackOverride(false);
+        UUID expected = UUID.randomUUID();
+        APIGatewayV2HTTPEvent event = lambdaAuthorizerEvent(Map.of("sub", expected.toString(), "username", "jan", "groups", ""));
+
+        Optional<UUID> actual = SecurityContext.getUserIdOptional(event);
+        assertEquals(Optional.of(expected), actual);
+        assertEquals(Optional.of("jan"), SecurityContext.getUsername(event));
+        assertTrue(SecurityContext.getGroups(event).isEmpty());
+    }
+
+    @Test
+    void getUserIdOptional_fromAnonymousLambdaAuthorizerContext_returnsEmpty() {
+        SecurityContext.setDevFallbackOverride(false);
+        APIGatewayV2HTTPEvent event = lambdaAuthorizerEvent(Map.of());
+
+        assertTrue(SecurityContext.getUserIdOptional(event).isEmpty());
+    }
+
+    @Test
+    void requireAdmin_fromLambdaAuthorizerContext_whenAdminGroupPresent_doesNotThrow() {
+        SecurityContext.setDevFallbackOverride(false);
+        APIGatewayV2HTTPEvent event = lambdaAuthorizerEvent(
+            Map.of("sub", UUID.randomUUID().toString(), "groups", "USER,COOLTURE_ADMIN"));
+
         assertDoesNotThrow(() -> SecurityContext.requireAdmin(event));
+    }
+
+    private static APIGatewayV2HTTPEvent lambdaAuthorizerEvent(Map<String, Object> context) {
+        var authorizer = APIGatewayV2HTTPEvent.RequestContext.Authorizer.builder()
+            .withLambda(context)
+            .build();
+        var requestContext = APIGatewayV2HTTPEvent.RequestContext.builder()
+            .withAuthorizer(authorizer)
+            .build();
+        return APIGatewayV2HTTPEvent.builder()
+            .withRequestContext(requestContext)
+            .build();
     }
 }

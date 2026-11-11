@@ -1,4 +1,5 @@
 import json
+import sys
 from unittest.mock import ANY, MagicMock, call
 from uuid import UUID
 
@@ -151,3 +152,38 @@ def test_should_return_post_ids_when_s3_event_contains_post_keys():
 
     # then
     assert post_ids == [UUID(POST_ID), UUID("22222222-2222-2222-2222-222222222222")]
+
+
+def test_should_use_password_when_iam_auth_is_disabled(monkeypatch):
+    # given
+    monkeypatch.setattr(app.settings, "db_iam_auth", False)
+    monkeypatch.setattr(app.settings, "db_password", "local-secret")
+
+    # when
+    credentials = app._db_credentials()
+
+    # then
+    assert credentials == {"password": "local-secret"}
+
+
+def test_should_sign_iam_token_and_require_ssl_when_iam_auth_is_enabled(monkeypatch):
+    # given
+    rds = MagicMock()
+    rds.generate_db_auth_token.return_value = "signed-token"
+    boto3 = MagicMock()
+    boto3.client.return_value = rds
+    monkeypatch.setitem(sys.modules, "boto3", boto3)
+    monkeypatch.setattr(app.settings, "db_iam_auth", True)
+    monkeypatch.setattr(app.settings, "db_host", "cluster.example.com")
+    monkeypatch.setattr(app.settings, "db_port", 5432)
+    monkeypatch.setattr(app.settings, "db_username", "coolture_app")
+
+    # when
+    credentials = app._db_credentials()
+
+    # then
+    assert (credentials, boto3.client.call_args_list, rds.generate_db_auth_token.call_args_list) == (
+        {"password": "signed-token", "sslmode": "require"},
+        [call("rds", region_name=app.settings.aws_region)],
+        [call(DBHostname="cluster.example.com", Port=5432, DBUsername="coolture_app")],
+    )

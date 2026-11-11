@@ -10,6 +10,9 @@ import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
@@ -21,6 +24,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class S3StorageService {
@@ -38,6 +42,8 @@ public class S3StorageService {
             Instant expiresAt,
             Map<String, String> requiredHeaders
     ) {}
+
+    public record StoredObject(long sizeBytes, String contentType) {}
 
     public S3StorageService() {
         this(createDefaultS3Client(), createDefaultPresigner(), resolveBucketName());
@@ -92,6 +98,21 @@ public class S3StorageService {
                 .build());
 
         return presigned.url().toString();
+    }
+
+    public Optional<StoredObject> headObject(String objectKey) {
+        try {
+            HeadObjectResponse head = s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .build());
+            return Optional.of(new StoredObject(head.contentLength(), head.contentType()));
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return Optional.empty();
+            }
+            throw e;
+        }
     }
 
     public void deleteObject(String objectKey) {
@@ -158,12 +179,12 @@ public class S3StorageService {
         if (regionStr != null && !regionStr.isBlank()) {
             return Region.of(regionStr);
         }
-        return Region.EU_CENTRAL_1;
+        return Region.EU_NORTH_1;
     }
 
     private static AwsCredentialsProvider resolveCredentialsProvider() {
-        String accessKey = getEnvAny("GARAGE_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID");
-        String secretKey = getEnvAny("GARAGE_ACCESS_KEY_SECRET", "AWS_SECRET_ACCESS_KEY");
+        String accessKey = getEnvAny("GARAGE_ACCESS_KEY_ID");
+        String secretKey = getEnvAny("GARAGE_ACCESS_KEY_SECRET");
 
         if (accessKey != null && !accessKey.isBlank() && secretKey != null && !secretKey.isBlank()) {
             return StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKey, secretKey));

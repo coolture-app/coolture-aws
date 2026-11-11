@@ -7,18 +7,39 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
-  CallbackUrls:
-    Type: CommaDelimitedList
-    Default: 'http://localhost:4200'
-  LogoutUrls:
-    Type: CommaDelimitedList
-    Default: 'http://localhost:4200'
+  FrontendUrl:
+    Type: String
+    Default: ''
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+
+Conditions:
+  HasFrontendUrl: !Not [!Equals [!Ref FrontendUrl, '']]
+
+Globals:
+  Function:
+    CodeUri: lambdas/authorizer/src/
+    Handler: app.lambda_handler
+    Runtime: python3.13
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 5
+    Environment:
+      Variables:
+        COGNITO_ISSUER: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+        COGNITO_CLIENT_ID: !Ref UserPoolClient
+        ORIGIN_VERIFY_SECRET: !Sub '{{resolve:secretsmanager:${OriginVerifySecret}:SecretString}}'
+    Tags:
+      Project: coolture
+      Environment: !Ref Environment
 
 Resources:
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: !Sub 'coolture-${Environment}'
+      DeletionProtection: ACTIVE
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
       Policies:
@@ -47,22 +68,13 @@ Resources:
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-        - ALLOW_USER_PASSWORD_AUTH
-      GenerateSecret: false
       PreventUserExistenceErrors: ENABLED
-      AccessTokenValidity: 1
-      IdTokenValidity: 1
-      RefreshTokenValidity: 30
-      TokenValidityUnits:
-        AccessToken: hours
-        IdToken: hours
-        RefreshToken: days
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid, email, profile]
       AllowedOAuthFlowsUserPoolClient: true
-      CallbackURLs: !Ref CallbackUrls
-      LogoutURLs: !Ref LogoutUrls
-      EnableTokenRevocation: true
+      CallbackURLs: [!If [HasFrontendUrl, !Sub '${FrontendUrl}/auth/callback', 'https://frontend-not-deployed.invalid/auth/callback']]
+      LogoutURLs: [!If [HasFrontendUrl, !Sub '${FrontendUrl}/', 'https://frontend-not-deployed.invalid/']]
+      SupportedIdentityProviders: [COGNITO]
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
@@ -70,16 +82,56 @@ Resources:
       Domain: !Sub 'coolture-${Environment}-${AWS::AccountId}'
       UserPoolId: !Ref UserPool
 
+  OriginVerifySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'coolture-${Environment}-origin-verify'
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  OptionalAuthLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-optional-auth'
+      RetentionInDays: !Ref LogRetentionDays
+
+  OptionalAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-optional-auth'
+      LoggingConfig:
+        LogGroup: !Ref OptionalAuthLogGroup
+      Environment:
+        Variables:
+          AUTH_MODE: optional
+
+  RequiredAuthLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-required-auth'
+      RetentionInDays: !Ref LogRetentionDays
+
+  RequiredAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-required-auth'
+      LoggingConfig:
+        LogGroup: !Ref RequiredAuthLogGroup
+      Environment:
+        Variables:
+          AUTH_MODE: required
+
 Outputs:
-  UserPoolId:
-    Value: !Ref UserPool
-    Export:
-      Name: !Sub '${AWS::StackName}-UserPoolId'
   UserPoolClientId:
     Value: !Ref UserPoolClient
+  HostedUiUrl:
+    Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
+  OptionalAuthFunctionArn:
+    Value: !GetAtt OptionalAuthFunction.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-ClientId'
-  JWTIssuer:
-    Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+      Name: !Sub '${AWS::StackName}-OptionalAuthFunctionArn'
+  RequiredAuthFunctionArn:
+    Value: !GetAtt RequiredAuthFunction.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-Issuer'
+      Name: !Sub '${AWS::StackName}-RequiredAuthFunctionArn'

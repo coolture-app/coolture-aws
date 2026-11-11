@@ -9,7 +9,6 @@ import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.common.security.SecurityContext;
-import com.coolture.user.dto.CreateUserRequest;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
@@ -62,6 +61,22 @@ class UserHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(401, response.getStatusCode());
+        }
+    }
+
+    @Test
+    void search_returns200WithPage_whenPathHasStagePrefix() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/dev/users", null, null);
+
+        var page = new CursorPage<UserSummaryDto>(List.of(), new PaginationMeta(20, false, null));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
+            when(service.search(eq(CALLER_ID), eq(null), eq(null), eq(20))).thenReturn(page);
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
         }
     }
 
@@ -356,20 +371,6 @@ class UserHandlerTest {
 
             assertEquals(403, response.getStatusCode());
         }
-    }
-
-    @Test
-    void createUser_returns201_whenValid() throws Exception {
-        String body = "{\"username\":\"newuser\",\"firstName\":\"Jan\",\"lastName\":\"Kowalski\"}";
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/users", body, null);
-
-        var created = new UserEntity(UUID.randomUUID(), "newuser", "Jan", "Kowalski", null, Instant.now());
-        when(service.createUser(any(CreateUserRequest.class))).thenReturn(created);
-
-        APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-        assertEquals(201, response.getStatusCode());
-        assertTrue(response.getBody().contains("newuser"));
     }
 
     @Test

@@ -60,12 +60,12 @@ class CommentReadHandlerTest {
         CursorPage<CommentSummaryDto> page = new CursorPage<>(
             List.of(commentDto(UUID.randomUUID(), postId)),
             new PaginationMeta(20, false, null));
-        when(service.list(eq(postId), isNull(), isNull(), eq(20))).thenReturn(page);
+        when(service.list(eq(postId), any(), isNull(), isNull(), eq(20))).thenReturn(page);
 
         APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
         assertEquals(200, response.getStatusCode());
-        verify(service).list(eq(postId), isNull(), isNull(), eq(20));
+        verify(service).list(eq(postId), any(), isNull(), isNull(), eq(20));
     }
 
     @Test
@@ -79,12 +79,12 @@ class CommentReadHandlerTest {
 
         CursorPage<CommentSummaryDto> page = new CursorPage<>(
             List.of(), new PaginationMeta(20, false, null));
-        when(service.list(eq(postId), eq(parentId), isNull(), eq(20))).thenReturn(page);
+        when(service.list(eq(postId), any(), eq(parentId), isNull(), eq(20))).thenReturn(page);
 
         APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
         assertEquals(200, response.getStatusCode());
-        verify(service).list(eq(postId), eq(parentId), isNull(), eq(20));
+        verify(service).list(eq(postId), any(), eq(parentId), isNull(), eq(20));
     }
 
     @Test
@@ -93,7 +93,7 @@ class CommentReadHandlerTest {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(
             "/posts/" + postId + "/comments", null, Map.of("postId", postId.toString()));
 
-        when(service.list(any(), any(), any(), anyInt()))
+        when(service.list(any(), any(), any(), any(), anyInt()))
             .thenThrow(new IllegalArgumentException("Post with id '" + postId + "' was not found"));
 
         APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
@@ -128,7 +128,7 @@ class CommentReadHandlerTest {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(
             "/posts/" + postId + "/comments", null, Map.of("postId", postId.toString()));
 
-        when(service.list(any(), any(), any(), anyInt()))
+        when(service.list(any(), any(), any(), any(), anyInt()))
             .thenThrow(new RuntimeException("boom-db-secret"));
 
         APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);

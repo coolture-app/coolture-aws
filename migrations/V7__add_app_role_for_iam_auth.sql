@@ -1,0 +1,16 @@
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'coolture_app') THEN
+        CREATE ROLE coolture_app LOGIN;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_iam') THEN
+        GRANT rds_iam TO coolture_app;
+    END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public TO coolture_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO coolture_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO coolture_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO coolture_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO coolture_app;

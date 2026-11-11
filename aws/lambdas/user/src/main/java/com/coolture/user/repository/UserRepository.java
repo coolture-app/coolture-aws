@@ -38,31 +38,6 @@ public class UserRepository {
             Instant deletedAt
     ) {}
 
-    public UserEntity createUser(UUID id, String username, String firstName, String lastName, String bio) throws SQLException {
-        String sql = """
-            INSERT INTO users (id, username, first_name, last_name, bio, created_at)
-            VALUES (?, ?, ?, ?, ?, now())
-            RETURNING id, username, first_name, last_name, bio, created_at
-        """;
-
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            stmt.setObject(1, id != null ? id : UUID.randomUUID());
-            stmt.setString(2, username);
-            stmt.setString(3, firstName);
-            stmt.setString(4, lastName);
-            stmt.setString(5, bio);
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return mapUser(rs);
-                }
-            }
-        }
-        throw new SQLException("Failed to insert user");
-    }
-
     /**
      * Creates a user if one with the given ID does not already exist.
      * Uses ON CONFLICT DO NOTHING to handle concurrent inserts safely.

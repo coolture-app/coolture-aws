@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir torch==${TORCH_VERSION} --index-url https://downl
  && pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}').save('/opt/model')" \
+ && chmod -R a+rX /opt/model \
  && rm -rf /root/.cache
 
 ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
