@@ -44,7 +44,7 @@ SNAPSHOT_DIR := scraper/snapshot
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-COMPOSE_ALL := docker compose --profile rec --profile graph --profile geo
+COMPOSE_ALL := docker compose --profile geo
 GEOCODER_INDEX := coolture-geocoder-index
 
 up: ## Start PostgreSQL (migrated and seeded) and Garage
@@ -74,7 +74,7 @@ migrate: ## Apply new database migrations and the local seed
 reset-db: stop-lambdas ## Delete the local database and stored photos (then: make up && make seed)
 	$(COMPOSE_ALL) down -v
 
-logs: ## Tail PostgreSQL logs (SERVICE=worker for another service)
+logs: ## Tail PostgreSQL logs (SERVICE=photon for another service)
 	$(COMPOSE_ALL) logs -f $(or $(SERVICE),postgres)
 
 geo-index: ## Build or refresh the geocoder's Poland index for make up and make geo-publish (about 40 minutes and 4 GB of memory)
@@ -86,12 +86,6 @@ geo-index: ## Build or refresh the geocoder's Poland index for make up and make 
 
 geo-publish: ## Upload the geocoder and its index to AWS and restart the instance (ENV=dev), after make geo-index and deploy-geocoder
 	@scripts/geo-publish.sh $(or $(ENV),dev)
-
-rec-up: ## Start the recommender (local SQS + worker) on top of `up`
-	docker compose --profile rec up -d --build
-
-rec-test: ## Run recommender tests in the worker container
-	docker compose --profile rec run --rm worker python -m pytest -p no:cacheprovider -rs tests
 
 clean: ## Clean build artifacts
 	@rm -rf .aws-sam

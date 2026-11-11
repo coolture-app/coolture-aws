@@ -158,7 +158,6 @@ scripts/                        # deploy.sh, doctor.sh, embed-posts.sh, geo-publ
 | `make test-post-read-db` | `post-read`'s database tests, against `make up` |
 | `make test-python` | The Python Lambdas: embedding workers, migrations, authorizer |
 | `make test-scraper` | The scraper |
-| `make rec-test` | The recommender worker, in its container |
 | `make api-test` | The request flows in `api/`, against `make dev` and `make seed` |
 
 ## Deploying to AWS
