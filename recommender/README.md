@@ -1,19 +1,15 @@
 # Recommender
 
-The Python side of the feed: Lambdas that embed posts and interests and turn them into user vectors, and a worker
-for graph scores. Everything here reads the app's tables in `public` directly. Its own tables are prefixed `rec_`, only the
-recommender writes them, and they're created by ordinary migrations in [`../migrations/`](../migrations/). How the feed
-uses the vectors is in `post-read`'s [contract](../aws/lambdas/post-read/contracts/README.md).
+The Python side of the feed: Lambdas that embed posts and interests and turn them into user vectors. Everything here
+reads the app's tables in `public` directly. Its own tables are prefixed `rec_`, only the recommender writes them, and
+they're created by ordinary migrations in [`../migrations/`](../migrations/). How the feed uses the vectors is in
+`post-read`'s [contract](../aws/lambdas/post-read/contracts/README.md).
 
 | Path | What it does |
 |---|---|
 | `embedding-workers/post-embedding/` | Container image: embeds a post's title, description and tags, and interests, with `mmlw-roberta-base` |
 | `embedding-workers/user-embedding/` | Blends a user's interests and interactions into their vector |
 | `embedding-workers/template.yaml` | Their own stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
-| `worker.py` | SQS handler: stores a graph-scores snapshot in `rec_graph_scores`, ignoring repeated or late runs |
-| `graph_gateway.py` | Reads the graph from AuraDB, runs PageRank in an Aura analytics session, publishes the scores to SQS |
-| `local_runner.py`, `elasticmq.conf` | Run the worker or the gateway locally, with local SQS |
-| `docs/auradb-check.md` | Measurements of the AuraDB path |
 
 All commands below run from the repository root.
 
@@ -130,25 +126,3 @@ To use another decay formula, change `interest_share` in `embedding-workers/user
 | `INTEREST_WEIGHT_MINIMUM` | 0.2 | `embedding-workers/template.yaml` | Lowest share of interests in the vector |
 | `INTEREST_DECAY_SCALE` | 10 | `embedding-workers/template.yaml` | Engagement at which the share falls to about 37% |
 | `ENGAGEMENT_WINDOW_DAYS` | 30 | `embedding-workers/template.yaml` | Days of interactions that count as engagement |
-
-## Graph scores worker (`rec` profile)
-
-```bash
-make rec-up     # make up, ElasticMQ on 127.0.0.1:9324 (SQS_PORT) and the worker
-make rec-test   # pytest in the worker container against the local Postgres
-make logs SERVICE=worker
-```
-
-The worker container mounts this folder, so a code change needs only `docker compose --profile rec restart worker`.
-A change to `requirements.txt` needs `make rec-up` to rebuild the image.
-
-## Graph gateway (`graph` profile)
-
-Needs a hosted AuraDB instance and an Aura API key. Copy `.env.example` to `.env` (ignored by git), fill it in, then:
-
-```bash
-docker compose --profile rec --profile graph run --rm graph-gateway
-```
-
-The gateway publishes one scores message to the local queue. With the `rec` profile running, the worker stores it in
-`rec_graph_scores`.

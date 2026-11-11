@@ -1,13 +1,6 @@
 # A fixed project name, so every clone and worktree drives the same containers instead of clashing on their names.
 name: coolture-aws
 
-x-queue: &queue
-  SQS_ENDPOINT_URL: http://sqs:9324
-  SCORES_QUEUE_URL: http://sqs:9324/000000000000/coolture-recommendation-events
-  AWS_DEFAULT_REGION: eu-north-1
-  AWS_ACCESS_KEY_ID: local
-  AWS_SECRET_ACCESS_KEY: local
-
 services:
   postgres:
     build: ./db
@@ -124,50 +117,8 @@ services:
     volumes:
       - geocoder-index:/data
 
-  # Recommender (docker compose --profile rec): local SQS and the worker that stores graph scores.
-  sqs:
-    image: softwaremill/elasticmq-native:1.7.1
-    profiles: [rec, graph]
-    ports:
-      - "127.0.0.1:${SQS_PORT:-9324}:9324"
-    volumes:
-      - ./recommender/elasticmq.conf:/opt/elasticmq.conf:ro
-      - sqs-data:/data
-
-  worker:
-    build: ./recommender
-    image: coolture-aws-recommender:latest
-    profiles: [rec]
-    command: [python, local_runner.py, worker]
-    environment:
-      <<: *queue
-      DATABASE_URL: postgresql://coolture_admin:admin@postgres:5432/coolture
-    volumes:
-      - ./recommender:/app:ro
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      sqs:
-        condition: service_started
-
-  # AuraDB graph gateway (docker compose --profile graph run --rm graph-gateway), credentials in recommender/.env.
-  graph-gateway:
-    build: ./recommender
-    image: coolture-aws-recommender:latest
-    profiles: [graph]
-    command: [python, local_runner.py, gateway]
-    env_file:
-      - path: recommender/.env
-        required: false
-    environment: *queue
-    volumes:
-      - ./recommender:/app:ro
-    depends_on:
-      - sqs
-
 volumes:
   postgres-data:
-  sqs-data:
   garage_data:
   garage_meta:
   # External, so make reset-db's down -v keeps an index that is slow to build. make clean-all removes it.
