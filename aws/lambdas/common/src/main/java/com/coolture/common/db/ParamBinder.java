@@ -136,17 +136,6 @@ public class ParamBinder {
     }
 
     /**
-     * Binds the same String value three times — for the text search pattern:
-     * (?::varchar IS NULL OR LOWER(title) LIKE ... OR LOWER(description) LIKE ...)
-     */
-    public ParamBinder bindStringFilterTriple(String value) throws SQLException {
-        stmt.setString(index++, value);
-        stmt.setString(index++, value);
-        stmt.setString(index++, value);
-        return this;
-    }
-
-    /**
      * Binds a cursor triple: timestamp, timestamp, timestamp, uuid — for the pattern:
      * (?::timestamptz IS NULL OR created_at < ? OR (created_at = ? AND id < ?))
      */

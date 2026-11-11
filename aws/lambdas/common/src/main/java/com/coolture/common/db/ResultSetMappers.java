@@ -115,7 +115,6 @@ public final class ResultSetMappers {
         if (locId == null) return null;
 
         return new EventLocationDto(
-            locId,
             rs.getString("country_code"),
             rs.getString("venue_name"),
             rs.getString("building_num"),
@@ -125,8 +124,7 @@ public final class ResultSetMappers {
             new GeoPointDto(
                 rs.getDouble("latitude"),
                 rs.getDouble("longitude")
-            ),
-            null
+            )
         );
     }
 

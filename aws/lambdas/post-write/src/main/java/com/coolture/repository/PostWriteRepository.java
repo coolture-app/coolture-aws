@@ -4,9 +4,7 @@ import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
-import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.EventLocationDto;
-import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostMediaDto;
@@ -269,6 +267,14 @@ public class PostWriteRepository {
                     stmt.executeUpdate();
                 }
 
+                // Each post has its own row, so a post gone online leaves nothing pointing at it.
+                if (effectiveLocationId == null && existing.eventLocationId() != null) {
+                    try (PreparedStatement delStmt = conn.prepareStatement("DELETE FROM event_locations WHERE id = ?")) {
+                        delStmt.setObject(1, existing.eventLocationId());
+                        delStmt.executeUpdate();
+                    }
+                }
+
                 PostDetailDto updated = getPostDetail(conn, postId);
                 conn.commit();
                 return updated;
@@ -373,108 +379,6 @@ public class PostWriteRepository {
         }
     }
 
-    public EventLocationDto createLocation(EventLocationDto req) throws SQLException {
-        UUID id = UUID.randomUUID();
-        Instant now = Instant.now();
-        String sql = """
-            INSERT INTO event_locations (
-                id, country_code, venue_name, building_num, street, postal_code, city,
-                coordinates, created_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?,
-                ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
-                ?
-            )
-            RETURNING id, country_code, venue_name, building_num, street, postal_code, city,
-                      ST_Y(coordinates::geometry) AS latitude,
-                      ST_X(coordinates::geometry) AS longitude,
-                      created_at
-        """;
-
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            bindLocationParams(new ParamBinder(stmt, conn), id, req, now);
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return mapLocationFromReturning(rs);
-                }
-            }
-        }
-        throw new SQLException("Failed to create event location");
-    }
-
-    public EventLocationDto updateLocation(UUID locationId, EventLocationDto req) throws SQLException {
-        String sql = """
-            UPDATE event_locations SET
-                country_code = COALESCE(?, country_code),
-                venue_name = COALESCE(?, venue_name),
-                building_num = COALESCE(?, building_num),
-                street = COALESCE(?, street),
-                postal_code = COALESCE(?, postal_code),
-                city = COALESCE(?, city),
-                coordinates = CASE WHEN ? IS NOT NULL AND ? IS NOT NULL THEN ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography ELSE coordinates END
-            WHERE id = ?
-            RETURNING id, country_code, venue_name, building_num, street, postal_code, city,
-                      ST_Y(coordinates::geometry) AS latitude,
-                      ST_X(coordinates::geometry) AS longitude,
-                      created_at
-        """;
-
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            ParamBinder b = new ParamBinder(stmt, conn);
-            b.bindString(req.countryCode())
-             .bindString(req.venueName())
-             .bindString(req.buildingNum())
-             .bindString(req.street())
-             .bindString(req.postalCode())
-             .bindString(req.city());
-
-            if (req.coordinates() != null) {
-                b.bindDouble(req.coordinates().longitude())
-                 .bindDouble(req.coordinates().latitude())
-                 .bindDouble(req.coordinates().longitude())
-                 .bindDouble(req.coordinates().latitude());
-            } else {
-                b.bindDouble(null).bindDouble(null)
-                 .bindDouble(null).bindDouble(null);
-            }
-            b.bindUUID(locationId);
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return mapLocationFromReturning(rs);
-                }
-            }
-        }
-        throw new IllegalArgumentException("EventLocation not found: " + locationId);
-    }
-
-    public void deleteLocation(UUID locationId) throws SQLException {
-        String checkSql = "SELECT 1 FROM posts WHERE event_location_id = ? AND deleted_at IS NULL LIMIT 1";
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
-                checkStmt.setObject(1, locationId);
-                try (ResultSet rs = checkStmt.executeQuery()) {
-                    if (rs.next()) {
-                        throw new IllegalStateException("Event location is referenced by one or more posts");
-                    }
-                }
-            }
-
-            try (PreparedStatement delStmt = conn.prepareStatement("DELETE FROM event_locations WHERE id = ?")) {
-                delStmt.setObject(1, locationId);
-                int affected = delStmt.executeUpdate();
-                if (affected == 0) {
-                    throw new IllegalArgumentException("EventLocation not found: " + locationId);
-                }
-            }
-        }
-    }
-
     // --- Private helpers ---
 
     private UUID insertLocation(Connection conn, EventLocationDto loc, Instant now) throws SQLException {
@@ -490,7 +394,17 @@ public class PostWriteRepository {
             )
         """;
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            bindLocationParams(new ParamBinder(stmt, conn), locationId, loc, now);
+            new ParamBinder(stmt, conn)
+                .bindUUID(locationId)
+                .bindString(loc.countryCode())
+                .bindString(loc.venueName())
+                .bindString(loc.buildingNum())
+                .bindString(loc.street())
+                .bindString(loc.postalCode())
+                .bindString(loc.city())
+                .bindDouble(loc.coordinates().longitude())
+                .bindDouble(loc.coordinates().latitude())
+                .bindTimestamp(now);
             stmt.executeUpdate();
         }
         return locationId;
@@ -561,33 +475,6 @@ public class PostWriteRepository {
             }
             stmt.executeBatch();
         }
-    }
-
-    private void bindLocationParams(ParamBinder b, UUID id, EventLocationDto loc, Instant now) throws SQLException {
-        b.bindUUID(id)
-         .bindString(loc.countryCode())
-         .bindString(loc.venueName())
-         .bindString(loc.buildingNum())
-         .bindString(loc.street())
-         .bindString(loc.postalCode())
-         .bindString(loc.city())
-         .bindDouble(loc.coordinates().longitude())
-         .bindDouble(loc.coordinates().latitude())
-         .bindTimestamp(now);
-    }
-
-    private EventLocationDto mapLocationFromReturning(ResultSet rs) throws SQLException {
-        return new EventLocationDto(
-            (UUID) rs.getObject("id"),
-            rs.getString("country_code"),
-            rs.getString("venue_name"),
-            rs.getString("building_num"),
-            rs.getString("street"),
-            rs.getString("postal_code"),
-            rs.getString("city"),
-            new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
-            rs.getTimestamp("created_at").toInstant()
-        );
     }
 
     public void upsertReaction(UUID postId, UUID userId, ReactionType newType) throws SQLException {
@@ -798,70 +685,6 @@ public class PostWriteRepository {
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, postId);
             stmt.executeUpdate();
-        }
-    }
-
-    public CountryCodeDto createCountryCode(String code) throws SQLException {
-        String sql = "INSERT INTO country_codes (code) VALUES (?) RETURNING code";
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, code);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return new CountryCodeDto(rs.getString("code"));
-                }
-            }
-        }
-        throw new SQLException("Failed to create country code");
-    }
-
-    public CountryCodeDto updateCountryCode(String oldCode, String newCode) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                String checkSql = "SELECT 1 FROM country_codes WHERE code = ?";
-                try (PreparedStatement stmt = conn.prepareStatement(checkSql)) {
-                    stmt.setString(1, oldCode);
-                    try (ResultSet rs = stmt.executeQuery()) {
-                        if (!rs.next()) {
-                            throw new IllegalArgumentException("Country code not found: " + oldCode);
-                        }
-                    }
-                }
-                String insertSql = "INSERT INTO country_codes (code) VALUES (?) ON CONFLICT (code) DO NOTHING";
-                try (PreparedStatement stmt = conn.prepareStatement(insertSql)) {
-                    stmt.setString(1, newCode);
-                    stmt.executeUpdate();
-                }
-                String updateRefsSql = "UPDATE event_locations SET country_code = ? WHERE country_code = ?";
-                try (PreparedStatement stmt = conn.prepareStatement(updateRefsSql)) {
-                    stmt.setString(1, newCode);
-                    stmt.setString(2, oldCode);
-                    stmt.executeUpdate();
-                }
-                String deleteSql = "DELETE FROM country_codes WHERE code = ?";
-                try (PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
-                    stmt.setString(1, oldCode);
-                    stmt.executeUpdate();
-                }
-                conn.commit();
-                return new CountryCodeDto(newCode);
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            }
-        }
-    }
-
-    public void deleteCountryCode(String code) throws SQLException {
-        String sql = "DELETE FROM country_codes WHERE code = ?";
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, code);
-            int deleted = stmt.executeUpdate();
-            if (deleted == 0) {
-                throw new IllegalArgumentException("Country code not found: " + code);
-            }
         }
     }
 }

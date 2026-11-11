@@ -121,15 +121,6 @@ class ParamBinderTest {
     }
 
     @Test
-    void bindStringFilterTriple_bindsThrice() throws SQLException {
-        binder.bindStringFilterTriple("query");
-
-        verify(stmt).setString(1, "query");
-        verify(stmt).setString(2, "query");
-        verify(stmt).setString(3, "query");
-    }
-
-    @Test
     void bindCursorParams_bindsThreeTimestampsAndOneUUID() throws SQLException {
         Instant cursorTime = Instant.now();
         UUID cursorId = UUID.randomUUID();

@@ -205,17 +205,6 @@ class PostReadServiceTest {
     }
 
     @Test
-    void listCountryCodes_callsRepository() throws SQLException {
-        when(repository.findAllCountryCodes()).thenReturn(List.of(new com.coolture.common.dto.CountryCodeDto("POL")));
-
-        var result = service.listCountryCodes();
-
-        assertEquals(1, result.size());
-        assertEquals("POL", result.get(0).code());
-        verify(repository).findAllCountryCodes();
-    }
-
-    @Test
     void getById_whenFound_returnsDetail() throws SQLException {
         UUID postId = UUID.randomUUID();
         UUID callerId = UUID.randomUUID();
@@ -248,16 +237,5 @@ class PostReadServiceTest {
         verify(repository).findPostMarks(filters, bounds, callerId, false);
     }
 
-    @Test
-    void listEventLocations_callsRepository() throws SQLException {
-        when(repository.findEventLocations(isNull(), isNull(), eq(21)))
-            .thenReturn(List.of());
-
-        var result = service.listEventLocations(null, 20);
-
-        assertNotNull(result);
-        assertTrue(result.items().isEmpty());
-        verify(repository).findEventLocations(isNull(), isNull(), eq(21));
-    }
 }
 

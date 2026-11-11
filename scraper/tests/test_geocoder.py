@@ -21,20 +21,17 @@ class FakeResponse:
 
 
 class FakeSession:
-    """Photon, answering each search from `answers` by its street, q or city, and every reverse with `reverse`."""
+    """Photon, answering each search from `answers` by its street, q or city."""
 
     def __init__(self, answers=None, error=None):
         self.answers = answers or {}
         self.error = error
-        self.reverse = [feature(postcode='80-001')]
         self.requests = []
 
     def get(self, url, params, timeout):
         self.requests.append((url.rsplit('/', 1)[-1], params))
         if self.error:
             raise self.error
-        if url.endswith('/reverse'):
-            return FakeResponse({'features': self.reverse})
         asked = params.get('street') or params['q']
         return FakeResponse({'features': [self.answers[asked]] if asked in self.answers else []})
 
@@ -122,33 +119,6 @@ def test_a_hit_with_no_postal_code_asks_nothing_more_by_itself():
     assert len(session.requests) == 1
 
 
-def test_postcode_at_asks_at_the_point_of_the_place():
-    session = FakeSession()
-
-    assert geocoder(session).postcode_at(Place(54.5, 18.5, None, exact=False)) == '80-001'
-    path, params = session.requests[0]
-    assert (path, params['lat'], params['lon']) == ('reverse', 54.5, 18.5)
-    # Photon's reverse lookup answers 400 to a country filter.
-    assert 'countrycode' not in params
-
-
-def test_postcode_at_asks_once_for_a_place():
-    session = FakeSession()
-    subject = geocoder(session)
-
-    subject.postcode_at(Place(54.5, 18.5, None, exact=False))
-    subject.postcode_at(Place(54.5, 18.5, None, exact=False))
-
-    assert len(session.requests) == 1
-
-
-def test_no_postal_code_at_the_point_either():
-    session = FakeSession()
-    session.reverse = []
-
-    assert geocoder(session).postcode_at(Place(54.5, 18.5, None, exact=False)) is None
-
-
 def test_nothing_found():
     assert geocoder(FakeSession()).locate(event('Klub', 'Portowa', '9', 'Gdynia')) is None
 
@@ -207,13 +177,6 @@ def test_a_failed_request_is_not_remembered():
     assert subject.locate(event(None, 'Portowa', '9', 'Gdynia')).exact is True
 
 
-def test_a_failure_of_the_reverse_lookup_stops_the_run_too():
-    session = FakeSession(error=requests.Timeout('slow'))
-
-    with pytest.raises(GeocoderUnavailable):
-        geocoder(session).postcode_at(Place(54.5, 18.5, None, exact=False))
-
-
 def test_a_body_that_is_not_json_means_the_service_could_not_be_asked():
     class NotJson(FakeResponse):
         def json(self):
@@ -238,11 +201,3 @@ def test_an_answer_of_the_wrong_shape_means_the_service_could_not_be_asked(body)
 
     with pytest.raises(GeocoderUnavailable):
         geocoder(session).locate(event(None, 'Portowa', '9', 'Gdynia'))
-
-
-def test_a_reverse_answer_of_the_wrong_shape_means_the_service_could_not_be_asked():
-    session = FakeSession()
-    session.reverse = [{'properties': 'none'}]
-
-    with pytest.raises(GeocoderUnavailable):
-        geocoder(session).postcode_at(Place(54.5, 18.5, None, exact=False))

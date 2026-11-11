@@ -45,6 +45,25 @@ HTTP 200
 [Asserts]
 jsonpath "$.title" == "Wieczór z planszówkami online, edycja zimowa"
 
+# In person, a city and a pin are enough.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "type": "OFFLINE", "location": { "city": "Gdańsk", "coordinates": { "latitude": 54.35, "longitude": 18.65 } } }
+HTTP 200
+[Asserts]
+jsonpath "$.location.city" == "Gdańsk"
+jsonpath "$.location.id" not exists
+
+# Back online, the place goes with it.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "type": "ONLINE" }
+HTTP 200
+[Asserts]
+jsonpath "$.location" not exists
+
 # Jan likes it and is interested. PUT replaces his reaction, so sending it twice changes nothing.
 PUT {{api}}/posts/{{post}}/reaction
 X-User-Id: {{jan}}

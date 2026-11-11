@@ -80,8 +80,8 @@ class ContractTest {
             MediaStatus.ATTACHED, "http://localhost/a.png", now, null);
         MediaResourceDto cover = new MediaResourceDto(UUID.randomUUID(), MediaPurpose.EVENT_MEDIA, "image/png", 10L,
             MediaStatus.ATTACHED, "http://localhost/c.png", now, null, 1080, 1350);
-        EventLocationDto location = new EventLocationDto(UUID.randomUUID(), "POL", "Hala", "1", "Długa", "80-001", "Gdańsk",
-            new GeoPointDto(54.35, 18.65), null);
+        EventLocationDto location = new EventLocationDto("PL", "Hala", "1", "Długa", "80-001", "Gdańsk",
+            new GeoPointDto(54.35, 18.65));
         return new PostCardDto(
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", "Anna", "Nowak", avatar, now, 1, 2),
@@ -139,8 +139,9 @@ class ContractTest {
     @Test
     void postMap_matches() throws Exception {
         when(posts.getMapMarks(any(), any(), any(), anyBoolean())).thenReturn(List.of(
-            new PostMarkDto(UUID.randomUUID(), "Koncert", "Opis", "http://localhost/c.png", 3, new GeoPointDto(54.35, 18.65)),
-            new PostMarkDto(UUID.randomUUID(), "Koncert", null, null, 0, new GeoPointDto(54.35, 18.65))));
+            new PostMarkDto(UUID.randomUUID(), "Koncert", "Opis", "http://localhost/c.png", 3, new GeoPointDto(54.35, 18.65),
+                "Hala", "Gdańsk"),
+            new PostMarkDto(UUID.randomUUID(), "Koncert", null, null, 0, new GeoPointDto(54.35, 18.65), null, null)));
 
         assertMatches(responseReport("/posts/map", ApiGatewayEvents.get("/posts/map", Map.of(
             "leftUpper.latitude", "54.5", "leftUpper.longitude", "18.0",
