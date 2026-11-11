@@ -34,7 +34,7 @@ class Geocoder:
     def __init__(self, session: requests.Session, base_url: str = DEFAULT_URL) -> None:
         self._session = session
         self._base_url = base_url.rstrip('/')
-        self._answers: dict[tuple, Place | str | None] = {}
+        self._answers: dict[tuple, Place | None] = {}
 
     def locate(self, event: Event) -> Place | None:
         """The street address, else the venue, else the city centre. The address goes first even when only its street is
@@ -59,23 +59,14 @@ class Geocoder:
                 return place
         return self._search('api', {'q': city, 'layer': 'city'}, exact=False)
 
-    def postcode_at(self, place: Place) -> str | None:
-        # A city has no postal code of its own, so this takes the one at its centre.
-        key = ('reverse', place.latitude, place.longitude)
-        return self._remembered(key, lambda: self._reverse(place))
-
     def _search(self, path: str, query: dict, exact: bool) -> Place | None:
         key = (path, *sorted(query.items()))
         return self._remembered(key, lambda: self._first(path, {**query, 'countrycode': 'PL', 'bbox': REGION}, exact))
 
-    def _remembered(self, key: tuple, ask: Callable[[], Place | str | None]) -> Place | str | None:
+    def _remembered(self, key: tuple, ask: Callable[[], Place | None]) -> Place | None:
         if key not in self._answers:
             self._answers[key] = ask()
         return self._answers[key]
-
-    def _reverse(self, place: Place) -> str | None:
-        found = self._first('reverse', {'lat': place.latitude, 'lon': place.longitude}, exact=False)
-        return found.postal_code if found else None
 
     def _first(self, path: str, params: dict, exact: bool) -> Place | None:
         try:

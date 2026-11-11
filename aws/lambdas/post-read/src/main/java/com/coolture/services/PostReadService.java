@@ -1,7 +1,5 @@
 package com.coolture.services;
 
-import com.coolture.common.dto.CountryCodeDto;
-import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.MapBoundsDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostDetailDto;
@@ -15,7 +13,6 @@ import com.coolture.repository.PostSort;
 import com.coolture.repository.PostsCursor;
 
 import java.sql.SQLException;
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -63,20 +60,6 @@ public class PostReadService {
         return repository.findPostMarks(filters, bounds, callerId, excludeMine);
     }
 
-    public CursorPage<EventLocationDto> listEventLocations(String cursor, int limit) throws SQLException {
-        Optional<CursorPayload> payload = CursorCodec.decode(cursor);
-        Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
-        UUID cursorId = payload.map(CursorPayload::id).orElse(null);
-
-        int effectiveLimit = clampLimit(limit);
-        List<EventLocationDto> rows = repository.findEventLocations(cursorCreatedAt, cursorId, effectiveLimit + 1);
-
-        return CursorPage.of(rows, effectiveLimit, EventLocationDto::id, EventLocationDto::createdAt);
-    }
-
-    public List<CountryCodeDto> listCountryCodes() throws SQLException {
-        return repository.findAllCountryCodes();
-    }
 
     private void validateParticipationFilter(List<String> participationTypes, UUID callerId) {
         if (participationTypes == null || participationTypes.isEmpty()) return;

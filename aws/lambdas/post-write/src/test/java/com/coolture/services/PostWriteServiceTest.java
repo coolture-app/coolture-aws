@@ -55,8 +55,8 @@ class PostWriteServiceTest {
     void createPost_whenOnlineWithLocation_throwsIllegalArgumentException() {
         UUID authorId = UUID.randomUUID();
         EventLocationDto loc = new EventLocationDto(
-            null, "POL", "Venue", "1", "Street", "00-001", "City",
-            new GeoPointDto(50.0, 20.0), null
+            "PL", "Venue", "1", "Street", "00-001", "City",
+            new GeoPointDto(50.0, 20.0)
         );
         CreatePostRequest req = new CreatePostRequest(
             "Stream", "Description", "https://example.com",
@@ -303,56 +303,6 @@ class PostWriteServiceTest {
     }
 
     @Test
-    void createCountryCode_whenValid_callsRepository() throws SQLException {
-        com.coolture.dto.CountryCodeRequest req = new com.coolture.dto.CountryCodeRequest("pln");
-        when(repository.createCountryCode("PLN")).thenReturn(new com.coolture.common.dto.CountryCodeDto("PLN"));
-
-        var result = service.createCountryCode(req);
-
-        assertEquals("PLN", result.code());
-        verify(repository).createCountryCode("PLN");
-    }
-
-    @Test
-    void createCountryCode_whenNullOrBlank_throwsIllegalArgumentException() {
-        assertThrows(IllegalArgumentException.class, () -> service.createCountryCode(null));
-        assertThrows(IllegalArgumentException.class, () -> service.createCountryCode(new com.coolture.dto.CountryCodeRequest(null)));
-        assertThrows(IllegalArgumentException.class, () -> service.createCountryCode(new com.coolture.dto.CountryCodeRequest("   ")));
-    }
-
-    @Test
-    void updateCountryCode_whenValid_callsRepository() throws SQLException {
-        com.coolture.dto.CountryCodeRequest req = new com.coolture.dto.CountryCodeRequest("pol");
-        when(repository.updateCountryCode("PLN", "POL")).thenReturn(new com.coolture.common.dto.CountryCodeDto("POL"));
-
-        var result = service.updateCountryCode("pln", req);
-
-        assertEquals("POL", result.code());
-        verify(repository).updateCountryCode("PLN", "POL");
-    }
-
-    @Test
-    void updateCountryCode_whenInvalid_throwsIllegalArgumentException() {
-        com.coolture.dto.CountryCodeRequest req = new com.coolture.dto.CountryCodeRequest("pol");
-        assertThrows(IllegalArgumentException.class, () -> service.updateCountryCode(null, req));
-        assertThrows(IllegalArgumentException.class, () -> service.updateCountryCode("   ", req));
-        assertThrows(IllegalArgumentException.class, () -> service.updateCountryCode("PLN", null));
-        assertThrows(IllegalArgumentException.class, () -> service.updateCountryCode("PLN", new com.coolture.dto.CountryCodeRequest(" ")));
-    }
-
-    @Test
-    void deleteCountryCode_whenValid_callsRepository() throws SQLException {
-        service.deleteCountryCode("pln");
-        verify(repository).deleteCountryCode("PLN");
-    }
-
-    @Test
-    void deleteCountryCode_whenNullOrBlank_throwsIllegalArgumentException() {
-        assertThrows(IllegalArgumentException.class, () -> service.deleteCountryCode(null));
-        assertThrows(IllegalArgumentException.class, () -> service.deleteCountryCode("   "));
-    }
-
-    @Test
     void createPost_whenValidOnlinePost_succeeds() throws SQLException {
         UUID authorId = UUID.randomUUID();
         CreatePostRequest req = new CreatePostRequest(
@@ -374,8 +324,8 @@ class PostWriteServiceTest {
     void createPost_whenValidOfflinePost_succeeds() throws SQLException {
         UUID authorId = UUID.randomUUID();
         EventLocationDto loc = new EventLocationDto(
-            null, "POL", "Venue", "1", "Street", "00-001", "City",
-            new GeoPointDto(50.0, 20.0), null
+            "PL", "Venue", "1", "Street", "00-001", "City",
+            new GeoPointDto(50.0, 20.0)
         );
         CreatePostRequest req = new CreatePostRequest(
             "Concert", "Description", "https://example.com",
@@ -415,58 +365,43 @@ class PostWriteServiceTest {
         verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req));
     }
 
-    @Test
-    void createLocation_whenValid_callsRepository() throws SQLException {
-        EventLocationDto loc = new EventLocationDto(
-            null, "POL", "Venue", "1", "Street", "00-001", "City",
-            new GeoPointDto(50.0, 20.0), null
+    private PostWriteRepository.ExistingPost inPersonPost(UUID postId, UUID authorId) {
+        EventLocationDto saved = new EventLocationDto("PL", "Hala", null, null, null, "Gdańsk", new GeoPointDto(54.4, 18.6));
+        return new PostWriteRepository.ExistingPost(
+            postId, authorId, UUID.randomUUID(), "Title", "Desc", null,
+            Instant.now(), null, List.of(), PostType.OFFLINE,
+            PostStatus.ACTIVE, PostVisibility.PUBLIC, Instant.now(), null, null, saved
         );
-        when(repository.createLocation(loc)).thenReturn(loc);
-
-        var result = service.createLocation(loc);
-
-        assertNotNull(result);
-        verify(repository).createLocation(loc);
     }
 
     @Test
-    void createLocation_whenNull_throwsIllegalArgumentException() {
-        assertThrows(IllegalArgumentException.class, () -> service.createLocation(null));
-    }
-
-    @Test
-    void updateLocation_whenValid_callsRepository() throws SQLException {
-        UUID locId = UUID.randomUUID();
-        EventLocationDto loc = new EventLocationDto(
-            locId, "POL", "Venue", "1", "Street", "00-001", "City",
-            new GeoPointDto(50.0, 20.0), null
+    void updatePost_switchingAnInPersonPostToOnline_isAccepted() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
+        when(repository.findById(postId)).thenReturn(Optional.of(existing));
+        UpdatePostRequest req = new UpdatePostRequest(
+            null, null, null, null, null, null, PostType.ONLINE, null, null, null, null
         );
-        when(repository.updateLocation(locId, loc)).thenReturn(loc);
+        when(repository.updatePost(postId, authorId, existing, req))
+            .thenReturn(mock(com.coolture.common.dto.PostDetailDto.class));
 
-        var result = service.updateLocation(locId, loc);
+        service.updatePost(postId, authorId, req);
 
-        assertNotNull(result);
-        verify(repository).updateLocation(locId, loc);
+        verify(repository).updatePost(postId, authorId, existing, req);
     }
 
     @Test
-    void updateLocation_whenInvalid_throwsIllegalArgumentException() {
-        assertThrows(IllegalArgumentException.class, () -> service.updateLocation(null, mock(EventLocationDto.class)));
-        assertThrows(IllegalArgumentException.class, () -> service.updateLocation(UUID.randomUUID(), null));
-    }
+    void updatePost_switchingToOnlineWithAPlace_throwsIllegalArgumentException() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
+        when(repository.findById(postId)).thenReturn(Optional.of(existing));
+        UpdatePostRequest req = new UpdatePostRequest(
+            null, null, null, null, null, null, PostType.ONLINE, null, existing.location(), null, null
+        );
 
-    @Test
-    void deleteLocation_whenValid_callsRepository() throws SQLException {
-        UUID locId = UUID.randomUUID();
-
-        service.deleteLocation(locId);
-
-        verify(repository).deleteLocation(locId);
-    }
-
-    @Test
-    void deleteLocation_whenNull_throwsIllegalArgumentException() {
-        assertThrows(IllegalArgumentException.class, () -> service.deleteLocation(null));
+        assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req));
     }
 
     @Test

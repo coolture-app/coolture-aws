@@ -51,16 +51,8 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
             String path = event.getRawPath() != null ? event.getRawPath() : "";
             UUID callerId = SecurityContext.getUserIdOptional(event).orElse(null);
 
-            if (path.contains("/admin")) {
-                SecurityContext.requireAdmin(event);
-            }
-
             if (path.contains("/actuator/health") || path.endsWith("/health")) {
                 return ApiResponse.ok(Map.of("status", "UP"));
-            } else if (path.contains("/dicts/country-codes")) {
-                return ApiResponse.ok(service.listCountryCodes());
-            } else if (path.contains("/event-locations")) {
-                return getEventLocations(event);
             } else if (path.endsWith("/posts/map") || path.endsWith("/map")) {
                 return getMapMarks(event, callerId);
             } else if (isPostDetailRequest(event)) {
@@ -86,15 +78,6 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
             context.getLogger().log("Error in PostReadHandler: " + e.getMessage());
             return ApiResponse.error("Internal server error");
         }
-    }
-
-    private APIGatewayV2HTTPResponse getEventLocations(APIGatewayV2HTTPEvent event) throws Exception {
-        Map<String, String> qp = getQueryParams(event);
-        String cursor = qp.get("cursor");
-        int limit = parseLimit(qp.get("limit"), 20);
-
-        var page = service.listEventLocations(cursor, limit);
-        return ApiResponse.ok(page);
     }
 
     private APIGatewayV2HTTPResponse getHomeFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
@@ -215,10 +198,10 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
     }
 
     private MapBoundsDto parseMapBounds(Map<String, String> qp) {
-        Double leftUpperLat = getFirstDouble(qp, "leftUpper.latitude", "leftUpperLat", "maxLat");
-        Double leftUpperLng = getFirstDouble(qp, "leftUpper.longitude", "leftUpperLng", "minLng");
-        Double rightBottomLat = getFirstDouble(qp, "rightBottom.latitude", "rightBottomLat", "minLat");
-        Double rightBottomLng = getFirstDouble(qp, "rightBottom.longitude", "rightBottomLng", "maxLng");
+        Double leftUpperLat = parseDouble(qp, "leftUpper.latitude");
+        Double leftUpperLng = parseDouble(qp, "leftUpper.longitude");
+        Double rightBottomLat = parseDouble(qp, "rightBottom.latitude");
+        Double rightBottomLng = parseDouble(qp, "rightBottom.longitude");
 
         if (leftUpperLat == null || leftUpperLng == null || rightBottomLat == null || rightBottomLng == null) {
             throw new IllegalArgumentException("Map bounds (leftUpper & rightBottom coordinates) are required");
@@ -230,13 +213,9 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         );
     }
 
-    private Double getFirstDouble(Map<String, String> map, String... keys) {
-        for (String k : keys) {
-            if (map.containsKey(k) && map.get(k) != null && !map.get(k).isBlank()) {
-                return Double.parseDouble(map.get(k));
-            }
-        }
-        return null;
+    private Double parseDouble(Map<String, String> qp, String key) {
+        String value = qp.get(key);
+        return value == null || value.isBlank() ? null : Double.parseDouble(value);
     }
 
     private List<String> parseList(String raw) {

@@ -48,21 +48,15 @@ class FakeSite:
 
 
 class FakeGeocoder:
-    def __init__(self, place=PLACE, postcode='80-001'):
+    def __init__(self, place=PLACE):
         self.place = place
-        self.postcode = postcode
         self.calls = 0
         self.venues = []
-        self.reverse_calls = 0
 
     def locate(self, event):
         self.calls += 1
         self.venues.append(event.venue)
         return self.place
-
-    def postcode_at(self, place):
-        self.reverse_calls += 1
-        return self.postcode
 
 
 class FakeApi:
@@ -168,44 +162,31 @@ def test_unreadable_page_is_skipped():
     assert stats['unreadable'] == 1
 
 
-def test_no_postal_code_anywhere_is_left_out():
-    site = FakeSite([item(1)], {item(1).url: page(postal_code=None)})
+def test_a_place_with_no_postal_code_is_still_sent():
     api = FakeApi()
 
-    stats = run_import(site, FakeGeocoder(postcode=None), api)
+    stats = run_import(FakeSite([item(1)], {item(1).url: page(postal_code=None)}),
+                       FakeGeocoder(Place(54.3, 18.6, None, exact=False)), api)
 
-    assert stats['no_location'] == 1
-    assert api.created == []
+    assert stats['no_location'] == 0
+    assert 'postalCode' not in api.created[0]['location']
 
 
-def test_postal_code_of_the_page_needs_no_reverse_lookup():
-    geocoder = FakeGeocoder(Place(54.3, 18.6, None, exact=True))
+def test_postal_code_of_the_page_comes_before_the_hits():
     api = FakeApi()
 
-    run_import(FakeSite([item(1)]), geocoder, api)
+    run_import(FakeSite([item(1)]), FakeGeocoder(Place(54.3, 18.6, '80-002', exact=True)), api)
 
-    assert geocoder.reverse_calls == 0
     assert api.created[0]['location']['postalCode'] == '81-350'
 
 
-def test_postal_code_of_the_hit_needs_no_reverse_lookup():
-    geocoder = FakeGeocoder(Place(54.3, 18.6, '80-002', exact=True))
+def test_postal_code_of_the_hit_fills_a_missing_one():
     api = FakeApi()
 
-    run_import(FakeSite([item(1)], {item(1).url: page(postal_code=None)}), geocoder, api)
+    run_import(FakeSite([item(1)], {item(1).url: page(postal_code=None)}),
+               FakeGeocoder(Place(54.3, 18.6, '80-002', exact=True)), api)
 
-    assert geocoder.reverse_calls == 0
     assert api.created[0]['location']['postalCode'] == '80-002'
-
-
-def test_reverse_lookup_runs_when_neither_has_a_postal_code():
-    geocoder = FakeGeocoder(Place(54.3, 18.6, None, exact=False))
-    api = FakeApi()
-
-    run_import(FakeSite([item(1)], {item(1).url: page(postal_code=None)}), geocoder, api)
-
-    assert geocoder.reverse_calls == 1
-    assert api.created[0]['location']['postalCode'] == '80-001'
 
 
 def test_an_event_that_starts_during_the_run_is_not_sent():

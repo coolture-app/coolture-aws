@@ -1,12 +1,10 @@
 package com.coolture.services;
 
-import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.dto.CountryCodeRequest;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.ParticipationRequest;
 import com.coolture.dto.ReactionRequest;
@@ -67,9 +65,11 @@ public class PostWriteService {
         }
 
         PostType newType = req.type() != null ? req.type() : existing.type();
-        boolean locationTouched = req.location() != null;
-        EventLocationDto newLocDto = locationTouched ? req.location() : existing.location();
-        validateTypeLocationInvariant(newType, newLocDto);
+        // Switching to online drops the saved place, so only a place sent with it is wrong.
+        EventLocationDto newLocation = req.location() != null || newType == PostType.ONLINE
+            ? req.location()
+            : existing.location();
+        validateTypeLocationInvariant(newType, newLocation);
 
         Instant newStartsAt = req.startsAt() != null ? req.startsAt() : existing.startsAt();
         Instant newEndsAt = req.endsAt() != null ? req.endsAt() : existing.endsAt();
@@ -104,27 +104,6 @@ public class PostWriteService {
         }
 
         repository.softDeletePost(postId);
-    }
-
-    public EventLocationDto createLocation(EventLocationDto req) throws SQLException {
-        if (req == null) {
-            throw new IllegalArgumentException("Location payload is required");
-        }
-        return repository.createLocation(req);
-    }
-
-    public EventLocationDto updateLocation(UUID locationId, EventLocationDto req) throws SQLException {
-        if (locationId == null || req == null) {
-            throw new IllegalArgumentException("Location ID and payload are required");
-        }
-        return repository.updateLocation(locationId, req);
-    }
-
-    public void deleteLocation(UUID locationId) throws SQLException {
-        if (locationId == null) {
-            throw new IllegalArgumentException("Location ID is required");
-        }
-        repository.deleteLocation(locationId);
     }
 
     public void upsertReaction(UUID postId, UUID userId, ReactionRequest req) throws SQLException {
@@ -171,30 +150,6 @@ public class PostWriteService {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
         }
         repository.deleteParticipation(postId, userId);
-    }
-
-    public CountryCodeDto createCountryCode(CountryCodeRequest req) throws SQLException {
-        if (req == null || req.code() == null || req.code().isBlank()) {
-            throw new IllegalArgumentException("Country code is required");
-        }
-        return repository.createCountryCode(req.code().toUpperCase());
-    }
-
-    public CountryCodeDto updateCountryCode(String oldCode, CountryCodeRequest req) throws SQLException {
-        if (oldCode == null || oldCode.isBlank()) {
-            throw new IllegalArgumentException("Old country code is required");
-        }
-        if (req == null || req.code() == null || req.code().isBlank()) {
-            throw new IllegalArgumentException("New country code is required");
-        }
-        return repository.updateCountryCode(oldCode.toUpperCase(), req.code().toUpperCase());
-    }
-
-    public void deleteCountryCode(String code) throws SQLException {
-        if (code == null || code.isBlank()) {
-            throw new IllegalArgumentException("Country code is required");
-        }
-        repository.deleteCountryCode(code.toUpperCase());
     }
 
     private boolean embeddedContentChanged(PostWriteRepository.ExistingPost existing, PostDetailDto updated) {
