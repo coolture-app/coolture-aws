@@ -107,6 +107,10 @@ paths:
       operationId: getPostMarks
       summary: Map markers. Takes the same filters as /posts, plus the map bounds. Only the newer parameters are listed here.
       parameters:
+        - {name: leftUpper.latitude, in: query, required: true, description: The view's north edge., schema: {type: number, format: double, minimum: -90, maximum: 90}}
+        - {name: leftUpper.longitude, in: query, required: true, description: The view's west edge., schema: {type: number, format: double, minimum: -180, maximum: 180}}
+        - {name: rightBottom.latitude, in: query, required: true, description: The view's south edge., schema: {type: number, format: double, minimum: -90, maximum: 90}}
+        - {name: rightBottom.longitude, in: query, required: true, description: The view's east edge., schema: {type: number, format: double, minimum: -180, maximum: 180}}
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/RadiusKm'
         - name: excludeMine
@@ -163,7 +167,7 @@ components:
     Q:
       name: q
       in: query
-      description: Matches a part of the title or the description, ignoring case.
+      description: Matches a part of the title, the description, the city or the place's name, ignoring case.
       schema: {type: string}
     Tags:
       name: tags
@@ -303,6 +307,8 @@ components:
         coverMediaUrl: {type: string}
         positiveReactionCount: {type: integer}
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
+        venueName: {type: string}
+        city: {type: string}
     UserSummary:
       type: object
       additionalProperties: false
@@ -319,17 +325,15 @@ components:
     EventLocation:
       type: object
       additionalProperties: false
-      required: [id, coordinates]
+      required: [coordinates]
       properties:
-        id: {type: string, format: uuid}
-        countryCode: {type: string}
+        countryCode: {type: string, pattern: '^[A-Z]{2}$', description: 'ISO 3166-1 alpha-2, such as PL.'}
         venueName: {type: string}
         buildingNum: {type: string}
         street: {type: string}
         postalCode: {type: string}
         city: {type: string}
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
-        createdAt: {type: string, format: date-time}
     GeoPoint:
       type: object
       additionalProperties: false
