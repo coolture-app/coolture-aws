@@ -19,6 +19,9 @@ Parameters:
   WebAclArn:
     Type: String
     Default: ''
+  GitHubRepository:
+    Type: String
+    Default: coolture-app/coolture-frontend
 
 Conditions:
   HasWebAcl: !Not [!Equals [!Ref WebAclArn, '']]
@@ -76,6 +79,48 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: cloudfront.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  GitHubDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepository}:environment:${Environment}'
+      Policies:
+        - PolicyName: deploy-frontend-code
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                Resource: !GetAtt SSRFunction.Arn
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt StaticAssetsBucket.Arn
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub '${StaticAssetsBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetInvalidation
+                Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+      Tags:
+        - Key: Project
+          Value: coolture
+        - Key: Environment
+          Value: !Ref Environment
 
   StaticAssetsBucket:
     Type: AWS::S3::Bucket
@@ -226,3 +271,5 @@ Outputs:
     Value: !Ref CloudFrontDistribution
   WebsiteUrl:
     Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+  GitHubDeployerRoleArn:
+    Value: !GetAtt GitHubDeployerRole.Arn
