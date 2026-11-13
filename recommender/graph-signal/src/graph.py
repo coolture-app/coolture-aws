@@ -48,7 +48,7 @@ def content_edges(inputs: Inputs) -> tuple[list, list]:
     live = np.flatnonzero(inputs.scorable)
     pairs = events[live] @ events[live].T
     np.fill_diagonal(pairs, -np.inf)
-    k = min(EVENT_NEIGHBOURS, len(live) - 1)
+    k = max(0, min(EVENT_NEIGHBOURS, len(live) - 1))
     neighbours = np.argsort(-pairs, axis=1)[:, :k]
     to_event = {tuple(sorted((int(live[a]), int(live[b])))) for a in range(len(live)) for b in neighbours[a]}
     return to_interest, sorted(to_event)

@@ -24,7 +24,7 @@ EVENT_END = f"COALESCE(p.ends_at, p.starts_at + interval '{DEFAULT_EVENT_HOURS} 
 PRUNE = """
 DELETE FROM rec_graph_runs
 WHERE (finished_at IS NULL AND started_at < now() - interval '1 hour')
-   OR run_number < (SELECT max(run_number) FROM rec_graph_runs WHERE finished_at < now() - interval '1 day')
+   OR finished_at < (SELECT max(finished_at) FROM rec_graph_runs WHERE finished_at < now() - interval '1 day')
 """
 
 

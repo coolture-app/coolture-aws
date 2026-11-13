@@ -175,9 +175,10 @@ test-post-read-db: build-common ## Run the post-read database tests against `mak
 embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
 	@scripts/embed-posts.sh
 
-# Built on first use, or when its image was removed. After changing a worker's code, run make build-embeddings again.
+# Built on first use, when its image was removed, or when the template or the graph signal's code changed. After
+# changing post-embedding's code, run make build-embeddings again.
 require-embeddings-build:
-	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ -n "$$(find recommender/embedding-workers/template.yaml recommender/graph-signal/src -newer $(EMBEDDINGS_TEMPLATE))" ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
+	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ -n "$$(find recommender/embedding-workers/template.yaml recommender/graph-signal/src -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
 		echo "Building the embedding workers. The first build downloads the model into a 3.5 GB image."; \
 		$(MAKE) --no-print-directory build-embeddings; \
 	fi

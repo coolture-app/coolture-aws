@@ -49,7 +49,7 @@ public class FeedRepository {
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
         LEFT JOIN event_locations el ON el.id = p.event_location_id
         LEFT JOIN rec_graph_scores g ON g.post_id = p.id AND g.user_id = ?::uuid
-         -- The minute keeps a run whose finish isn't committed yet off a session's later pages.
+         -- The minute covers clock skew between this Lambda and the database, and the commit after a run is marked finished.
          AND g.run_number = (SELECT max(run_number) FROM rec_graph_runs
                              WHERE finished_at <= ?::timestamptz - interval '1 minute')
         WHERE

@@ -33,13 +33,16 @@ def test_a_run_scores_only_what_the_feed_may_show(conn):
     assert shown_wrongly == 0
 
 
-def test_a_new_run_keeps_the_last_one_a_session_may_read(conn):
-    inputs = app.load(conn)
-    first, _ = app.write(conn, inputs)
-    second, _ = app.write(conn, inputs)
+def test_a_run_keeps_the_newest_run_finished_over_a_day_ago_and_deletes_older_ones(conn):
+    def run_finished(ago):
+        return conn.execute("INSERT INTO rec_graph_runs (finished_at) VALUES (now() - %s::interval) RETURNING run_number",
+                            (ago,)).fetchone()[0]
 
-    runs = {r for (r,) in conn.execute("SELECT run_number FROM rec_graph_runs WHERE run_number >= %s", (first,))}
-    assert runs == {first, second}
+    oldest, day_old, recent = run_finished("3 days"), run_finished("2 days"), run_finished("1 hour")
+    new, _ = app.write(conn, app.load(conn))
+
+    kept = {r for (r,) in conn.execute("SELECT run_number FROM rec_graph_runs WHERE run_number >= %s", (oldest,))}
+    assert kept == {day_old, recent, new}
 
 
 def test_the_job_and_the_feed_have_their_grants(conn):

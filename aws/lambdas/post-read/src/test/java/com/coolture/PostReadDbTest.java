@@ -106,7 +106,6 @@ class PostReadDbTest {
     private static void removeFixtures(Statement stmt) throws SQLException {
         stmt.execute("RESET ROLE");
         String users = "(SELECT id FROM users WHERE id::text LIKE 'a0000000-%')";
-        stmt.execute("DELETE FROM rec_graph_runs WHERE run_number IN (SELECT run_number FROM rec_graph_scores WHERE user_id IN " + users + ")");
         stmt.execute("DELETE FROM comments WHERE author_id IN " + users);
         stmt.execute("DELETE FROM post_reactions WHERE user_id IN " + users);
         stmt.execute("DELETE FROM post_participations WHERE user_id IN " + users);
@@ -308,18 +307,22 @@ class PostReadDbTest {
         }
     }
 
-    /** A graph run that finished at the given time, with one score for ME. */
-    private static void graphRun(Instant finishedAt, UUID post, double score) throws SQLException {
+    /** A graph run that finished at the given time, with one score for ME. Returns its number. */
+    private static long graphRun(Instant finishedAt, UUID post, double score) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("RESET ROLE");
             try (PreparedStatement write = conn.prepareStatement("""
                      WITH run AS (INSERT INTO rec_graph_runs (finished_at) VALUES (?) RETURNING run_number)
-                     INSERT INTO rec_graph_scores (run_number, user_id, post_id, score) SELECT run_number, ?, ?, ? FROM run""")) {
+                     INSERT INTO rec_graph_scores (run_number, user_id, post_id, score)
+                     SELECT run_number, ?, ?, ? FROM run RETURNING run_number""")) {
                 write.setObject(1, java.sql.Timestamp.from(finishedAt));
                 write.setObject(2, ME);
                 write.setObject(3, post);
                 write.setDouble(4, score);
-                write.executeUpdate();
+                try (ResultSet rs = write.executeQuery()) {
+                    rs.next();
+                    return rs.getLong(1);
+                }
             } finally {
                 stmt.execute("SET ROLE coolture_reader");
             }
@@ -330,12 +333,19 @@ class PostReadDbTest {
     void feed_readsTheLatestGraphRunFinishedByAsOf() throws SQLException {
         Instant now = Instant.now();
         UUID post = postTitled("future_public");
-        graphRun(now.minus(Duration.ofHours(1)), post, 0.25);
-        graphRun(now.plus(Duration.ofHours(1)), post, 0.75);
-
-        assertEquals(0.25, graphOf(post, now), 1e-6);
-        assertEquals(0.75, graphOf(post, now.plus(Duration.ofHours(2))), 1e-6);
-        assertNull(graphOf(postTitled("commented"), now));
+        long earlier = graphRun(now.minus(Duration.ofHours(1)), post, 0.25);
+        long later = graphRun(now.plus(Duration.ofHours(1)), post, 0.75);
+        try {
+            assertEquals(0.25, graphOf(post, now), 1e-6);
+            assertEquals(0.75, graphOf(post, now.plus(Duration.ofHours(2))), 1e-6);
+            assertNull(graphOf(postTitled("commented"), now));
+        } finally {
+            try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
+                stmt.execute("RESET ROLE");
+                stmt.execute("DELETE FROM rec_graph_runs WHERE run_number IN (" + earlier + ", " + later + ")");
+                stmt.execute("SET ROLE coolture_reader");
+            }
+        }
     }
 
     private Double graphOf(UUID post, Instant asOf) throws SQLException {

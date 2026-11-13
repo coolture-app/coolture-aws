@@ -137,7 +137,7 @@ deleted, and a session older than that ranks with `0.5` for every post.
 
 ```bash
 make graph-signal                    # one run locally; make seed ends with it
-DB_TEST=true .venv/bin/python -m pytest recommender/graph-signal/tests   # with its database tests, after make seed
+DB_TEST=true make test-python      # with its database tests, after make seed
 ```
 
 On AWS it runs on a schedule, off by default: `GraphScheduleEnabled=true` and `GraphSchedule` (default `rate(6 hours)`)
