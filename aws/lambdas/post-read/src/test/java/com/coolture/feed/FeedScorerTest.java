@@ -40,7 +40,7 @@ class FeedScorerTest {
 
     @Test
     void score_computesEachPartFromTheFormula() {
-        FeedScorer.Facts post = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(14)), 100, 0.906, 20_000.0);
+        FeedScorer.Facts post = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(30)), 100, 0.225, 20_000.0);
 
         FeedScorer.Score score = DEFAULT.score(post, AS_OF, 7);
 
@@ -48,8 +48,9 @@ class FeedScorerTest {
         assertEquals(Math.exp(-1), score.proximity(), 1e-12);
         assertEquals(Math.exp(-1), score.time(), 1e-12);
         assertEquals(1.0, score.popularity(), 1e-12);
-        assertEquals(0.40 * score.affinity() + 0.20 * score.proximity() + 0.25 * score.time()
-            + 0.15 * score.popularity() + 0.10 * score.jitter(), score.total(), 1e-12);
+        FeedConfig w = FeedConfig.DEFAULTS;
+        assertEquals(w.affinity() * score.affinity() + w.proximity() * score.proximity() + w.time() * score.time()
+            + w.popularity() * score.popularity() + w.jitter() * score.jitter(), score.total(), 1e-12);
     }
 
     @Test
@@ -71,24 +72,24 @@ class FeedScorerTest {
     }
 
     @Test
-    void affinity_spreadsTheModelsCosineRangeOverZeroToOne() {
+    void affinity_spreadsTheBandOverZeroToOne_withATypicalPostNeutral() {
         assertEquals(0.0, affinityOf(FeedConfig.AFFINITY_LOW), 1e-12);
         assertEquals(1.0, affinityOf(FeedConfig.AFFINITY_HIGH), 1e-12);
-        assertEquals(FeedConfig.NEUTRAL, affinityOf((FeedConfig.AFFINITY_LOW + FeedConfig.AFFINITY_HIGH) / 2), 1e-12);
+        assertEquals(FeedConfig.NEUTRAL, affinityOf(0), 1e-12);
     }
 
     @Test
-    void affinity_outsideTheModelsCosineRange_staysBetweenZeroAndOne() {
+    void affinity_outsideTheBand_staysBetweenZeroAndOne() {
         assertEquals(0.0, affinityOf(-1.0));
         assertEquals(1.0, affinityOf(1.0));
     }
 
     @Test
     void aGoodMatch_cantBeOvertakenByJitterAlone() {
-        // One user's 95th and 5th percentile cosines, measured for a new user.
+        // The 95th and 5th percentile of a new user's cosines, with the averages taken out.
         FeedScorer scorer = new FeedScorer(FeedConfig.parse("proximity=0,time=0,popularity=0,jitter=0"));
-        double good = scorer.score(facts(UUID.randomUUID(), AS_OF, 0, 0.854, null), AS_OF, 7).total();
-        double poor = scorer.score(facts(UUID.randomUUID(), AS_OF, 0, 0.789, null), AS_OF, 7).total();
+        double good = scorer.score(facts(UUID.randomUUID(), AS_OF, 0, 0.273, null), AS_OF, 7).total();
+        double poor = scorer.score(facts(UUID.randomUUID(), AS_OF, 0, -0.176, null), AS_OF, 7).total();
 
         assertTrue(good - poor > FeedConfig.DEFAULTS.jitter());
     }
@@ -104,8 +105,8 @@ class FeedScorerTest {
 
     @Test
     void score_whenEventEnded_timeFadesWithTheDaysSinceItsEnd() {
-        Instant start = AS_OF.minus(Duration.ofDays(20));
-        FeedScorer.Facts ended = new FeedScorer.Facts(UUID.randomUUID(), start, AS_OF.minus(Duration.ofDays(14)), 0, null, null);
+        Instant start = AS_OF.minus(Duration.ofDays(40));
+        FeedScorer.Facts ended = new FeedScorer.Facts(UUID.randomUUID(), start, AS_OF.minus(Duration.ofDays(30)), 0, null, null);
 
         assertEquals(Math.exp(-1), DEFAULT.score(ended, AS_OF, 7).time(), 1e-12);
     }

@@ -11,7 +11,7 @@ class FeedConfigTest {
 
     @Test
     void defaults_matchTheDesign() {
-        assertEquals(new FeedConfig(0.40, 0.20, 0.25, 0.15, 0.10), FeedConfig.DEFAULTS);
+        assertEquals(new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10), FeedConfig.DEFAULTS);
     }
 
     @Test
@@ -32,7 +32,7 @@ class FeedConfigTest {
     void parse_whenSomeWeightsGiven_keepsTheOtherDefaults() {
         FeedConfig config = FeedConfig.parse("jitter=0, affinity = 0");
 
-        assertEquals(new FeedConfig(0, 0.20, 0.25, 0.15, 0), config);
+        assertEquals(new FeedConfig(0, 0.15, 0.10, 0.10, 0), config);
     }
 
     @ParameterizedTest

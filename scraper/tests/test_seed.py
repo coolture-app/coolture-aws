@@ -6,7 +6,8 @@ import requests
 import seed
 from api import Outcome
 from images import Image
-from seed import (BOT_ID, SeedError, moved, picks, seed_events, seed_reactions, shift_days, shifted, wait_for_api)
+from seed import (BOT_ID, HISTORY_DAYS, SeedError, history, moved, picks, seed_events, seed_reactions, shift_days, shifted,
+                  wait_for_api)
 from snapshot import Snapshot
 
 UTC = timezone.utc
@@ -115,8 +116,12 @@ class FakeSession:
         return response
 
 
-def fake_query(reacted=()):
+def fake_query(reacted=(), updates=None):
     def query(sql):
+        if sql.lstrip().startswith('UPDATE'):
+            if updates is not None:
+                updates.append(sql)
+            return []
         if 'count(*)' in sql:
             return ['1' if any(user_id in sql for user_id in reacted) else '0']
         assert BOT_ID in sql
@@ -132,6 +137,23 @@ def test_each_demo_user_reacts_as_themself():
     assert stats['users'] == 3 and stats['like'] == 15 and stats['interested'] == 6 and stats['dislike'] == 6
     assert ('anna_demo', 'http://api.test/posts/p3/reaction', 'LIKE') in session.sent
     assert ('ola_demo', 'http://api.test/posts/p4/participation', 'INTERESTED') in session.sent
+
+
+def test_reactions_are_dated_weeks_back_so_new_likes_lead():
+    updates = []
+
+    seed_reactions('http://api.test', query=fake_query(updates=updates), session_factory=FakeSession)
+
+    assert len(updates) == 3
+    assert updates[0].count('UPDATE') == 9
+    assert "post_reactions SET created_at = now() - make_interval(days => 14)" in updates[0]
+    assert "post_participations SET" in updates[0]
+    assert f"days => {HISTORY_DAYS[1]})" in updates[0]
+
+
+def test_history_spreads_evenly_over_the_weeks():
+    assert history(3) == [14, 28, 42]
+    assert history(1) == [14]
 
 
 def test_a_user_who_already_reacted_is_left_alone():

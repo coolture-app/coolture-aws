@@ -42,7 +42,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -52,6 +54,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -201,8 +204,8 @@ class PostReadDbTest {
     @Test
     void feed_aPostCreatedAfterAsOf_appearsOnlyInALaterSession() throws SQLException {
         Instant now = Instant.now();
-        Set<UUID> thisSession = ids(feedRepository.findCandidates(ME, null, now, null, null, PostFeedFilters.none()));
-        Set<UUID> laterSession = ids(feedRepository.findCandidates(ME, null, now.plus(Duration.ofHours(2)), null, null, PostFeedFilters.none()));
+        Set<UUID> thisSession = ids(feedRepository.findCandidates(ME, null, null, now, null, null, PostFeedFilters.none()));
+        Set<UUID> laterSession = ids(feedRepository.findCandidates(ME, null, null, now.plus(Duration.ofHours(2)), null, null, PostFeedFilters.none()));
 
         laterSession.removeAll(thisSession);
         assertEquals(1, laterSession.size());
@@ -223,13 +226,61 @@ class PostReadDbTest {
     @Test
     void feed_aPostVectorFromAnotherModel_isNeutral() throws SQLException {
         Instant now = Instant.now();
-        double[] myVector = UserVector.blend(feedRepository.findVectorParts(ME, now));
-        List<FeedScorer.Facts> candidates = feedRepository.findCandidates(ME, myVector, now, null, null, PostFeedFilters.none());
+        List<FeedScorer.Facts> candidates = candidates(now);
         FeedScorer.Facts otherModel = candidates.stream().filter(f -> f.id().equals(OTHER_MODEL_POST)).findFirst().orElseThrow();
 
         assertNull(otherModel.similarity());
         assertEquals(FeedConfig.NEUTRAL, new FeedScorer(FeedConfig.DEFAULTS).score(otherModel, now, 42).affinity());
         assertTrue(candidates.stream().anyMatch(f -> f.similarity() != null), "vectors of the same model must still be compared");
+    }
+
+    @Test
+    void feed_comparesEachPost_withThePostAverageTakenOut() throws SQLException {
+        Instant now = Instant.now();
+        UserVector.Parts parts = feedRepository.findVectorParts(ME, now);
+        double[] viewer = UserVector.blend(parts);
+        UUID post = postTitled("walk_3");
+        double[] centred = embeddingOf(post).clone();
+        for (int i = 0; i < centred.length; i++) {
+            centred[i] -= parts.postAverage()[i];
+        }
+
+        assertEquals(cosine(centred, viewer), similarity(post, now), 1e-5);
+    }
+
+    @Test
+    void feed_thePostAverage_countsOnlyPostsCreatedByAsOf() throws SQLException {
+        // Half the walk posts were created an hour before the others.
+        Instant beforeTheNewerHalf = Instant.now().truncatedTo(ChronoUnit.HOURS).minus(Duration.ofMinutes(30));
+
+        double[] then = feedRepository.findVectorParts(ME, beforeTheNewerHalf).postAverage();
+        double[] now = feedRepository.findVectorParts(ME, Instant.now()).postAverage();
+
+        assertFalse(Arrays.equals(then, now), "a post created after asOf moved the average");
+    }
+
+    private static double[] embeddingOf(UUID post) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement("SELECT embedding::real[] FROM post_embeddings WHERE post_id = ? AND model = 'test'")) {
+            stmt.setObject(1, post);
+            try (ResultSet rs = stmt.executeQuery()) {
+                rs.next();
+                Float[] values = (Float[]) rs.getArray(1).getArray();
+                double[] result = new double[values.length];
+                for (int i = 0; i < values.length; i++) {
+                    result[i] = values[i];
+                }
+                return result;
+            }
+        }
+    }
+
+    private static double cosine(double[] a, double[] b) {
+        double dot = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+        }
+        return dot / (length(a) * length(b));
     }
 
     // ===== The viewer's vector =====
@@ -268,10 +319,14 @@ class PostReadDbTest {
         return cards.stream().map(PostCardDto::id).toList();
     }
 
+    /** ME's candidates, as the feed's first page gathers them. */
+    private List<FeedScorer.Facts> candidates(Instant asOf) throws SQLException {
+        UserVector.Parts parts = feedRepository.findVectorParts(ME, asOf);
+        return feedRepository.findCandidates(ME, UserVector.blend(parts), parts.postAverage(), asOf, null, null, PostFeedFilters.none());
+    }
+
     private double similarity(UUID post, Instant asOf) throws SQLException {
-        double[] vector = UserVector.blend(feedRepository.findVectorParts(ME, asOf));
-        return feedRepository.findCandidates(ME, vector, asOf, null, null, PostFeedFilters.none()).stream()
-            .filter(f -> f.id().equals(post)).findFirst().orElseThrow().similarity();
+        return candidates(asOf).stream().filter(f -> f.id().equals(post)).findFirst().orElseThrow().similarity();
     }
 
     @Test
@@ -309,6 +364,28 @@ class PostReadDbTest {
         assertTrue(parts.stances().isEmpty());
         assertEquals(List.of(1), parts.categories().stream().map(UserVector.Category::picks).toList());
         assertEquals(768, UserVector.blend(parts).length);
+    }
+
+    @Test
+    void vector_aStanceFadesByHalfEachHalfLife_andIsLeftOutWhenVeryOld() throws SQLException {
+        Instant halfLifeLater = Instant.now().plus(Duration.ofSeconds((long) (FeedConfig.STANCE_HALF_LIFE_DAYS * 86400)));
+        Instant tooOld = Instant.now().plus(Duration.ofDays(FeedConfig.STANCE_MAX_AGE_DAYS + 1));
+
+        UserVector.Stance now = feedRepository.findVectorParts(ME, Instant.now()).stances().getFirst();
+        UserVector.Stance later = feedRepository.findVectorParts(ME, halfLifeLater).stances().getFirst();
+
+        assertEquals(1.0, now.amount(), 0.001);
+        assertEquals(0.5, later.amount(), 0.001);
+        assertEquals(0.5 * length(now.sum()), length(later.sum()), 0.001 * length(now.sum()));
+        assertTrue(feedRepository.findVectorParts(ME, tooOld).stances().isEmpty());
+    }
+
+    private static double length(double[] vector) {
+        double sum = 0;
+        for (double v : vector) {
+            sum += v * v;
+        }
+        return Math.sqrt(sum);
     }
 
     @Test
@@ -523,14 +600,15 @@ class PostReadDbTest {
         List<UUID> walked = walkFeed(feedService, viewer, 7, latitude, longitude, FeedMode.RANKED).stream().map(PostCardDto::id).toList();
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
-        assertEquals(ids(feedRepository.findCandidates(viewer, null, Instant.now(), latitude, longitude, PostFeedFilters.none())), new HashSet<>(walked));
+        assertEquals(ids(feedRepository.findCandidates(viewer, null, null, Instant.now(), latitude, longitude, PostFeedFilters.none())), new HashSet<>(walked));
     }
 
     @Test
     void walkingTheFallback_showsTheSamePostsOnce() throws SQLException {
         FeedRepository rankingDown = new FeedRepository("test") {
             @Override
-            public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
+            public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
+                                                         Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
                 throw new SQLException("ranking is down");
             }
         };
@@ -539,6 +617,6 @@ class PostReadDbTest {
         List<UUID> walked = walkFeed(fallback, ME, 7, null, null, FeedMode.UPCOMING).stream().map(PostCardDto::id).toList();
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
-        assertEquals(ids(feedRepository.findCandidates(ME, null, Instant.now(), null, null, PostFeedFilters.none())), new HashSet<>(walked));
+        assertEquals(ids(feedRepository.findCandidates(ME, null, null, Instant.now(), null, null, PostFeedFilters.none())), new HashSet<>(walked));
     }
 }

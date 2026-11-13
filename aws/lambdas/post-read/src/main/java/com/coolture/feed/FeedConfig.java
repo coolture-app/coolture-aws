@@ -9,30 +9,34 @@ import java.util.Map;
  */
 public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter) {
 
-    public static final FeedConfig DEFAULTS = new FeedConfig(0.40, 0.20, 0.25, 0.15, 0.10);
+    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10);
 
     /** Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it can't change the order. */
     public static final double NEUTRAL = 0.5;
     /**
-     * sdadas/mmlw-roberta-base puts user and event cosines in a narrow band, so this is the part of it that affinity spreads over 0 to 1.
-     * The midpoint is the median cosine, which keeps NEUTRAL close to a typical post. Measure these again if the model changes.
+     * The part of the cosine between the viewer's vector and a post, both with their averages taken out (UserVector), that
+     * affinity spreads over 0 to 1. That cosine is 0 for a typical post, so NEUTRAL stays a typical post, and with
+     * sdadas/mmlw-roberta-base it rarely leaves ±0.3 for anyone. A narrower band lets several good fits reach 1, where
+     * jitter picks between them. Measure it again if the model changes.
      */
-    public static final double AFFINITY_LOW = 0.786;
-    public static final double AFFINITY_HIGH = 0.946;
+    public static final double AFFINITY_LOW = -0.45;
+    public static final double AFFINITY_HIGH = 0.45;
     /** The model the constants above were measured with. The viewer's vector is built from this model's vectors only. */
     public static final String EMBEDDING_MODEL = "sdadas/mmlw-roberta-base";
 
     /**
-     * How the viewer's vector is built (UserVector). Unmeasured starting values, for the evaluation to tune. Only the
-     * stances named here count, so a negative one can never pull the vector away from what every post shares.
+     * How the viewer's vector is built (UserVector). Starting values, for the evaluation to tune; only the interest decay
+     * was compared, on simulated users. Only the stances named here count, so "Nie dla mnie" stays out of the vector.
      */
     public static final Map<String, Double> STANCE_WEIGHTS = Map.of("LIKE", 1.0, "INTERESTED", 1.5, "TAKES_PART", 2.0);
     public static final double INTEREST_CATEGORY_WEIGHT = 0.25;
     public static final double INTEREST_SHARE_MIN = 0.2;
-    public static final double INTEREST_DECAY = 10;
-    public static final int ENGAGEMENT_WINDOW_DAYS = 30;
+    public static final double INTEREST_DECAY = 5;
+    /** A stance this many days old counts half, in the vector and in engagement, so recent taste leads. */
+    public static final double STANCE_HALF_LIFE_DAYS = 14;
+    public static final int STANCE_MAX_AGE_DAYS = 112;
     public static final double PROXIMITY_SCALE_METERS = 20_000;
-    public static final double TIME_SCALE_DAYS = 14;
+    public static final double TIME_SCALE_DAYS = 30;
     public static final int POPULARITY_CAP = 100;
 
     public static final int QUERY_TIMEOUT_SECONDS = 5;

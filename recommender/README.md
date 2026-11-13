@@ -59,8 +59,8 @@ vector.
    (`test_model_name.py` checks they agree). Keep it 768-dimensional, or add a migration for the vector columns.
 2. Re-embed interests, then posts.
 3. Measure `AFFINITY_LOW` and `AFFINITY_HIGH` in `FeedConfig` again. They cover the cosines this model gives between
-   users and events, with the midpoint at the median, so they belong to the model. Interests with a prefix, or users who
-   like more posts, shift them too.
+   the viewer's vector and posts once the average post and the average interest are taken out (`UserVector`), so they
+   belong to the model.
 
 A new model name is what marks a vector as old. A new revision, or a change to how text is encoded, isn't visible that
 way: locally, clear `interest_embeddings` and run `make embed-posts ALL=1`. There's no equivalent on AWS yet.
@@ -104,7 +104,9 @@ frontend blocks the page with the interest picker until a user has some.
 
 The feed builds the viewer's vector on every page, in `post-read` (`FeedRepository.findVectorParts`, then `UserVector`):
 the posts they liked, are interested in or going to, up to the session's `asOf`, blended with their picks, each pick with
-a share of its category's average. Interests give way as the viewer engages more, down to a floor. Nothing is stored, so
+a share of its category's average. Interests give way as the viewer engages more, down to a floor. The stances lose the
+average post and the interests the average interest before they're blended, and each post loses the average post before
+it's compared, so what every text shares doesn't decide the order (`UserVector` says why). Nothing is stored, so
 a reaction or a new pick counts from the next session, and every page of a session ranks with the same vector. The
 weights and the decay are in `FeedConfig`.
 

@@ -41,7 +41,7 @@ public class FeedRepository {
                p.starts_at,
         """ + "       " + PostSql.EVENT_END + " AS ends_at,\n" + """
                COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0) AS engagement,
-               CASE WHEN pe.model = ? THEN 1 - (pe.embedding <=> ?::vector) END AS similarity,
+               CASE WHEN pe.model = ? THEN 1 - ((pe.embedding - ?::vector) <=> ?::vector) END AS similarity,
                ST_Distance(el.coordinates,
                            ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters
         FROM posts p
@@ -52,14 +52,28 @@ public class FeedRepository {
 
     /**
      * The sums UserVector blends, each from one model's vectors. Stances count up to asOf, so every page of a session
-     * gets the same vector; interests have no time and count as they are. Each row is a part: a stance, the picked
-     * interests, or one category picked from with all of its interests.
+     * gets the same vector. Each fades with its age in whole days by asOf, half every STANCE_HALF_LIFE_DAYS: summed per
+     * day first, then each day's sum weighed once, so a stance type comes back as one row; past STANCE_MAX_AGE_DAYS
+     * they'd weigh next to nothing and are left out. Interests have no time and count as they are. Each row is a part: a stance, with the sum of its fading
+     * weights as the amount, the picked interests, one category picked from with all of its interests, or the average of
+     * every interest or every post. The post average counts posts created up to asOf, ended and deleted ones too, so
+     * nothing done during a session moves it.
      */
     private static final String VECTOR_PARTS = """
         WITH stances AS (
             SELECT post_id, type, created_at FROM post_reactions WHERE user_id = ?::uuid
             UNION ALL
             SELECT post_id, type, created_at FROM post_participations WHERE user_id = ?::uuid
+        ), aged AS (
+            SELECT s.type, pe.embedding, floor(extract(epoch FROM ?::timestamptz - s.created_at) / 86400) AS age
+            FROM stances s
+            JOIN post_embeddings pe ON pe.post_id = s.post_id AND pe.model = ?
+            WHERE s.type = ANY(?) AND s.created_at <= ?::timestamptz
+              AND s.created_at > ?::timestamptz - make_interval(days => ?)
+        ), daily AS (
+            SELECT type, sum(embedding) AS embedding, count(*) AS stances, power(0.5, age / ?) AS fade
+            FROM aged
+            GROUP BY type, age
         ), picks AS (
             SELECT i.key, i.category_key, ie.embedding
             FROM user_interests ui
@@ -67,12 +81,10 @@ public class FeedRepository {
             JOIN interest_embeddings ie ON ie.interest_key = i.key AND ie.model = ?
             WHERE ui.user_id = ?::uuid
         )
-        SELECT s.type AS part, sum(pe.embedding)::real[] AS total,
-               count(*) FILTER (WHERE s.created_at >= ?::timestamptz - make_interval(days => ?)) AS amount
-        FROM stances s
-        JOIN post_embeddings pe ON pe.post_id = s.post_id AND pe.model = ?
-        WHERE s.type = ANY(?) AND s.created_at <= ?::timestamptz
-        GROUP BY s.type
+        SELECT type AS part, sum(embedding * array_fill(fade::real, ARRAY[vector_dims(embedding)])::vector)::real[] AS total,
+               sum(stances * fade) AS amount
+        FROM daily
+        GROUP BY type
         UNION ALL
         SELECT 'INTERESTS', sum(embedding)::real[], count(*) FROM picks HAVING count(*) > 0
         UNION ALL
@@ -81,6 +93,14 @@ public class FeedRepository {
         JOIN interests i ON i.category_key = chosen.category_key
         JOIN interest_embeddings ie ON ie.interest_key = i.key AND ie.model = ?
         GROUP BY chosen.category_key
+        UNION ALL
+        SELECT 'INTEREST_AVERAGE', avg(embedding)::real[], count(*) FROM interest_embeddings WHERE model = ? HAVING count(*) > 0
+        UNION ALL
+        SELECT 'POST_AVERAGE', avg(pe.embedding)::real[], count(*)
+        FROM post_embeddings pe
+        JOIN posts p ON p.id = pe.post_id
+        WHERE pe.model = ? AND p.created_at <= ?::timestamptz
+        HAVING count(*) > 0
         """;
 
     private final String model;
@@ -93,13 +113,15 @@ public class FeedRepository {
         this.model = model;
     }
 
-    /** Empty for a guest, and for a viewer with nothing to build a vector from. */
+    /** Empty for a guest, with no query. */
     public UserVector.Parts findVectorParts(UUID viewer, Instant asOf) throws SQLException {
         List<UserVector.Stance> stances = new ArrayList<>();
         List<UserVector.Category> categories = new ArrayList<>();
         double[] interests = null;
+        double[] interestAverage = null;
+        double[] postAverage = null;
         if (viewer == null) {
-            return new UserVector.Parts(stances, null, categories);
+            return new UserVector.Parts(stances, null, categories, null, null);
         }
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -109,29 +131,36 @@ public class FeedRepository {
             new ParamBinder(stmt, conn)
                 .bindUUID(viewer)
                 .bindUUID(viewer)
-                .bindString(model)
-                .bindUUID(viewer)
                 .bindTimestamp(asOf)
-                .bindInt(FeedConfig.ENGAGEMENT_WINDOW_DAYS)
                 .bindString(model)
                 .bindVarcharArray(FeedConfig.STANCE_WEIGHTS.keySet().toArray(new String[0]))
                 .bindTimestamp(asOf)
-                .bindString(model);
+                .bindTimestamp(asOf)
+                .bindInt(FeedConfig.STANCE_MAX_AGE_DAYS)
+                .bindDouble(FeedConfig.STANCE_HALF_LIFE_DAYS)
+                .bindString(model)
+                .bindUUID(viewer)
+                .bindString(model)
+                .bindString(model)
+                .bindString(model)
+                .bindTimestamp(asOf);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     String part = rs.getString("part");
                     double[] total = doubles(rs.getArray("total"));
-                    int amount = rs.getInt("amount");
+                    double amount = rs.getDouble("amount");
                     switch (part) {
                         case "INTERESTS" -> interests = total;
-                        case "CATEGORY" -> categories.add(new UserVector.Category(total, amount));
+                        case "CATEGORY" -> categories.add(new UserVector.Category(total, (int) amount));
+                        case "INTEREST_AVERAGE" -> interestAverage = total;
+                        case "POST_AVERAGE" -> postAverage = total;
                         default -> stances.add(new UserVector.Stance(part, total, amount));
                     }
                 }
             }
         }
-        return new UserVector.Parts(stances, interests, categories);
+        return new UserVector.Parts(stances, interests, categories, interestAverage, postAverage);
     }
 
     private static double[] doubles(Array array) throws SQLException {
@@ -146,9 +175,10 @@ public class FeedRepository {
     /**
      * One row per candidate. Has its own timeout, so slow ranking falls back to the upcoming order instead of holding up
      * the page. The position is the session's, for proximity; a radius in the filters uses the filters' own position.
+     * Each post loses the post average before it's compared with the viewer's vector, as the vector's parts did.
      */
-    public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, Instant asOf, Double latitude,
-                                                 Double longitude, PostFeedFilters filters) throws SQLException {
+    public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
+                                                 Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(FEATURES + feedRules(filters.showsAllPastEvents()))) {
 
@@ -156,6 +186,7 @@ public class FeedRepository {
 
             ParamBinder b = new ParamBinder(stmt, conn);
             b.bindString(model)
+             .bindString(UserVector.toSql(postAverage))
              .bindString(UserVector.toSql(viewerVector))
              .bindDouble(longitude)
              .bindDouble(latitude);
