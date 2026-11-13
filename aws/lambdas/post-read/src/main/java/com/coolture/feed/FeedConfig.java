@@ -9,7 +9,7 @@ import java.util.Map;
  */
 public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter) {
 
-    public static final FeedConfig DEFAULTS = new FeedConfig(0.55, 0.20, 0.10, 0.15, 0.10);
+    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10);
 
     /** Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it can't change the order. */
     public static final double NEUTRAL = 0.5;
@@ -25,13 +25,13 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     public static final String EMBEDDING_MODEL = "sdadas/mmlw-roberta-base";
 
     /**
-     * How the viewer's vector is built (UserVector). Unmeasured starting values, for the evaluation to tune. Only the
-     * stances named here count, so a negative one can never pull the vector away from what every post shares.
+     * How the viewer's vector is built (UserVector). Starting values, for the evaluation to tune; only the interest decay
+     * was compared, on simulated users. Only the stances named here count, so "Nie dla mnie" stays out of the vector.
      */
     public static final Map<String, Double> STANCE_WEIGHTS = Map.of("LIKE", 1.0, "INTERESTED", 1.5, "TAKES_PART", 2.0);
     public static final double INTEREST_CATEGORY_WEIGHT = 0.25;
     public static final double INTEREST_SHARE_MIN = 0.2;
-    public static final double INTEREST_DECAY = 10;
+    public static final double INTEREST_DECAY = 5;
     /** A stance this many days old counts half, in the vector and in engagement, so recent taste leads. */
     public static final double STANCE_HALF_LIFE_DAYS = 14;
     public static final int STANCE_MAX_AGE_DAYS = 112;
