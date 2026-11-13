@@ -129,16 +129,13 @@ weights and the decay are in `FeedConfig`.
 | Event–event | Each event's 5 nearest among events that haven't ended |
 | User → user | Follows, minus blocks either way |
 
-Each user's candidates (events not ended, not theirs, not reacted to) get the walk's mass as a rank from 0 to 1. A run is
-one row of `rec_graph_runs` with its rows in `rec_graph_scores`, marked finished once they're committed. The feed reads
-the latest run finished a minute before the session's `asOf`, so a run landing mid-scroll doesn't move its pages, and
-gives a post with no score `0.5`. Its weight is `graph` in `FeedConfig`. Runs older than one finished a day ago are
-deleted, and a session older than that ranks with `0.5` for every post.
+Each user's candidates, the posts the feed may show them as new, get the walk's mass as a rank from 0 to 1. The feed
+reads the latest run finished a minute before the session's `asOf`, so a run landing mid-scroll doesn't move its pages;
+a post with no score gets `0.5` (weight `graph` in `FeedConfig`). Runs are kept a day.
 
 ```bash
-make graph-signal                    # one run locally; make seed ends with it
+make graph-signal                  # one run locally; make seed ends with it
 DB_TEST=true make test-python      # with its database tests, after make seed
 ```
 
-On AWS it runs on a schedule, off by default: `GraphScheduleEnabled=true` and `GraphSchedule` (default `rate(6 hours)`)
-are parameters of the stack. Between runs a new user or post is neutral.
+On AWS it runs every 6 hours once the stack's `GraphScheduleEnabled` is `true`; it's off by default.

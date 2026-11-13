@@ -36,16 +36,13 @@ Parameters:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
-  GraphSchedule:
-    Type: String
-    Default: 'rate(6 hours)'
   LogRetentionDays:
     Type: Number
     Default: 7
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
-  GraphScheduleOn: !And [!Condition IsAWS, !Equals [!Ref GraphScheduleEnabled, 'true']]
+  GraphScheduleOn: !Equals [!Ref GraphScheduleEnabled, 'true']
 
 Globals:
   Function:
@@ -125,5 +122,5 @@ Resources:
         Schedule:
           Type: ScheduleV2
           Properties:
-            ScheduleExpression: !Ref GraphSchedule
+            ScheduleExpression: rate(6 hours)
             State: !If [GraphScheduleOn, ENABLED, DISABLED]

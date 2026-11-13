@@ -36,7 +36,6 @@ def inputs(**kw):
 
 
 def by_event(rows, user=0):
-    rows = list(rows)
     return {e: s for u, e, s in rows if u == user}
 
 
@@ -50,7 +49,6 @@ def test_scores_are_ranks_from_0_to_1():
     got = by_event(scores(inputs(picks=[(0, 0)])))
     assert len(got) == N
     assert min(got.values()) == 0 and max(got.values()) == 1
-    assert all(0 <= s <= 1 for s in got.values())
 
 
 def test_hidden_and_ended_events_get_no_score():
@@ -108,6 +106,13 @@ def test_ended_events_have_no_event_neighbours():
     scorable[list(group(0))] = False
     _, to_event = content_edges(inputs(scorable=scorable))
     assert not any(e in group(0) or f in group(0) for e, f in to_event)
+
+
+def test_an_event_equal_to_the_average_post_gets_no_content_edges():
+    vectors = EVENTS.copy()
+    vectors[3] = EVENTS.mean(axis=0)
+    to_interest, to_event = content_edges(inputs(event_vectors=vectors, post_average=vectors[3]))
+    assert all(e != 3 for e, _ in to_interest) and all(3 not in pair for pair in to_event)
 
 
 def test_a_single_event_still_links_to_interests():

@@ -39,13 +39,14 @@ def centred(vectors: np.ndarray, average: np.ndarray) -> np.ndarray:
 
 def content_edges(inputs: Inputs) -> tuple[list, list]:
     """By rank, not by a cosine threshold: the model's cosines sit in a narrow band. Event–event edges join scorable
-    events only, as measured; ended ones keep their other edges."""
+    events only, as measured; ended ones keep their other edges. An event equal to the average post has no content."""
     events = centred(inputs.event_vectors, inputs.post_average)
     interests = centred(inputs.interest_vectors, inputs.interest_vectors.mean(axis=0))
+    has_content = events.any(axis=1)
     nearest = np.argsort(-(events @ interests.T), axis=1)[:, :INTERESTS_PER_EVENT]
-    to_interest = [(e, int(i)) for e in range(len(events)) for i in nearest[e]]
+    to_interest = [(int(e), int(i)) for e in np.flatnonzero(has_content) for i in nearest[e]]
 
-    live = np.flatnonzero(inputs.scorable)
+    live = np.flatnonzero(inputs.scorable & has_content)
     pairs = events[live] @ events[live].T
     np.fill_diagonal(pairs, -np.inf)
     k = max(0, min(EVENT_NEIGHBOURS, len(live) - 1))

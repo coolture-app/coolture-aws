@@ -59,7 +59,7 @@ def load(conn: psycopg.Connection) -> Inputs | None:
            WHERE pe.model = %s AND p.created_at <= now()""", (EMBEDDING_MODEL,)).fetchone()
     # Ended events stay while their stances count, to connect people and places.
     events = conn.execute(
-        f"""SELECT p.id, pe.embedding::real[], {EVENT_END} >= now(),
+        f"""SELECT p.id, pe.embedding::real[], {EVENT_END} >= now(), p.author_id, p.visibility,
                    CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
                         THEN lower(btrim(el.venue_name)) || ' | ' || lower(btrim(coalesce(el.city, ''))) END
             FROM posts p
@@ -80,34 +80,36 @@ def load(conn: psycopg.Connection) -> Inputs | None:
                  UNION ALL SELECT user_id, post_id, type, created_at FROM post_participations) s
            WHERE type = ANY(%s) AND created_at > now() - make_interval(days => %s)""",
         (list(STANCE_WEIGHTS), STANCE_MAX_AGE_DAYS)).fetchall()
-    follows = conn.execute(
-        """SELECT f.source_user_id, f.target_user_id FROM user_relations f
-           WHERE f.type = 'FOLLOW' AND NOT EXISTS (
-               SELECT 1 FROM user_relations b WHERE b.type = 'BLOCK'
-                 AND ((b.source_user_id = f.source_user_id AND b.target_user_id = f.target_user_id)
-                   OR (b.source_user_id = f.target_user_id AND b.target_user_id = f.source_user_id)))""").fetchall()
-    # As the feed's NOT_MINE, for the events that can be scored.
-    hidden = conn.execute(
-        f"""SELECT s.user_id, s.post_id
-            FROM (SELECT user_id, post_id FROM post_reactions UNION SELECT user_id, post_id FROM post_participations
-                  UNION SELECT author_id, id FROM posts) s
-            JOIN posts p ON p.id = s.post_id
-            WHERE p.deleted_at IS NULL AND {EVENT_END} >= now()""").fetchall()
+    relations = conn.execute("SELECT source_user_id, target_user_id, type FROM user_relations").fetchall()
+    reacted = conn.execute(
+        "SELECT user_id, post_id FROM post_reactions UNION SELECT user_id, post_id FROM post_participations").fetchall()
 
+    following = {(a, b) for a, b, t in relations if t == "FOLLOW"}
+    blocked = {pair for a, b, t in relations if t == "BLOCK" for pair in ((a, b), (b, a))}
+    follows = sorted(following - blocked)
     event_index = {row[0]: e for e, row in enumerate(events)}
     interest_index = {row[0]: i for i, row in enumerate(interests)}
     user_ids = sorted({u for u, _ in picks} | {row[0] for row in stances} | {u for pair in follows for u in pair})
     user_index = {u: j for j, u in enumerate(user_ids)}
-    hidden_by_user: dict[int, set[int]] = {}
-    for user, post in hidden:
+
+    # What the feed never shows a user as new: PostSql's NOT_MINE, VISIBLE and NOT_BLOCKED.
+    hidden: dict[int, set[int]] = {}
+    for user, post in reacted:
         if user in user_index and post in event_index:
-            hidden_by_user.setdefault(user_index[user], set()).add(event_index[post])
+            hidden.setdefault(user_index[user], set()).add(event_index[post])
+    for e, (_, _, scorable, author, visibility, _) in enumerate(events):
+        if not scorable:
+            continue
+        for user, u in user_index.items():
+            unseen = visibility != "PUBLIC" and not (visibility == "FRIENDS" and (user, author) in following)
+            if user == author or (unseen and user != author) or (user, author) in blocked:
+                hidden.setdefault(u, set()).add(e)
 
     return Inputs(
         event_ids=[row[0] for row in events],
         event_vectors=np.array([row[1] for row in events], dtype=float),
         scorable=np.array([row[2] for row in events], dtype=bool),
-        venues=[row[3] for row in events],
+        venues=[row[5] for row in events],
         post_average=np.array(average, dtype=float),
         interest_vectors=np.array([row[1] for row in interests], dtype=float),
         user_ids=user_ids,
@@ -115,7 +117,7 @@ def load(conn: psycopg.Connection) -> Inputs | None:
         stances=[(user_index[u], event_index[p], STANCE_WEIGHTS[t] * 0.5 ** (float(age) / STANCE_HALF_LIFE_DAYS))
                  for u, p, t, age in stances if p in event_index],
         follows=[(user_index[a], user_index[b]) for a, b in follows],
-        hidden=hidden_by_user,
+        hidden=hidden,
     )
 
 

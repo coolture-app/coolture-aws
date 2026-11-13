@@ -70,8 +70,8 @@ public class FeedRepository {
         CROSS JOIN LATERAL (SELECT CASE WHEN pe.model = ? THEN pe.embedding - ?::vector END AS centred OFFSET 0) c
         LEFT JOIN rec_graph_scores g ON g.post_id = p.id AND g.user_id = ?::uuid
          -- The minute covers clock skew between this Lambda and the database, and the commit after a run is marked finished.
-         AND g.run_number = (SELECT max(run_number) FROM rec_graph_runs
-                             WHERE finished_at <= ?::timestamptz - interval '1 minute')
+         AND g.run_number = (SELECT run_number FROM rec_graph_runs
+                             WHERE finished_at <= ?::timestamptz - interval '1 minute' ORDER BY finished_at DESC LIMIT 1)
         WHERE
         """;
 

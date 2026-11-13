@@ -178,17 +178,20 @@ embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/s
 
 # Built on first use, when its image was removed, or when the template or the graph signal's code changed. After
 # changing post-embedding's code, run make build-embeddings again.
+# Invokes a worker locally with an event, and fails when it returns an error.
+invoke-worker = out="$$(echo '$(2)' | sam local invoke $(1) --template-file $(EMBEDDINGS_TEMPLATE) --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
+
 require-embeddings-build:
-	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ -n "$$(find recommender/embedding-workers/template.yaml recommender/graph-signal/src -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
+	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ -n "$$(find recommender/embedding-workers/template.yaml recommender/graph-signal/src -type f -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
 		echo "Building the embedding workers. The first build downloads the model into a 3.5 GB image."; \
 		$(MAKE) --no-print-directory build-embeddings; \
 	fi
 
 embed-interests: require-embeddings-build ## Embed interests missing vectors locally
-	@out="$$(echo '{"action":"embed-interests"}' | sam local invoke PostEmbeddingFunction --template-file .aws-sam/embeddings/template.yaml --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
+	@$(call invoke-worker,PostEmbeddingFunction,{"action":"embed-interests"})
 
 graph-signal: require-embeddings-build ## Score every user's events with the graph walk locally (after embed-posts)
-	@out="$$(echo '{}' | sam local invoke GraphSignalFunction --template-file $(EMBEDDINGS_TEMPLATE) --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
+	@$(call invoke-worker,GraphSignalFunction,{})
 
 local: build stop-lambdas ## Start local API on localhost:3000 (Ctrl+C stops it; make stop if containers stay)
 	@echo "API: http://localhost:3000"
