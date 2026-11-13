@@ -6,10 +6,11 @@ import java.util.Map;
 /**
  * Every value the feed depends on. Only the weights can be overridden, with FEED_WEIGHTS, for example
  * "affinity=0.4,jitter=0". A weight of 0 switches that signal off. FEED_WEIGHTS is never a request parameter.
+ * notForMe is how much affinity a post loses at most for being like what the viewer marked "Nie dla mnie" (FeedScorer).
  */
-public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter) {
+public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter, double notForMe) {
 
-    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10);
+    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10, 0.5);
 
     /** Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it can't change the order. */
     public static final double NEUTRAL = 0.5;
@@ -21,6 +22,14 @@ public record FeedConfig(double affinity, double proximity, double time, double 
      */
     public static final double AFFINITY_LOW = -0.45;
     public static final double AFFINITY_HIGH = 0.45;
+    /**
+     * A post starts losing affinity for "Nie dla mnie" once its cosine to a marked post, both with the post average taken
+     * out, passes this: the p95 between two posts with this model, so only a post closer than nearly every pair counts as
+     * like the marked one. Measure it again if the model changes.
+     */
+    public static final double NOT_FOR_ME_FROM = 0.206;
+    /** How many of the viewer's newest marks a post is compared with, which bounds the query. */
+    public static final int NOT_FOR_ME_MARKS = 100;
     /** The model the constants above were measured with. The viewer's vector is built from this model's vectors only. */
     public static final String EMBEDDING_MODEL = "sdadas/mmlw-roberta-base";
 
@@ -32,7 +41,7 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     public static final double INTEREST_CATEGORY_WEIGHT = 0.25;
     public static final double INTEREST_SHARE_MIN = 0.2;
     public static final double INTEREST_DECAY = 5;
-    /** A stance this many days old counts half, in the vector and in engagement, so recent taste leads. */
+    /** A stance this many days old counts half, in the vector, in engagement and as a mark, so recent taste leads. */
     public static final double STANCE_HALF_LIFE_DAYS = 14;
     public static final int STANCE_MAX_AGE_DAYS = 112;
     public static final double PROXIMITY_SCALE_METERS = 20_000;
@@ -61,7 +70,8 @@ public record FeedConfig(double affinity, double proximity, double time, double 
                 "proximity", DEFAULTS.proximity,
                 "time", DEFAULTS.time,
                 "popularity", DEFAULTS.popularity,
-                "jitter", DEFAULTS.jitter));
+                "jitter", DEFAULTS.jitter,
+                "notForMe", DEFAULTS.notForMe));
             for (String entry : raw.split(",")) {
                 String[] pair = entry.split("=", 2);
                 String name = pair[0].trim();
@@ -75,7 +85,7 @@ public record FeedConfig(double affinity, double proximity, double time, double 
                 weights.put(name, value);
             }
             return new FeedConfig(weights.get("affinity"), weights.get("proximity"), weights.get("time"),
-                weights.get("popularity"), weights.get("jitter"));
+                weights.get("popularity"), weights.get("jitter"), weights.get("notForMe"));
         } catch (RuntimeException e) {
             System.err.println("Invalid FEED_WEIGHTS, using the defaults: " + e.getMessage());
             return DEFAULTS;

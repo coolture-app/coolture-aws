@@ -61,7 +61,7 @@ import static org.mockito.Mockito.mock;
 
 /**
  * Runs the real queries on the migrated database, as the read-only role post-read uses on AWS, so a missing grant fails here.
- * Needs `make up`. Run it with `make test-post-read-db`. The fixtures are removed afterwards.
+ * Needs `make up`. Run it with `make test-db`. The fixtures are removed afterwards.
  */
 @EnabledIfEnvironmentVariable(named = "DB_TEST", matches = "true")
 class PostReadDbTest {
@@ -70,7 +70,7 @@ class PostReadDbTest {
     private static final UUID OTHER_MODEL_POST = UUID.fromString("a0000000-0000-0000-0000-000000000200");
 
     private static final Set<String> PUBLIC_LIVE = Set.of("future_public", "no_end_started_2h", "multi_day_running", "commented");
-    private static final Set<String> INTERACTED = Set.of("liked", "disliked", "interested", "attending");
+    private static final Set<String> INTERACTED = Set.of("liked", "marked", "interested", "attending");
     private static final Set<String> ENDED_RECENTLY = Set.of("no_end_started_4h", "no_end_started_14h", "ended_1h_ago", "ended_11h_ago");
     private static final Set<String> ENDED_LONG_AGO = Set.of("no_end_started_16h", "ended_13h_ago", "ended_last_year");
     private static final Set<String> HIDDEN_FROM_ME = Set.of("deleted", "by_i_blocked", "by_blocked_me", "friends_by_stranger", "private_by_stranger");
@@ -315,8 +315,30 @@ class PostReadDbTest {
         writeAsTheApp("DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?", post);
     }
 
+    /** "Nie dla mnie" at the given SQL time. */
+    private static void mark(UUID post, String createdAt) throws SQLException {
+        writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'NOT_INTERESTED', "
+            + createdAt + ")", post);
+    }
+
+    private static void unmark(UUID post) throws SQLException {
+        writeAsTheApp("DELETE FROM post_participations WHERE post_id = ? AND user_id = ?", post);
+    }
+
+    private double nearMark(UUID post, Instant asOf) throws SQLException {
+        return candidates(asOf).stream().filter(f -> f.id().equals(post)).findFirst().orElseThrow().nearMark();
+    }
+
     private static List<UUID> idsOf(List<PostCardDto> cards) {
         return cards.stream().map(PostCardDto::id).toList();
+    }
+
+    /**
+     * A session that started before anything the test writes next. Docker's clock on Windows can drift a second or more
+     * from this one, so a mark or like stamped with the database's now() could otherwise land before asOf.
+     */
+    private static Instant sessionStart() {
+        return Instant.now().minusSeconds(10);
     }
 
     /** ME's candidates, as the feed's first page gathers them. */
@@ -331,7 +353,7 @@ class PostReadDbTest {
 
     @Test
     void feed_aLikeMadeDuringASession_leavesItsVectorAlone_andCountsFromTheNext() throws SQLException {
-        Instant asOf = Instant.now().minusSeconds(1);
+        Instant asOf = sessionStart();
         FeedService session = new FeedService(feedRepository, FeedConfig.DEFAULTS, Clock.fixed(asOf, ZoneOffset.UTC), () -> 42);
         UUID liked = postTitled("walk_7");
         UUID twin = postTitled("twin_of_walk_7");
@@ -354,6 +376,70 @@ class PostReadDbTest {
             assertTrue(similarity(twin, Instant.now()) > twinBefore, "the next session's vector didn't move towards the like");
         } finally {
             unlike(liked);
+        }
+    }
+
+    @Test
+    void feed_aMarkMadeDuringASession_leavesItsPagesAlone_andPushesItsTwinDownFromTheNext() throws SQLException {
+        Instant asOf = sessionStart();
+        FeedService session = new FeedService(feedRepository, FeedConfig.DEFAULTS, Clock.fixed(asOf, ZoneOffset.UTC), () -> 42);
+        UUID marked = postTitled("walk_7");
+        UUID twin = postTitled("twin_of_walk_7");
+
+        List<UUID> walked = new ArrayList<>();
+        FeedPage page = session.getFeed(ME, null, 7, null, null);
+        walked.addAll(idsOf(page.items()));
+        mark(marked, "now()");
+        try {
+            while (page.page().nextCursor() != null) {
+                page = session.getFeed(ME, page.page().nextCursor(), 7, null, null);
+                walked.addAll(idsOf(page.items()));
+            }
+            assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
+            assertEquals(0, nearMark(twin, asOf), "a mark after asOf acted on its own session");
+
+            Instant next = Instant.now();
+            assertEquals(1, nearMark(twin, next), 1e-6);
+            assertFalse(candidates(next).stream().anyMatch(f -> f.id().equals(marked)), "the marked post is still a candidate");
+            FeedConfig d = FeedConfig.DEFAULTS;
+            FeedScorer scorer = new FeedScorer(new FeedConfig(d.affinity(), d.proximity(), d.time(), d.popularity(), 0, d.notForMe()));
+            FeedScorer.Facts twinFacts = candidates(next).stream().filter(f -> f.id().equals(twin)).findFirst().orElseThrow();
+            FeedScorer.Facts unmarked = new FeedScorer.Facts(twinFacts.id(), twinFacts.startsAt(), twinFacts.endsAt(),
+                twinFacts.engagement(), twinFacts.similarity(), twinFacts.meters());
+            assertTrue(scorer.score(twinFacts, next, 1).total() < scorer.score(unmarked, next, 1).total());
+        } finally {
+            unmark(marked);
+        }
+    }
+
+    @Test
+    void feed_aMarkFadesByHalfEachHalfLife_andIsLeftOutWhenVeryOld() throws SQLException {
+        UUID marked = postTitled("walk_7");
+        UUID twin = postTitled("twin_of_walk_7");
+        mark(marked, "now()");
+        try {
+            // An hour more, so a database clock ahead of this one still counts whole days.
+            Instant halfLifeLater = Instant.now().plus(Duration.ofSeconds((long) (FeedConfig.STANCE_HALF_LIFE_DAYS * 86400)))
+                .plus(Duration.ofHours(1));
+            Instant tooOld = Instant.now().plus(Duration.ofDays(FeedConfig.STANCE_MAX_AGE_DAYS + 1));
+
+            assertEquals(0.5, nearMark(twin, halfLifeLater), 1e-6);
+            assertEquals(0, nearMark(twin, tooOld));
+        } finally {
+            unmark(marked);
+        }
+    }
+
+    @Test
+    void vector_leavesMarksOut() throws SQLException {
+        Instant asOf = Instant.now();
+        UUID marked = postTitled("walk_7");
+        double[] before = UserVector.blend(feedRepository.findVectorParts(ME, asOf));
+        mark(marked, "now() - interval '1 second'");
+        try {
+            assertArrayEquals(before, UserVector.blend(feedRepository.findVectorParts(ME, asOf)), 0);
+        } finally {
+            unmark(marked);
         }
     }
 
@@ -432,6 +518,29 @@ class PostReadDbTest {
 
         assertEquals(ReactionType.LIKE, card(cards, "liked").myReaction());
         assertEquals(ParticipationType.INTERESTED, card(cards, "interested").myParticipation());
+        assertEquals(ParticipationType.NOT_INTERESTED, card(cards, "marked").myParticipation());
+    }
+
+    private static PostFeedFilters stances(String... types) {
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null, null,
+            List.of(types), null, null, 20, "STANCE_NEWEST", true);
+    }
+
+    @Test
+    void browse_theViewersMarks_newestFirst_andOnlyTheirOwn() throws SQLException {
+        UUID older = postTitled("walk_11");
+        UUID newer = postTitled("walk_12");
+        mark(older, "now() - interval '2 hours'");
+        mark(newer, "now() - interval '1 hour'");
+        try {
+            List<String> walked = titles(walkPosts(ME, stances("NOT_INTERESTED"), 1));
+
+            assertEquals(List.of("marked", "walk_12", "walk_11"), walked);
+            assertTrue(walkPosts(UUID.fromString("a0000000-0000-0000-0000-000000000002"), stances("NOT_INTERESTED"), 20).isEmpty());
+        } finally {
+            unmark(older);
+            unmark(newer);
+        }
     }
 
     private static PostCardDto card(List<PostCardDto> cards, String title) {
@@ -578,7 +687,7 @@ class PostReadDbTest {
     // ===== Walks =====
 
     @ParameterizedTest
-    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = "NEAREST")
+    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = {"NEAREST", "STANCE_NEWEST"})
     void walkingASort_showsEveryPostOnceInOrder(PostSort sort) throws SQLException {
         for (boolean includePast : List.of(false, true)) {
             PostFeedFilters filters = filters(sort.name(), includePast, null, null);

@@ -36,17 +36,37 @@ public class FeedRepository {
             + "  AND " + PostFilterSql.MATCHES + "\n";
     }
 
+    /**
+     * Each post loses the post average once (centred), and is compared with the viewer's vector and with each of the
+     * viewer's "Nie dla mnie" marks, centred the same way. Marks count up to asOf, fade as stances do, and only the newest
+     * NOT_FOR_ME_MARKS. MATERIALIZED, because an inlined CTE would run again for every candidate, and OFFSET 0, because a
+     * flattened lateral would read and centre the post's vector again for every mark (100 marks took 6 s at 2,000 posts).
+     */
     private static final String FEATURES = """
+        WITH marks AS MATERIALIZED (
+            SELECT pe.embedding - ?::vector AS centred,
+                   power(0.5, floor(extract(epoch FROM ?::timestamptz - pp.created_at) / 86400) / ?) AS fade
+            FROM post_participations pp
+            JOIN post_embeddings pe ON pe.post_id = pp.post_id AND pe.model = ?
+            WHERE pp.user_id = ?::uuid AND pp.type = 'NOT_INTERESTED'
+              AND pp.created_at <= ?::timestamptz
+              AND pp.created_at > ?::timestamptz - make_interval(days => ?)
+            ORDER BY pp.created_at DESC
+            LIMIT ?
+        )
         SELECT p.id,
                p.starts_at,
         """ + "       " + PostSql.EVENT_END + " AS ends_at,\n" + """
                COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0) AS engagement,
-               CASE WHEN pe.model = ? THEN 1 - ((pe.embedding - ?::vector) <=> ?::vector) END AS similarity,
+               1 - (c.centred <=> ?::vector) AS similarity,
+               (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
+                FROM marks m) AS near_mark,
                ST_Distance(el.coordinates,
                            ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters
         FROM posts p
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
         LEFT JOIN event_locations el ON el.id = p.event_location_id
+        CROSS JOIN LATERAL (SELECT CASE WHEN pe.model = ? THEN pe.embedding - ?::vector END AS centred OFFSET 0) c
         WHERE
         """;
 
@@ -175,7 +195,6 @@ public class FeedRepository {
     /**
      * One row per candidate. Has its own timeout, so slow ranking falls back to the upcoming order instead of holding up
      * the page. The position is the session's, for proximity; a radius in the filters uses the filters' own position.
-     * Each post loses the post average before it's compared with the viewer's vector, as the vector's parts did.
      */
     public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
                                                  Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
@@ -184,12 +203,24 @@ public class FeedRepository {
 
             stmt.setQueryTimeout(FeedConfig.QUERY_TIMEOUT_SECONDS);
 
+            String average = UserVector.toSql(postAverage);
             ParamBinder b = new ParamBinder(stmt, conn);
-            b.bindString(model)
-             .bindString(UserVector.toSql(postAverage))
+            b.bindString(average)
+             .bindTimestamp(asOf)
+             .bindDouble(FeedConfig.STANCE_HALF_LIFE_DAYS)
+             .bindString(model)
+             .bindNullableUUID(viewer)
+             .bindTimestamp(asOf)
+             .bindTimestamp(asOf)
+             .bindInt(FeedConfig.STANCE_MAX_AGE_DAYS)
+             .bindInt(FeedConfig.NOT_FOR_ME_MARKS)
              .bindString(UserVector.toSql(viewerVector))
+             .bindDouble(FeedConfig.NOT_FOR_ME_FROM)
+             .bindDouble(FeedConfig.NOT_FOR_ME_FROM)
              .bindDouble(longitude)
-             .bindDouble(latitude);
+             .bindDouble(latitude)
+             .bindString(model)
+             .bindString(average);
             bindRules(b, viewer, asOf, filters);
 
             List<FeedScorer.Facts> candidates = new ArrayList<>();
@@ -201,12 +232,18 @@ public class FeedRepository {
                         ResultSetMappers.mapInstant(rs, "ends_at"),
                         rs.getInt("engagement"),
                         (Double) rs.getObject("similarity"),
-                        (Double) rs.getObject("meters")
+                        (Double) rs.getObject("meters"),
+                        nearMark((Double) rs.getObject("near_mark"))
                     ));
                 }
             }
             return candidates;
         }
+    }
+
+    /** No marks, or none to compare with, push nothing down. pgvector gives NaN for a zero vector. */
+    private static double nearMark(Double value) {
+        return value == null || value.isNaN() ? 0 : value;
     }
 
     /** The fallback order: soonest first, continuing after the given start time and id when they're set. */

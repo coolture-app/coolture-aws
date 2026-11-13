@@ -27,7 +27,7 @@ INSERT INTO fx VALUES
   ('mine',                     '1', '2 days',    NULL,        'PUBLIC',  false),
   ('mine_private',             '1', '2 days',    NULL,        'PRIVATE', false),
   ('liked',                    '2', '2 days',    NULL,        'PUBLIC',  false),
-  ('disliked',                 '2', '2 days',    NULL,        'PUBLIC',  false),
+  ('marked',                   '2', '2 days',    NULL,        'PUBLIC',  false),
   ('interested',               '2', '2 days',    NULL,        'PUBLIC',  false),
   ('attending',                '2', '2 days',    NULL,        'PUBLIC',  false),
   ('commented',                '2', '2 days',    NULL,        'PUBLIC',  false),
@@ -47,12 +47,15 @@ INSERT INTO posts (author_id, title, starts_at, type, created_at)
 VALUES ('a0000000-0000-0000-0000-000000000002', 'created_after_as_of', now() + interval '2 days', 'ONLINE', now() + interval '1 hour');
 
 INSERT INTO post_reactions (post_id, user_id, type)
-SELECT id, 'a0000000-0000-0000-0000-000000000001', CASE title WHEN 'liked' THEN 'LIKE' ELSE 'DISLIKE' END
-FROM posts WHERE title IN ('liked', 'disliked');
+SELECT id, 'a0000000-0000-0000-0000-000000000001', 'LIKE'
+FROM posts WHERE title = 'liked';
 
-INSERT INTO post_participations (post_id, user_id, type)
-SELECT id, 'a0000000-0000-0000-0000-000000000001', CASE title WHEN 'interested' THEN 'INTERESTED' ELSE 'TAKES_PART' END
-FROM posts WHERE title IN ('interested', 'attending');
+-- "Nie dla mnie" is marked a minute back, so it's before any session a test starts.
+INSERT INTO post_participations (post_id, user_id, type, created_at)
+SELECT id, 'a0000000-0000-0000-0000-000000000001',
+       CASE title WHEN 'interested' THEN 'INTERESTED' WHEN 'attending' THEN 'TAKES_PART' ELSE 'NOT_INTERESTED' END,
+       now() - interval '1 minute'
+FROM posts WHERE title IN ('interested', 'attending', 'marked');
 
 INSERT INTO comments (post_id, author_id, content)
 SELECT id, 'a0000000-0000-0000-0000-000000000001', 'x' FROM posts WHERE title = 'commented';
@@ -76,9 +79,10 @@ INSERT INTO post_embeddings (post_id, embedding, model)
 SELECT p.id, (SELECT array_agg(cos(i / 89.0))::real[]::vector FROM generate_series(1, 768) i), 'test'
 FROM posts p WHERE p.title = 'liked' AND p.author_id = 'a0000000-0000-0000-0000-000000000002';
 
--- Another post with walk_7's vector, so a like of walk_7 shows in its similarity.
-INSERT INTO posts (author_id, title, starts_at, type)
-VALUES ('a0000000-0000-0000-0000-000000000002', 'twin_of_walk_7', now() + interval '2 days', 'ONLINE');
+-- Another post with walk_7's vector, so a like or a mark of walk_7 shows in its similarity. Created before the sessions
+-- the tests start.
+INSERT INTO posts (author_id, title, starts_at, type, created_at)
+VALUES ('a0000000-0000-0000-0000-000000000002', 'twin_of_walk_7', now() + interval '2 days', 'ONLINE', now() - interval '1 minute');
 
 INSERT INTO post_embeddings (post_id, embedding, model)
 SELECT (SELECT id FROM posts WHERE title = 'twin_of_walk_7'), pe.embedding, 'test'
