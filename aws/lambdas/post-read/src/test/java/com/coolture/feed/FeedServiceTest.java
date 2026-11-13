@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,14 +38,18 @@ class FeedServiceTest {
         final List<Instant> asOfs = new ArrayList<>();
         final List<Double> latitudes = new ArrayList<>();
         final List<UUID> viewers = new ArrayList<>();
+        final List<double[]> postAverages = new ArrayList<>();
+        double[] postAverage;
 
         @Override
         public UserVector.Parts findVectorParts(UUID viewer, Instant asOf) {
-            return new UserVector.Parts(List.of(), null, List.of());
+            return new UserVector.Parts(List.of(), null, List.of(), null, postAverage);
         }
 
         @Override
-        public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
+        public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
+                                                     Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
+            postAverages.add(postAverage);
             asOfs.add(asOf);
             latitudes.add(latitude);
             viewers.add(viewer);
@@ -141,6 +146,16 @@ class FeedServiceTest {
 
         assertEquals(137, seen.size());
         assertEquals(new HashSet<>(repository.candidates.stream().map(FeedScorer.Facts::id).toList()), new HashSet<>(seen));
+    }
+
+    @Test
+    void comparesPostsWithThePostAverageTheVectorWasBuiltWith() throws SQLException {
+        repository.candidates = posts(3);
+        repository.postAverage = new double[]{0.5, 0.25};
+
+        service().getFeed(VIEWER, null, 20, null, null);
+
+        assertSame(repository.postAverage, repository.postAverages.getFirst());
     }
 
     @Test
@@ -290,7 +305,8 @@ class FeedServiceTest {
         List<FeedScorer.Facts> all = repository.candidates;
         FakeRepository broken = new FakeRepository() {
             @Override
-            public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) {
+            public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
+                                                         Double latitude, Double longitude, PostFeedFilters filters) {
                 return List.of(new FeedScorer.Facts(UUID.randomUUID(), null, 0, null, null));
             }
         };

@@ -6,6 +6,11 @@ import java.util.List;
  * The viewer's taste as one vector: the posts they liked, are interested in or are going to, newer ones weighing more,
  * blended with their picked interests. Interests lead at first and give way as engagement grows, down to a floor, so a
  * few likes don't erase them, and take back over as the stances age.
+ *
+ * <p>Every event text shares a large part with every other, and every interest text with every other interest. Compared
+ * as they are, the cosine mostly measures that shared part, and generic posts come out close to everyone. So each side
+ * loses its own kind's average before the blend: the stances the average post, the interests the average interest. The
+ * feed takes the average post out of each post too, and compares what's left.
  */
 public final class UserVector {
 
@@ -18,8 +23,12 @@ public final class UserVector {
     /** The sum of every interest vector in a category the viewer picked from, and how many of their picks are in it. */
     public record Category(double[] sum, int picks) {}
 
-    /** What the database adds up for one viewer. {@code interests} is null when they picked none with a vector. */
-    public record Parts(List<Stance> stances, double[] interests, List<Category> categories) {}
+    /**
+     * What the database adds up for one viewer. {@code interests} is null when they picked none with a vector. The
+     * averages are over every interest and every post of the model, null when there are none.
+     */
+    public record Parts(List<Stance> stances, double[] interests, List<Category> categories, double[] interestAverage,
+                        double[] postAverage) {}
 
     private static final double ZERO = 1e-9;
 
@@ -34,7 +43,7 @@ public final class UserVector {
             behaviour = addScaled(behaviour, stance.sum(), weight);
             engagement += weight * stance.amount();
         }
-        behaviour = normalized(behaviour);
+        behaviour = centred(normalized(behaviour), parts.postAverage());
 
         double[] interests = scaled(parts.interests(), 1);
         for (Category category : parts.categories()) {
@@ -43,7 +52,7 @@ public final class UserVector {
                 interests = addScaled(interests, average, FeedConfig.INTEREST_CATEGORY_WEIGHT * category.picks());
             }
         }
-        interests = normalized(interests);
+        interests = centred(normalized(interests), parts.interestAverage());
 
         if (interests == null) {
             return behaviour;
@@ -81,6 +90,13 @@ public final class UserVector {
             result[i] += weight * vector[i];
         }
         return result;
+    }
+
+    private static double[] centred(double[] vector, double[] average) {
+        if (vector == null || average == null) {
+            return vector;
+        }
+        return normalized(addScaled(vector.clone(), average, -1));
     }
 
     private static double[] scaled(double[] vector, double weight) {

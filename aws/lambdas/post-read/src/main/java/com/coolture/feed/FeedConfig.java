@@ -14,11 +14,13 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     /** Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it can't change the order. */
     public static final double NEUTRAL = 0.5;
     /**
-     * sdadas/mmlw-roberta-base puts user and event cosines in a narrow band, so this is the part of it that affinity spreads over 0 to 1.
-     * The midpoint is the median cosine, which keeps NEUTRAL close to a typical post. Measure these again if the model changes.
+     * The part of the cosine between the viewer's vector and a post, both with their averages taken out (UserVector), that
+     * affinity spreads over 0 to 1. That cosine is 0 for a typical post, so NEUTRAL stays a typical post, and with
+     * sdadas/mmlw-roberta-base it rarely leaves ±0.3 for anyone. A narrower band lets several good fits reach 1, where
+     * jitter picks between them. Measure it again if the model changes.
      */
-    public static final double AFFINITY_LOW = 0.786;
-    public static final double AFFINITY_HIGH = 0.946;
+    public static final double AFFINITY_LOW = -0.45;
+    public static final double AFFINITY_HIGH = 0.45;
     /** The model the constants above were measured with. The viewer's vector is built from this model's vectors only. */
     public static final String EMBEDDING_MODEL = "sdadas/mmlw-roberta-base";
 

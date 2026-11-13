@@ -19,11 +19,11 @@ class UserVectorTest {
     }
 
     private static UserVector.Parts stances(UserVector.Stance... stances) {
-        return new UserVector.Parts(List.of(stances), null, List.of());
+        return new UserVector.Parts(List.of(stances), null, List.of(), null, null);
     }
 
     private static UserVector.Parts withInterests(double[] interests, UserVector.Stance... stances) {
-        return new UserVector.Parts(List.of(stances), interests, List.of());
+        return new UserVector.Parts(List.of(stances), interests, List.of(), null, null);
     }
 
     @Test
@@ -49,7 +49,7 @@ class UserVectorTest {
     @Test
     void blend_addsTheCategoryAverageToEachPick_atALowerWeight() {
         double[] music = {1, 1};
-        UserVector.Parts parts = new UserVector.Parts(List.of(), A, List.of(new UserVector.Category(music, 1)));
+        UserVector.Parts parts = new UserVector.Parts(List.of(), A, List.of(new UserVector.Category(music, 1)), null, null);
 
         double[] expected = {1 + 0.25 / Math.sqrt(2), 0.25 / Math.sqrt(2)};
         double norm = Math.hypot(expected[0], expected[1]);
@@ -91,10 +91,51 @@ class UserVectorTest {
         assertTrue(faded[1] > fresh[1], "faded likes count less towards engagement, so interests lead again");
     }
 
+    // Every text of a kind shares {0, 1, 0}; what's left of each part is X for the stances and Z for the interests.
+    private static final double[] X = {1, 0, 0};
+    private static final double[] Z = {0, 0, 1};
+    private static final double[] SHARED = {0, Math.sqrt(0.5), 0};
+    private static final double[] LIKED = {1, 1, 0};
+    private static final double[] PICKED = {0, 1, 1};
+
+    @Test
+    void blend_takesThePostAverageOutOfTheStances() {
+        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", LIKED, 1)), null, List.of(), SHARED, SHARED);
+
+        assertArrayEquals(X, UserVector.blend(parts), 1e-12);
+    }
+
+    @Test
+    void blend_takesTheInterestAverageOutOfTheInterests() {
+        UserVector.Parts parts = new UserVector.Parts(List.of(), PICKED, List.of(), SHARED, SHARED);
+
+        assertArrayEquals(Z, UserVector.blend(parts), 1e-12);
+    }
+
+    @Test
+    void blend_blendsWhatIsLeftOfEachPart_eachWithItsOwnAverage() {
+        double[] liked = {1, 0, 1};
+        double[] postAverage = {0, 0, Math.sqrt(0.5)};
+        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", liked, 100)), PICKED, List.of(),
+            SHARED, postAverage);
+
+        double share = FeedConfig.INTEREST_SHARE_MIN;
+        double norm = Math.hypot(share, 1 - share);
+        assertArrayEquals(new double[]{(1 - share) / norm, 0, share / norm}, UserVector.blend(parts), 1e-12);
+    }
+
+    @Test
+    void blend_aPartThatIsOnlyTheAverage_saysNothing() {
+        double[] average = {Math.sqrt(0.5), Math.sqrt(0.5), 0};
+        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", LIKED, 100)), Z, List.of(), null, average);
+
+        assertArrayEquals(Z, UserVector.blend(parts), 1e-12);
+    }
+
     @Test
     void interestShare_neverFallsBelowTheFloor() {
         assertEquals(1.0, UserVector.interestShare(0), 1e-12);
-        assertEquals(Math.exp(-1), UserVector.interestShare(10), 1e-12);
+        assertEquals(Math.exp(-1), UserVector.interestShare(FeedConfig.INTEREST_DECAY), 1e-12);
         assertEquals(0.2, UserVector.interestShare(1000), 1e-12);
     }
 
