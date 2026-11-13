@@ -71,8 +71,28 @@ SELECT p.id, (SELECT array_agg(sin(i * (1 + abs(hashtext(p.id::text)) % 1000) / 
 FROM posts p
 WHERE p.title LIKE 'walk\_%' AND p.author_id = 'a0000000-0000-0000-0000-000000000002';
 
-INSERT INTO user_embeddings (user_id, embedding, model)
-SELECT 'a0000000-0000-0000-0000-000000000001', array_agg(cos(i / 89.0))::real[]::vector, 'test' FROM generate_series(1, 768) i;
+-- The viewer's only vector comes from the post they liked, so the feed builds them a vector of this model.
+INSERT INTO post_embeddings (post_id, embedding, model)
+SELECT p.id, (SELECT array_agg(cos(i / 89.0))::real[]::vector FROM generate_series(1, 768) i), 'test'
+FROM posts p WHERE p.title = 'liked' AND p.author_id = 'a0000000-0000-0000-0000-000000000002';
+
+-- Another post with walk_7's vector, so a like of walk_7 shows in its similarity.
+INSERT INTO posts (author_id, title, starts_at, type)
+VALUES ('a0000000-0000-0000-0000-000000000002', 'twin_of_walk_7', now() + interval '2 days', 'ONLINE');
+
+INSERT INTO post_embeddings (post_id, embedding, model)
+SELECT (SELECT id FROM posts WHERE title = 'twin_of_walk_7'), pe.embedding, 'test'
+FROM post_embeddings pe JOIN posts p ON p.id = pe.post_id WHERE p.title = 'walk_7';
+
+-- Interests of their own, since the seed may have embedded the real ones. The stranger picks one and has no stances.
+INSERT INTO interest_categories (key, label_pl, label_en, position) VALUES ('test_category', 't', 't', 99);
+INSERT INTO interests (key, category_key, label_pl, label_en, embedding_text, position) VALUES
+  ('test_interest_a', 'test_category', 'a', 'a', 'a', 0),
+  ('test_interest_b', 'test_category', 'b', 'b', 'b', 1);
+INSERT INTO interest_embeddings (interest_key, embedding, model, embedded_text)
+SELECT key, (SELECT array_agg(sin(g * length(key) * position / 31.0 + position))::real[]::vector FROM generate_series(1, 768) g), 'test', key
+FROM interests WHERE category_key = 'test_category';
+INSERT INTO user_interests (user_id, interest_key) VALUES ('a0000000-0000-0000-0000-000000000002', 'test_interest_a');
 
 -- A vector labelled with another model: comparing it with the viewer's would give a number that means nothing.
 INSERT INTO posts (id, author_id, title, starts_at, type)

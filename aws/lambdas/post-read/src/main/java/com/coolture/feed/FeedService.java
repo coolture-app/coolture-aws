@@ -84,7 +84,9 @@ public class FeedService {
     }
 
     private List<Ranked> rank(UUID viewer, Session session, PostFeedFilters filters, int count) throws SQLException {
-        List<FeedScorer.Facts> candidates = repository.findCandidates(viewer, session.asOf(), session.latitude(), session.longitude(), filters);
+        double[] viewerVector = UserVector.blend(repository.findVectorParts(viewer, session.asOf()));
+        List<FeedScorer.Facts> candidates = repository.findCandidates(viewer, viewerVector, session.asOf(),
+            session.latitude(), session.longitude(), filters);
 
         List<Ranked> ranked = new ArrayList<>(candidates.size());
         for (FeedScorer.Facts facts : candidates) {
