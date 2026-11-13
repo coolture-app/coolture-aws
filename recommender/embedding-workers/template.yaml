@@ -35,22 +35,9 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 7
-  UserEmbeddingScheduleEnabled:
-    Type: String
-    Default: 'false'
-    AllowedValues: ['true', 'false']
-  UserEmbeddingSchedule:
-    Type: String
-    Default: 'cron(0/30 8-15 ? * * *)'
-  UserEmbeddingScheduleTimezone:
-    Type: String
-    Default: Europe/Warsaw
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
-  UserEmbeddingScheduleOn: !And
-    - !Condition IsAWS
-    - !Equals [!Ref UserEmbeddingScheduleEnabled, 'true']
 
 Globals:
   Function:
@@ -106,45 +93,3 @@ Resources:
       Dockerfile: Dockerfile
       DockerContext: post-embedding
       DockerTag: python3.13-v1
-
-  UserEmbeddingLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-user-embedding'
-      RetentionInDays: !Ref LogRetentionDays
-
-  UserEmbeddingFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub 'coolture-${Environment}-user-embedding'
-      LoggingConfig:
-        LogGroup: !Ref UserEmbeddingLogGroup
-      CodeUri: user-embedding/src/
-      Handler: app.lambda_handler
-      Runtime: python3.13
-      MemorySize: 512
-      Timeout: 300
-      Environment:
-        Variables:
-          INTEREST_WEIGHT_CATEGORY: '0.25'
-          INTEREST_WEIGHT_MINIMUM: '0.2'
-          INTEREST_DECAY_SCALE: '10'
-          ENGAGEMENT_WINDOW_DAYS: '30'
-      Policies:
-        - !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbConnectPolicyArn'}, !Ref AWS::NoValue]
-      Events:
-        WorkingHours:
-          Type: ScheduleV2
-          Properties:
-            Name: !Sub 'coolture-${Environment}-user-embedding'
-            ScheduleExpression: !Ref UserEmbeddingSchedule
-            ScheduleExpressionTimezone: !Ref UserEmbeddingScheduleTimezone
-            State: !If [UserEmbeddingScheduleOn, ENABLED, DISABLED]
-        InterestChanges:
-          Type: SQS
-          Properties:
-            Queue: !If
-              - IsAWS
-              - !ImportValue {'Fn::Sub': '${BackendStackName}-UserEmbeddingQueueArn'}
-              - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:coolture-${Environment}-user-embedding'
-            BatchSize: 10

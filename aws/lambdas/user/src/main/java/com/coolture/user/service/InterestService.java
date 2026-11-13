@@ -1,6 +1,5 @@
 package com.coolture.user.service;
 
-import com.coolture.common.messaging.EmbeddingRequestPublisher;
 import com.coolture.user.dto.InterestCatalogDto;
 import com.coolture.user.dto.InterestCatalogDto.Category;
 import com.coolture.user.dto.InterestCatalogDto.Interest;
@@ -22,23 +21,19 @@ public class InterestService {
     private static final int DEFAULT_MAX_SELECTIONS = 6;
 
     private final InterestRepository repository;
-    private final EmbeddingRequestPublisher embeddingRequests;
     private final int minSelections;
     private final int maxSelections;
 
     public InterestService() {
         this(
                 new InterestRepository(),
-                new EmbeddingRequestPublisher(),
                 intFromEnv("INTERESTS_MIN_SELECTIONS", DEFAULT_MIN_SELECTIONS),
                 intFromEnv("INTERESTS_MAX_SELECTIONS", DEFAULT_MAX_SELECTIONS)
         );
     }
 
-    public InterestService(InterestRepository repository, EmbeddingRequestPublisher embeddingRequests,
-                           int minSelections, int maxSelections) {
+    public InterestService(InterestRepository repository, int minSelections, int maxSelections) {
         this.repository = repository;
-        this.embeddingRequests = embeddingRequests;
         this.minSelections = minSelections;
         this.maxSelections = maxSelections;
     }
@@ -85,7 +80,6 @@ public class InterestService {
         }
 
         repository.replaceSelection(targetId, keys);
-        embeddingRequests.requestUser(targetId);
         return new UserInterestsDto(List.copyOf(keys));
     }
 

@@ -39,7 +39,12 @@ class FeedServiceTest {
         final List<UUID> viewers = new ArrayList<>();
 
         @Override
-        public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
+        public UserVector.Parts findVectorParts(UUID viewer, Instant asOf) {
+            return new UserVector.Parts(List.of(), null, List.of());
+        }
+
+        @Override
+        public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
             asOfs.add(asOf);
             latitudes.add(latitude);
             viewers.add(viewer);
@@ -285,7 +290,7 @@ class FeedServiceTest {
         List<FeedScorer.Facts> all = repository.candidates;
         FakeRepository broken = new FakeRepository() {
             @Override
-            public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) {
+            public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) {
                 return List.of(new FeedScorer.Facts(UUID.randomUUID(), null, 0, null, null));
             }
         };

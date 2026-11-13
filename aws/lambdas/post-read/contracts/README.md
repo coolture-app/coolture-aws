@@ -123,8 +123,9 @@ The first request starts a session by choosing a time, `asOf`, and a random seed
 cursor, so nothing is stored on the server. A new first request starts a new session, which is what makes page 1 change between
 refreshes.
 
-Scores use `asOf` and not the current time, so the order doesn't drift while someone scrolls. Likes from other people, and changes
-to the viewer's own vector, can still move scores between pages:
+Scores use `asOf` and not the current time, so the order doesn't drift while someone scrolls. The viewer's taste counts their likes,
+interested and going up to `asOf`, so their own reactions reach the feed from the next session and never reorder the current one.
+Likes from other people can still move scores between pages:
 
 | Effect | Handling |
 |---|---|

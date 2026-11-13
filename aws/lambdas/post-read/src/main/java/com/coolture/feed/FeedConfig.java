@@ -19,6 +19,18 @@ public record FeedConfig(double affinity, double proximity, double time, double 
      */
     public static final double AFFINITY_LOW = 0.786;
     public static final double AFFINITY_HIGH = 0.946;
+    /** The model the constants above were measured with. The viewer's vector is built from this model's vectors only. */
+    public static final String EMBEDDING_MODEL = "sdadas/mmlw-roberta-base";
+
+    /**
+     * How the viewer's vector is built (UserVector). Unmeasured starting values, for the evaluation to tune. Only the
+     * stances named here count, so a negative one can never pull the vector away from what every post shares.
+     */
+    public static final Map<String, Double> STANCE_WEIGHTS = Map.of("LIKE", 1.0, "INTERESTED", 1.5, "TAKES_PART", 2.0);
+    public static final double INTEREST_CATEGORY_WEIGHT = 0.25;
+    public static final double INTEREST_SHARE_MIN = 0.2;
+    public static final double INTEREST_DECAY = 10;
+    public static final int ENGAGEMENT_WINDOW_DAYS = 30;
     public static final double PROXIMITY_SCALE_METERS = 20_000;
     public static final double TIME_SCALE_DAYS = 14;
     public static final int POPULARITY_CAP = 100;

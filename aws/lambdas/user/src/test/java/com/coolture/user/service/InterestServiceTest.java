@@ -1,6 +1,5 @@
 package com.coolture.user.service;
 
-import com.coolture.common.messaging.EmbeddingRequestPublisher;
 import com.coolture.user.dto.InterestCatalogDto;
 import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.repository.InterestRepository;
@@ -21,7 +20,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class InterestServiceTest {
@@ -29,8 +27,7 @@ class InterestServiceTest {
     private static final UUID USER_ID = UUID.randomUUID();
 
     private final InterestRepository repository = mock(InterestRepository.class);
-    private final EmbeddingRequestPublisher embeddingRequests = mock(EmbeddingRequestPublisher.class);
-    private final InterestService service = new InterestService(repository, embeddingRequests, 2, 3);
+    private final InterestService service = new InterestService(repository, 2, 3);
 
     @BeforeEach
     void catalogue() throws SQLException {
@@ -59,11 +56,10 @@ class InterestServiceTest {
     }
 
     @Test
-    void replaceSelection_storesInterestsAndRequestsUserVectorRefresh() throws SQLException {
+    void replaceSelection_storesInterests() throws SQLException {
         service.replaceSelection(USER_ID, USER_ID, request("jazz", "rock"));
 
         verify(repository).replaceSelection(USER_ID, Set.of("jazz", "rock"));
-        verify(embeddingRequests).requestUser(USER_ID);
     }
 
     @Test
@@ -72,7 +68,6 @@ class InterestServiceTest {
                 () -> service.replaceSelection(USER_ID, USER_ID, request("music", "jazz", "rock")));
 
         verify(repository, never()).replaceSelection(any(), any());
-        verifyNoInteractions(embeddingRequests);
     }
 
     @Test

@@ -17,6 +17,7 @@ import com.coolture.feed.FeedPage;
 import com.coolture.feed.FeedRepository;
 import com.coolture.feed.FeedScorer;
 import com.coolture.feed.FeedService;
+import com.coolture.feed.UserVector;
 import com.coolture.repository.PostReadRepository;
 import com.coolture.repository.PostSort;
 import com.coolture.services.PostReadService;
@@ -33,12 +34,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -47,6 +50,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -79,7 +83,7 @@ class PostReadDbTest {
 
     private final PostReadRepository postRepository = new PostReadRepository();
     private final PostReadService postService = new PostReadService(postRepository);
-    private final FeedRepository feedRepository = new FeedRepository();
+    private final FeedRepository feedRepository = new FeedRepository("test");
     private final FeedService feedService = new FeedService(feedRepository, FeedConfig.DEFAULTS, Clock.systemUTC(), () -> 42);
 
     @SafeVarargs
@@ -108,6 +112,8 @@ class PostReadDbTest {
         stmt.execute("DELETE FROM user_relations WHERE source_user_id IN " + users);
         stmt.execute("DELETE FROM event_locations WHERE id::text LIKE 'a0000000-%'");
         stmt.execute("DELETE FROM users WHERE id::text LIKE 'a0000000-%'");
+        stmt.execute("DELETE FROM interests WHERE category_key = 'test_category'");
+        stmt.execute("DELETE FROM interest_categories WHERE key = 'test_category'");
     }
 
     @BeforeAll
@@ -195,8 +201,8 @@ class PostReadDbTest {
     @Test
     void feed_aPostCreatedAfterAsOf_appearsOnlyInALaterSession() throws SQLException {
         Instant now = Instant.now();
-        Set<UUID> thisSession = ids(feedRepository.findCandidates(ME, now, null, null, PostFeedFilters.none()));
-        Set<UUID> laterSession = ids(feedRepository.findCandidates(ME, now.plus(Duration.ofHours(2)), null, null, PostFeedFilters.none()));
+        Set<UUID> thisSession = ids(feedRepository.findCandidates(ME, null, now, null, null, PostFeedFilters.none()));
+        Set<UUID> laterSession = ids(feedRepository.findCandidates(ME, null, now.plus(Duration.ofHours(2)), null, null, PostFeedFilters.none()));
 
         laterSession.removeAll(thisSession);
         assertEquals(1, laterSession.size());
@@ -217,12 +223,97 @@ class PostReadDbTest {
     @Test
     void feed_aPostVectorFromAnotherModel_isNeutral() throws SQLException {
         Instant now = Instant.now();
-        List<FeedScorer.Facts> candidates = feedRepository.findCandidates(ME, now, null, null, PostFeedFilters.none());
+        double[] myVector = UserVector.blend(feedRepository.findVectorParts(ME, now));
+        List<FeedScorer.Facts> candidates = feedRepository.findCandidates(ME, myVector, now, null, null, PostFeedFilters.none());
         FeedScorer.Facts otherModel = candidates.stream().filter(f -> f.id().equals(OTHER_MODEL_POST)).findFirst().orElseThrow();
 
         assertNull(otherModel.similarity());
         assertEquals(FeedConfig.NEUTRAL, new FeedScorer(FeedConfig.DEFAULTS).score(otherModel, now, 42).affinity());
         assertTrue(candidates.stream().anyMatch(f -> f.similarity() != null), "vectors of the same model must still be compared");
+    }
+
+    // ===== The viewer's vector =====
+
+    private static UUID postTitled(String title) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT id FROM posts WHERE title = '" + title + "'")) {
+            rs.next();
+            return (UUID) rs.getObject(1);
+        }
+    }
+
+    /** As the app's role, because the tests read as the read-only one. */
+    private static void writeAsTheApp(String sql, UUID post) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
+            stmt.execute("RESET ROLE");
+            try (PreparedStatement write = conn.prepareStatement(sql)) {
+                write.setObject(1, post);
+                write.setObject(2, ME);
+                write.executeUpdate();
+            } finally {
+                stmt.execute("SET ROLE coolture_reader");
+            }
+        }
+    }
+
+    private static void like(UUID post) throws SQLException {
+        writeAsTheApp("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (?, ?, 'LIKE', now())", post);
+    }
+
+    private static void unlike(UUID post) throws SQLException {
+        writeAsTheApp("DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?", post);
+    }
+
+    private static List<UUID> idsOf(List<PostCardDto> cards) {
+        return cards.stream().map(PostCardDto::id).toList();
+    }
+
+    private double similarity(UUID post, Instant asOf) throws SQLException {
+        double[] vector = UserVector.blend(feedRepository.findVectorParts(ME, asOf));
+        return feedRepository.findCandidates(ME, vector, asOf, null, null, PostFeedFilters.none()).stream()
+            .filter(f -> f.id().equals(post)).findFirst().orElseThrow().similarity();
+    }
+
+    @Test
+    void feed_aLikeMadeDuringASession_leavesItsVectorAlone_andCountsFromTheNext() throws SQLException {
+        Instant asOf = Instant.now().minusSeconds(1);
+        FeedService session = new FeedService(feedRepository, FeedConfig.DEFAULTS, Clock.fixed(asOf, ZoneOffset.UTC), () -> 42);
+        UUID liked = postTitled("walk_7");
+        UUID twin = postTitled("twin_of_walk_7");
+        double[] before = UserVector.blend(feedRepository.findVectorParts(ME, asOf));
+        double twinBefore = similarity(twin, asOf);
+
+        List<UUID> walked = new ArrayList<>();
+        FeedPage page = session.getFeed(ME, null, 7, null, null);
+        walked.addAll(idsOf(page.items()));
+        like(liked);
+        try {
+            while (page.page().nextCursor() != null) {
+                page = session.getFeed(ME, page.page().nextCursor(), 7, null, null);
+                walked.addAll(idsOf(page.items()));
+            }
+            assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
+            assertArrayEquals(before, UserVector.blend(feedRepository.findVectorParts(ME, asOf)), 0,
+                "a like after asOf changed the session's vector");
+
+            assertTrue(similarity(twin, Instant.now()) > twinBefore, "the next session's vector didn't move towards the like");
+        } finally {
+            unlike(liked);
+        }
+    }
+
+    @Test
+    void vector_isBuiltFromInterestsAlone_whenThereAreNoStances() throws SQLException {
+        UserVector.Parts parts = feedRepository.findVectorParts(UUID.fromString("a0000000-0000-0000-0000-000000000002"), Instant.now());
+
+        assertTrue(parts.stances().isEmpty());
+        assertEquals(List.of(1), parts.categories().stream().map(UserVector.Category::picks).toList());
+        assertEquals(768, UserVector.blend(parts).length);
+    }
+
+    @Test
+    void vector_isNullForAGuest() throws SQLException {
+        assertNull(UserVector.blend(feedRepository.findVectorParts(null, Instant.now())));
     }
 
     // ===== /posts rules =====
@@ -432,14 +523,14 @@ class PostReadDbTest {
         List<UUID> walked = walkFeed(feedService, viewer, 7, latitude, longitude, FeedMode.RANKED).stream().map(PostCardDto::id).toList();
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
-        assertEquals(ids(feedRepository.findCandidates(viewer, Instant.now(), latitude, longitude, PostFeedFilters.none())), new HashSet<>(walked));
+        assertEquals(ids(feedRepository.findCandidates(viewer, null, Instant.now(), latitude, longitude, PostFeedFilters.none())), new HashSet<>(walked));
     }
 
     @Test
     void walkingTheFallback_showsTheSamePostsOnce() throws SQLException {
-        FeedRepository rankingDown = new FeedRepository() {
+        FeedRepository rankingDown = new FeedRepository("test") {
             @Override
-            public List<FeedScorer.Facts> findCandidates(UUID viewer, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
+            public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, Instant asOf, Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
                 throw new SQLException("ranking is down");
             }
         };
@@ -448,6 +539,6 @@ class PostReadDbTest {
         List<UUID> walked = walkFeed(fallback, ME, 7, null, null, FeedMode.UPCOMING).stream().map(PostCardDto::id).toList();
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
-        assertEquals(ids(feedRepository.findCandidates(ME, Instant.now(), null, null, PostFeedFilters.none())), new HashSet<>(walked));
+        assertEquals(ids(feedRepository.findCandidates(ME, null, Instant.now(), null, null, PostFeedFilters.none())), new HashSet<>(walked));
     }
 }

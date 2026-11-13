@@ -10,7 +10,7 @@ usage() {
 Usage: $0 [dev|staging|prod] [stack...]
 
 Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (default: all)
-Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url), USER_EMBEDDING_SCHEDULE=true,
+Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url),
   FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack),
   SCRAPER_SCHEDULE=true|false and SCRAPER_END_DATE=2027-06-30T00:00:00Z (both keep their deployed values when unset)
 EOF
@@ -108,7 +108,7 @@ overrides_for() {
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\""
             ;;
         embeddings)
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT UserEmbeddingScheduleEnabled=${USER_EMBEDDING_SCHEDULE:-false}"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT"
             ;;
         geocoder)
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK CloudFrontPrefixListId=$(cloudfront_prefix_list)"

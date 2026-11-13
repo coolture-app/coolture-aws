@@ -1,7 +1,7 @@
 # Coolture backend
 
 The API, database, photo storage, recommender and event scraper of Coolture: Java Lambdas behind API Gateway, PostgreSQL
-(Aurora on AWS), S3, and Python workers that embed posts and users for the feed. The web app is
+(Aurora on AWS), S3, and a Python worker that embeds posts and interests for the feed. The web app is
 [coolture-frontend](https://github.com/coolture-app/coolture-frontend).
 
 ## Run locally
@@ -42,7 +42,7 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 1. Scrapes a snapshot of trojmiasto.pl into the gitignored `scraper/snapshot/`, if there's none yet. About 12 minutes, once.
 2. Loads it through the API as `coolture_bot`, with every date moved forward so all events are ahead. About 5 minutes.
 3. Embeds interests and posts. The first run builds the embedding image (3.5 GB, about 10 minutes).
-4. Lets the demo users react to posts close to their interests, then computes their vectors, so their feeds are personal.
+4. Lets the demo users react to posts close to their interests, so their feeds are personal.
 
 The first run takes about 30 minutes. Later runs take a minute and add nothing. How the snapshot is picked and loaded
 is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
