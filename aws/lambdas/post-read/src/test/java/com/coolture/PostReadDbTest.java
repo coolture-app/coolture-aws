@@ -331,11 +331,11 @@ class PostReadDbTest {
         Instant now = Instant.now();
         UUID post = postTitled("future_public");
         graphRun(now.minus(Duration.ofHours(1)), post, 0.25);
-        graphRun(now.minus(Duration.ofMinutes(10)), post, 0.75);
+        graphRun(now.plus(Duration.ofHours(1)), post, 0.75);
 
-        assertEquals(0.25, graphOf(post, now.minus(Duration.ofMinutes(30))), 1e-6);
-        assertEquals(0.75, graphOf(post, now), 1e-6);
-        assertNull(candidates(now).stream().filter(f -> f.id().equals(postTitled("commented"))).findFirst().orElseThrow().graph());
+        assertEquals(0.25, graphOf(post, now), 1e-6);
+        assertEquals(0.75, graphOf(post, now.plus(Duration.ofHours(2))), 1e-6);
+        assertNull(graphOf(postTitled("commented"), now));
     }
 
     private Double graphOf(UUID post, Instant asOf) throws SQLException {
