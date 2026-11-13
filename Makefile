@@ -122,7 +122,7 @@ build: build-common ## Build backend lambdas
 	fi; \
 	sam build --template-file aws/backend.yaml --parallel --cached && echo "$$sum" > .aws-sam/common.sha1
 
-test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding workers, migrations, authorizer, geocoder proxy
+test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding worker, graph signal, migrations, authorizer, geocoder proxy
 	@for dir in recommender/embedding-workers/post-embedding recommender/graph-signal \
 			aws/lambdas/migrations aws/lambdas/authorizer aws/lambdas/geo-proxy; do \
 		echo "$$dir"; (cd $$dir && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests) || exit 1; \
@@ -177,7 +177,7 @@ embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/s
 
 # Built on first use, or when its image was removed. After changing a worker's code, run make build-embeddings again.
 require-embeddings-build:
-	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ recommender/embedding-workers/template.yaml -nt $(EMBEDDINGS_TEMPLATE) ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
+	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ -n "$$(find recommender/embedding-workers/template.yaml recommender/graph-signal/src -newer $(EMBEDDINGS_TEMPLATE))" ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
 		echo "Building the embedding workers. The first build downloads the model into a 3.5 GB image."; \
 		$(MAKE) --no-print-directory build-embeddings; \
 	fi
@@ -208,7 +208,7 @@ deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to
 deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
 	@scripts/deploy.sh dev auth
 
-build-embeddings: ## Build embedding workers for local runs (x86_64; post-embedding image needs Docker)
+build-embeddings: ## Build the embedding worker and the graph signal for local runs (x86_64; needs Docker and Python 3.13)
 	@sam build --template-file recommender/embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
 deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs mgmt-stack-networking + backend deployed

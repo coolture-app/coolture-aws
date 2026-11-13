@@ -22,10 +22,6 @@ public final class FeedScorer {
     public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
                         Double graph) {
 
-        public Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters) {
-            this(id, startsAt, endsAt, engagement, similarity, meters, null);
-        }
-
         /** An event that hasn't ended, as every event in the plain feed. */
         public Facts(UUID id, Instant startsAt, int engagement, Double similarity, Double meters) {
             this(id, startsAt, null, engagement, similarity, meters, null);
@@ -51,7 +47,7 @@ public final class FeedScorer {
         double popularity = StrictMath.min(StrictMath.log(1.0 + StrictMath.max(facts.engagement(), 0)) / POPULARITY_SCALE, 1.0);
         double jitter = jitter(facts.id(), seed);
         // Graph scores are ranks from 0 to 1, so NEUTRAL is their median.
-        double graph = facts.graph() == null ? FeedConfig.NEUTRAL : StrictMath.max(0, StrictMath.min(facts.graph(), 1));
+        double graph = facts.graph() == null ? FeedConfig.NEUTRAL : facts.graph();
 
         double total = config.affinity() * affinity
             + config.proximity() * proximity

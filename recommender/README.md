@@ -1,7 +1,8 @@
 # Recommender
 
-The Python side of the feed: a Lambda that embeds posts and interests, and one that scores events with a graph walk. The feed turns those into the viewer's vector
-itself (see [Interests and user vectors](#interests-and-user-vectors)). Everything here reads the app's tables in `public`
+The Python side of the feed: a Lambda that embeds posts and interests, which the feed turns into the viewer's vector
+itself (see [Interests and user vectors](#interests-and-user-vectors)), and one that scores events with a graph walk
+(see [Graph signal](#graph-signal)). Everything here reads the app's tables in `public`
 directly. Its own tables are prefixed `rec_`, only the recommender writes them, and they're created by ordinary migrations
 in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post-read`'s
 [contract](../aws/lambdas/post-read/contracts/README.md).
@@ -122,21 +123,22 @@ weights and the decay are in `FeedConfig`.
 | Edges | From |
 |---|---|
 | Event–venue | `event_locations`, by lower-cased name and city |
-| Event–interest, event–event | Each event's 2 nearest interests and 5 nearest events, both sides centred as in the feed |
+| Event–interest | Each event's 2 nearest interests, both sides centred as in the feed |
 | User–interest | `user_interests` |
 | User–event | Likes, interested and going, faded as the feed fades them |
+| Event–event | Each event's 5 nearest among events that haven't ended |
 | User → user | Follows, minus blocks either way |
 
 Each user's candidates (events not ended, not theirs, not reacted to) get the walk's mass as a rank from 0 to 1. A run is
-one row of `rec_graph_runs` with its rows in `rec_graph_scores`; the feed reads the latest run finished by the session's
-`asOf`, so a run landing mid-scroll doesn't move its pages, and gives a post with no score `0.5`. The feed's weight is
-`graph` in `FeedConfig`. Why this setup: the thesis spec's decisions on the graph signal, measured in its
-`benchmarks/graph-ppr`.
+one row of `rec_graph_runs` with its rows in `rec_graph_scores`, marked finished once they're committed. The feed reads
+the latest run finished a minute before the session's `asOf`, so a run landing mid-scroll doesn't move its pages, and
+gives a post with no score `0.5`. Its weight is `graph` in `FeedConfig`. Runs older than one finished a day ago are
+deleted, and a session older than that ranks with `0.5` for every post.
 
 ```bash
-make graph-signal    # one run locally; make seed ends with it
+make graph-signal                    # one run locally; make seed ends with it
+DB_TEST=true .venv/bin/python -m pytest recommender/graph-signal/tests   # with its database tests, after make seed
 ```
 
 On AWS it runs on a schedule, off by default: `GraphScheduleEnabled=true` and `GraphSchedule` (default `rate(6 hours)`)
-are parameters of the stack. Between runs a new user or post is neutral. After changing `graph-signal/src`, run
-`make build-embeddings` again.
+are parameters of the stack. Between runs a new user or post is neutral.
