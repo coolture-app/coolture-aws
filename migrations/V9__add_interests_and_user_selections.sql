@@ -1,4 +1,4 @@
--- V10: Interest catalogue and user selections
+-- V9: Interest catalogue and user selections
 -- Users pick interests; categories only group them. The "embed-interests" action
 -- of the post-embedding worker fills interest_embeddings.
 

@@ -17,7 +17,7 @@ public record MediaResourceDto(
     String url,
     Instant createdAt,
     Instant deletedAt,
-    /** Pixels. Null when unknown: media from before V11, or not an image. */
+    /** Pixels. Null when unknown: media from before V10, or not an image. */
     Integer width,
     Integer height
 ) {

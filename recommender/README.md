@@ -110,7 +110,7 @@ of it don't count towards user vectors.
 
 ## Interests and user vectors
 
-`GET /dicts/interests` returns the catalogue from migration V10 (`interest_categories` group `interests`), and `GET` and
+`GET /dicts/interests` returns the catalogue from migration V9 (`interest_categories` group `interests`), and `GET` and
 `PUT /users/{userId}/interests` read and replace the caller's picks. `PUT` asks `UserEmbeddingFunction` to refresh that
 user at once; locally, run `make embed-users`. `/auth/me` returns `interestsSelected`, and the frontend blocks the page
 with the interest picker until a user has some.
