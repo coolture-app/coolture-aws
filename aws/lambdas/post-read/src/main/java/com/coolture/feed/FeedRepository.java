@@ -52,14 +52,26 @@ public class FeedRepository {
 
     /**
      * The sums UserVector blends, each from one model's vectors. Stances count up to asOf, so every page of a session
-     * gets the same vector; interests have no time and count as they are. Each row is a part: a stance, the picked
-     * interests, or one category picked from with all of its interests.
+     * gets the same vector. Each fades with its age in whole days by asOf, half every STANCE_HALF_LIFE_DAYS: summed per
+     * day first, then each day's sum weighed once, so a stance type comes back as one row; past STANCE_MAX_AGE_DAYS
+     * they'd weigh next to nothing and are left out. Interests have no time and count as they are. Each row is a part: a stance, with the sum of its fading
+     * weights as the amount, the picked interests, or one category picked from with all of its interests.
      */
     private static final String VECTOR_PARTS = """
         WITH stances AS (
             SELECT post_id, type, created_at FROM post_reactions WHERE user_id = ?::uuid
             UNION ALL
             SELECT post_id, type, created_at FROM post_participations WHERE user_id = ?::uuid
+        ), aged AS (
+            SELECT s.type, pe.embedding, floor(extract(epoch FROM ?::timestamptz - s.created_at) / 86400) AS age
+            FROM stances s
+            JOIN post_embeddings pe ON pe.post_id = s.post_id AND pe.model = ?
+            WHERE s.type = ANY(?) AND s.created_at <= ?::timestamptz
+              AND s.created_at > ?::timestamptz - make_interval(days => ?)
+        ), daily AS (
+            SELECT type, sum(embedding) AS embedding, count(*) AS stances, power(0.5, age / ?) AS fade
+            FROM aged
+            GROUP BY type, age
         ), picks AS (
             SELECT i.key, i.category_key, ie.embedding
             FROM user_interests ui
@@ -67,12 +79,10 @@ public class FeedRepository {
             JOIN interest_embeddings ie ON ie.interest_key = i.key AND ie.model = ?
             WHERE ui.user_id = ?::uuid
         )
-        SELECT s.type AS part, sum(pe.embedding)::real[] AS total,
-               count(*) FILTER (WHERE s.created_at >= ?::timestamptz - make_interval(days => ?)) AS amount
-        FROM stances s
-        JOIN post_embeddings pe ON pe.post_id = s.post_id AND pe.model = ?
-        WHERE s.type = ANY(?) AND s.created_at <= ?::timestamptz
-        GROUP BY s.type
+        SELECT type AS part, sum(embedding * array_fill(fade::real, ARRAY[vector_dims(embedding)])::vector)::real[] AS total,
+               sum(stances * fade) AS amount
+        FROM daily
+        GROUP BY type
         UNION ALL
         SELECT 'INTERESTS', sum(embedding)::real[], count(*) FROM picks HAVING count(*) > 0
         UNION ALL
@@ -109,23 +119,25 @@ public class FeedRepository {
             new ParamBinder(stmt, conn)
                 .bindUUID(viewer)
                 .bindUUID(viewer)
-                .bindString(model)
-                .bindUUID(viewer)
                 .bindTimestamp(asOf)
-                .bindInt(FeedConfig.ENGAGEMENT_WINDOW_DAYS)
                 .bindString(model)
                 .bindVarcharArray(FeedConfig.STANCE_WEIGHTS.keySet().toArray(new String[0]))
                 .bindTimestamp(asOf)
+                .bindTimestamp(asOf)
+                .bindInt(FeedConfig.STANCE_MAX_AGE_DAYS)
+                .bindDouble(FeedConfig.STANCE_HALF_LIFE_DAYS)
+                .bindString(model)
+                .bindUUID(viewer)
                 .bindString(model);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     String part = rs.getString("part");
                     double[] total = doubles(rs.getArray("total"));
-                    int amount = rs.getInt("amount");
+                    double amount = rs.getDouble("amount");
                     switch (part) {
                         case "INTERESTS" -> interests = total;
-                        case "CATEGORY" -> categories.add(new UserVector.Category(total, amount));
+                        case "CATEGORY" -> categories.add(new UserVector.Category(total, (int) amount));
                         default -> stances.add(new UserVector.Stance(part, total, amount));
                     }
                 }

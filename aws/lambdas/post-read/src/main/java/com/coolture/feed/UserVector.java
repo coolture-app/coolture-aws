@@ -3,13 +3,17 @@ package com.coolture.feed;
 import java.util.List;
 
 /**
- * The viewer's taste as one vector: the posts they liked, are interested in or are going to, blended with their picked
- * interests. Interests lead at first and give way as engagement grows, down to a floor, so a few likes don't erase them.
+ * The viewer's taste as one vector: the posts they liked, are interested in or are going to, newer ones weighing more,
+ * blended with their picked interests. Interests lead at first and give way as engagement grows, down to a floor, so a
+ * few likes don't erase them, and take back over as the stances age.
  */
 public final class UserVector {
 
-    /** The sum of the vectors of the posts the viewer gave one stance, and how many of them fall in the engagement window. */
-    public record Stance(String type, double[] sum, int recent) {}
+    /**
+     * The vectors of the posts the viewer gave one stance, each weighed by how much it has faded with age, summed, and
+     * the sum of those weights: a stance from today counts 1, one a half-life old 0.5.
+     */
+    public record Stance(String type, double[] sum, double amount) {}
 
     /** The sum of every interest vector in a category the viewer picked from, and how many of their picks are in it. */
     public record Category(double[] sum, int picks) {}
@@ -28,7 +32,7 @@ public final class UserVector {
         for (Stance stance : parts.stances()) {
             double weight = FeedConfig.STANCE_WEIGHTS.getOrDefault(stance.type(), 0.0);
             behaviour = addScaled(behaviour, stance.sum(), weight);
-            engagement += weight * stance.recent();
+            engagement += weight * stance.amount();
         }
         behaviour = normalized(behaviour);
 

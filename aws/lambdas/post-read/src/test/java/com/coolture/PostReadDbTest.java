@@ -312,6 +312,28 @@ class PostReadDbTest {
     }
 
     @Test
+    void vector_aStanceFadesByHalfEachHalfLife_andIsLeftOutWhenVeryOld() throws SQLException {
+        Instant halfLifeLater = Instant.now().plus(Duration.ofSeconds((long) (FeedConfig.STANCE_HALF_LIFE_DAYS * 86400)));
+        Instant tooOld = Instant.now().plus(Duration.ofDays(FeedConfig.STANCE_MAX_AGE_DAYS + 1));
+
+        UserVector.Stance now = feedRepository.findVectorParts(ME, Instant.now()).stances().getFirst();
+        UserVector.Stance later = feedRepository.findVectorParts(ME, halfLifeLater).stances().getFirst();
+
+        assertEquals(1.0, now.amount(), 0.001);
+        assertEquals(0.5, later.amount(), 0.001);
+        assertEquals(0.5 * length(now.sum()), length(later.sum()), 0.001 * length(now.sum()));
+        assertTrue(feedRepository.findVectorParts(ME, tooOld).stances().isEmpty());
+    }
+
+    private static double length(double[] vector) {
+        double sum = 0;
+        for (double v : vector) {
+            sum += v * v;
+        }
+        return Math.sqrt(sum);
+    }
+
+    @Test
     void vector_isNullForAGuest() throws SQLException {
         assertNull(UserVector.blend(feedRepository.findVectorParts(null, Instant.now())));
     }

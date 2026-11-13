@@ -30,7 +30,9 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     public static final double INTEREST_CATEGORY_WEIGHT = 0.25;
     public static final double INTEREST_SHARE_MIN = 0.2;
     public static final double INTEREST_DECAY = 10;
-    public static final int ENGAGEMENT_WINDOW_DAYS = 30;
+    /** A stance this many days old counts half, in the vector and in engagement, so recent taste leads. */
+    public static final double STANCE_HALF_LIFE_DAYS = 14;
+    public static final int STANCE_MAX_AGE_DAYS = 112;
     public static final double PROXIMITY_SCALE_METERS = 20_000;
     public static final double TIME_SCALE_DAYS = 30;
     public static final int POPULARITY_CAP = 100;

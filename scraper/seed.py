@@ -47,6 +47,9 @@ DEMO_USERS = {
 LIKE_RANKS = (3, 6, 9, 12, 15)
 INTERESTED_RANKS = (4, 10)
 DISLIKED_FROM_THE_END = 2
+# The API stamps a reaction with the time it's made. The feed lets older stances fade, so the demo users get a past,
+# 2 to 6 weeks back, and what someone likes in the app leads their taste, as it would for a real user.
+HISTORY_DAYS = (14, 42)
 
 RANKING_SQL = """
 WITH taste AS (
@@ -62,6 +65,10 @@ CROSS JOIN taste
 WHERE p.author_id = '{bot_id}' AND p.status <> 'DELETED' AND p.deleted_at IS NULL
   AND p.starts_at > now() AND pe.model = taste.model
 ORDER BY pe.embedding <=> taste.vector, p.id
+"""
+DATED_SQL = """
+UPDATE post_{table}s SET created_at = now() - make_interval(days => {days})
+WHERE user_id = '{user_id}' AND post_id = '{post_id}';
 """
 HAS_REACTED_SQL = """
 SELECT (SELECT count(*) FROM post_reactions WHERE user_id = '{user_id}')
@@ -172,6 +179,12 @@ def picks(ranking: list[str]) -> list[tuple[str, str, str]]:
     return chosen + [(post_id, 'reaction', 'DISLIKE') for post_id in tail]
 
 
+def history(count: int) -> list[int]:
+    """How many days ago each of a user's reactions was made, spread evenly over HISTORY_DAYS."""
+    first, last = HISTORY_DAYS
+    return [first + round((last - first) * i / max(count - 1, 1)) for i in range(count)]
+
+
 def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
                    session_factory: Callable[[], requests.Session] = http_session) -> Counter:
     stats: Counter = Counter()
@@ -193,6 +206,8 @@ def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
                 raise SeedError(f'PUT /posts/{post_id}/{path} as {username} returned {response.status_code}: '
                                 f'{response.text[:300]}')
             stats[kind.lower()] += 1
+        query(''.join(DATED_SQL.format(table=path, days=days, user_id=user_id, post_id=post_id)
+                      for (post_id, path, _), days in zip(chosen, history(len(chosen)))))
         stats['users'] += 1
         log.info('%s reacted to %d of %d posts', username, len(chosen), len(ranking))
     return stats

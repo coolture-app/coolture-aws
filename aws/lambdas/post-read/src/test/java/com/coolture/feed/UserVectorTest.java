@@ -14,8 +14,8 @@ class UserVectorTest {
     private static final double[] A = {1, 0};
     private static final double[] B = {0, 1};
 
-    private static UserVector.Stance stance(String type, double[] sum, int recent) {
-        return new UserVector.Stance(type, sum, recent);
+    private static UserVector.Stance stance(String type, double[] sum, double amount) {
+        return new UserVector.Stance(type, sum, amount);
     }
 
     private static UserVector.Parts stances(UserVector.Stance... stances) {
@@ -81,6 +81,14 @@ class UserVectorTest {
         double[] oneGoing = UserVector.blend(withInterests(B, stance("TAKES_PART", A, 1)));
 
         assertTrue(oneGoing[0] > oneLike[0], "going counts twice a like towards engagement");
+    }
+
+    @Test
+    void blend_givesInterestsBackTheirShare_asStancesFade() {
+        double[] fresh = UserVector.blend(withInterests(B, stance("LIKE", A, 10)));
+        double[] faded = UserVector.blend(withInterests(B, stance("LIKE", A, 10 * 0.05)));
+
+        assertTrue(faded[1] > fresh[1], "faded likes count less towards engagement, so interests lead again");
     }
 
     @Test
