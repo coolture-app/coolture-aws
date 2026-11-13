@@ -69,7 +69,7 @@ public class PostReadRepository {
             bindParticipationAndReaction(b, f, callerId);
 
             if (cursor != null) {
-                cursor.bindKeyset(b, f.latitude(), f.longitude());
+                cursor.bindKeyset(b, f.latitude(), f.longitude(), callerId);
             }
             if (sort.needsPosition()) {
                 b.bindDouble(f.longitude())
@@ -107,7 +107,7 @@ public class PostReadRepository {
     public Optional<PostDetailDto> findById(UUID postId, UUID callerId) throws SQLException {
         String sql = """
             SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
-                   p.positive_reaction_count, p.negative_reaction_count, p.participant_count, p.comments_count,
+                   p.positive_reaction_count, p.participant_count, p.comments_count,
                    p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
                    u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
                    avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
@@ -161,7 +161,6 @@ public class PostReadRepository {
                         mapInstant(rs, "ends_at"),
                         mapTags(rs),
                         rs.getInt("positive_reaction_count"),
-                        rs.getInt("negative_reaction_count"),
                         rs.getInt("participant_count"),
                         rs.getInt("comments_count"),
                         mapEnum(rs, "type", PostType.class),

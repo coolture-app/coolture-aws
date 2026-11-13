@@ -46,7 +46,7 @@ DEMO_USERS = {
 # closest few are left for it to show, and the likes come from just below them.
 LIKE_RANKS = (3, 6, 9, 12, 15)
 INTERESTED_RANKS = (4, 10)
-DISLIKED_FROM_THE_END = 2
+NOT_FOR_ME_FROM_THE_END = 2
 # The API stamps a reaction with the time it's made. The feed lets older stances fade, so the demo users get a past,
 # 2 to 6 weeks back, and what someone likes in the app leads their taste, as it would for a real user.
 HISTORY_DAYS = (14, 42)
@@ -175,8 +175,8 @@ def picks(ranking: list[str]) -> list[tuple[str, str, str]]:
     chosen = [(ranking[rank], 'reaction', 'LIKE') for rank in LIKE_RANKS if rank < len(ranking)]
     chosen += [(ranking[rank], 'participation', 'INTERESTED') for rank in INTERESTED_RANKS if rank < len(ranking)]
     taken = {post_id for post_id, _, _ in chosen}
-    tail = [post_id for post_id in ranking[-DISLIKED_FROM_THE_END:] if post_id not in taken]
-    return chosen + [(post_id, 'reaction', 'DISLIKE') for post_id in tail]
+    tail = [post_id for post_id in ranking[-NOT_FOR_ME_FROM_THE_END:] if post_id not in taken]
+    return chosen + [(post_id, 'participation', 'NOT_INTERESTED') for post_id in tail]
 
 
 def history(count: int) -> list[int]:

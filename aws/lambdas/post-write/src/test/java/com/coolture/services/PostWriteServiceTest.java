@@ -483,7 +483,7 @@ class PostWriteServiceTest {
     private PostDetailDto postDetail(UUID postId, String title, String description, List<String> tags) {
         return new PostDetailDto(
             postId, null, null, title, description, null,
-            Instant.now(), null, tags, 0, 0, 0, 0,
+            Instant.now(), null, tags, 0, 0, 0,
             PostType.ONLINE, PostStatus.ACTIVE, PostVisibility.PUBLIC,
             Instant.now(), null, null, null, null, null, null
         );

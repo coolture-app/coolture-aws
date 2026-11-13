@@ -155,7 +155,7 @@ scripts/                        # deploy.sh, doctor.sh, embed-posts.sh, geo-publ
 | Command | Runs |
 |---|---|
 | `mvn test -f aws/lambdas/<module>/pom.xml` | A Java module's unit tests, after `make build-common`. `make build` runs them too |
-| `make test-post-read-db` | `post-read`'s database tests, against `make up` |
+| `make test-db` | `post-read`'s and `post-write`'s database tests, against `make up` |
 | `make test-python` | The Python Lambdas: embedding workers, migrations, authorizer |
 | `make test-scraper` | The scraper |
 | `make api-test` | The request flows in `api/`, against `make dev` and `make seed` |

@@ -239,7 +239,6 @@ public final class ResultSetMappers {
             mapInstant(rs, "ends_at"),
             mapTags(rs),
             rs.getInt("positive_reaction_count"),
-            rs.getInt("negative_reaction_count"),
             rs.getInt("participant_count"),
             rs.getInt("comments_count"),
             mapEnum(rs, "type", PostType.class),

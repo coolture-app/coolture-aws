@@ -73,9 +73,11 @@ paths:
           in: query
           schema:
             type: string
-            enum: [RECENT, POPULAR, UPCOMING, NEAREST]
+            enum: [RECENT, POPULAR, UPCOMING, NEAREST, STANCE_NEWEST]
             default: RECENT
-          description: NEAREST needs latitude and longitude, and shows only posts with a place.
+          description: >
+            NEAREST needs latitude and longitude, and shows only posts with a place. STANCE_NEWEST needs participationTypes
+            and puts the viewer's newest of those stances first.
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/Q'
         - $ref: '#/components/parameters/Tags'
@@ -88,7 +90,7 @@ paths:
         - $ref: '#/components/parameters/Latitude'
         - $ref: '#/components/parameters/Longitude'
         - $ref: '#/components/parameters/RadiusKm'
-        - {name: participationTypes, in: query, description: Signed-in only., schema: {type: array, items: {$ref: '#/components/schemas/ParticipationType'}}, style: form, explode: true}
+        - {name: participationTypes, in: query, description: Signed-in only. Only the viewer's own stances; NOT_INTERESTED (Nie dla mnie) is never shown to anyone else., schema: {type: array, items: {$ref: '#/components/schemas/ParticipationType'}}, style: form, explode: true}
         - {name: reactionType, in: query, description: Signed-in only., schema: {$ref: '#/components/schemas/ReactionType'}}
       responses:
         '200':
@@ -259,7 +261,6 @@ components:
         - startsAt
         - tags
         - positiveReactionCount
-        - negativeReactionCount
         - participantCount
         - commentsCount
         - type
@@ -277,7 +278,6 @@ components:
         endsAt: {type: string, format: date-time}
         tags: {type: array, items: {type: string}}
         positiveReactionCount: {type: integer}
-        negativeReactionCount: {type: integer}
         participantCount: {type: integer}
         commentsCount: {type: integer}
         type: {$ref: '#/components/schemas/PostType'}
@@ -359,8 +359,11 @@ components:
     PostType: {type: string, enum: [ONLINE, OFFLINE]}
     PostStatus: {type: string, enum: [ACTIVE, EDITED, DELETED]}
     PostVisibility: {type: string, enum: [PUBLIC, PRIVATE, FRIENDS]}
-    ReactionType: {type: string, enum: [LIKE, DISLIKE]}
-    ParticipationType: {type: string, enum: [INTERESTED, TAKES_PART]}
+    ReactionType: {type: string, enum: [LIKE]}
+    ParticipationType:
+      type: string
+      enum: [INTERESTED, TAKES_PART, NOT_INTERESTED]
+      description: NOT_INTERESTED is "Nie dla mnie", private to the viewer. It hides the post from /feed, pushes similar posts down, and isn't counted in participantCount.
     Error:
       type: object
       required: [error]

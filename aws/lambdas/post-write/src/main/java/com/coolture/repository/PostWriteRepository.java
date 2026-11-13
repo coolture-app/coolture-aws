@@ -152,12 +152,12 @@ public class PostWriteRepository {
                     INSERT INTO posts (
                         id, author_id, event_location_id, title, description, event_url,
                         tags, type, status, visibility,
-                        positive_reaction_count, negative_reaction_count, participant_count, comments_count,
+                        positive_reaction_count, participant_count, comments_count,
                         starts_at, ends_at, created_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?,
-                        0, 0, 0, 0,
+                        0, 0, 0,
                         ?, ?, ?
                     )
                 """;
@@ -319,7 +319,7 @@ public class PostWriteRepository {
     private PostDetailDto getPostDetail(Connection conn, UUID postId) throws SQLException {
         String sql = """
             SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
-                   p.positive_reaction_count, p.negative_reaction_count, p.participant_count, p.comments_count,
+                   p.positive_reaction_count, p.participant_count, p.comments_count,
                    p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
                    u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
                    avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
@@ -361,7 +361,6 @@ public class PostWriteRepository {
                     mapInstant(rs, "ends_at"),
                     mapTags(rs),
                     rs.getInt("positive_reaction_count"),
-                    rs.getInt("negative_reaction_count"),
                     rs.getInt("participant_count"),
                     rs.getInt("comments_count"),
                     mapEnum(rs, "type", PostType.class),
@@ -477,6 +476,7 @@ public class PostWriteRepository {
         }
     }
 
+    /** A like takes back the viewer's "Nie dla mnie" on the post, which has no count. */
     public void upsertReaction(UUID postId, UUID userId, ReactionType newType) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
@@ -484,17 +484,12 @@ public class PostWriteRepository {
                 if (!PostQueries.isPostVisible(conn, postId, userId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
-                Optional<ReactionType> oldTypeOpt = findReaction(conn, postId, userId);
-                if (oldTypeOpt.isPresent()) {
-                    ReactionType oldType = oldTypeOpt.get();
-                    if (oldType != newType) {
-                        decrementReactionCount(conn, postId, oldType);
-                        incrementReactionCount(conn, postId, newType);
-                        updateReaction(conn, postId, userId, newType);
-                    }
-                } else {
+                if (findReaction(conn, postId, userId).isEmpty()) {
                     insertReaction(conn, postId, userId, newType);
-                    incrementReactionCount(conn, postId, newType);
+                    incrementLikeCount(conn, postId);
+                }
+                if (findParticipation(conn, postId, userId).orElse(null) == ParticipationType.NOT_INTERESTED) {
+                    deleteParticipationRow(conn, postId, userId);
                 }
                 conn.commit();
             } catch (Exception e) {
@@ -511,10 +506,9 @@ public class PostWriteRepository {
                 if (!PostQueries.isPostVisible(conn, postId, userId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
-                Optional<ReactionType> oldTypeOpt = findReaction(conn, postId, userId);
-                if (oldTypeOpt.isPresent()) {
+                if (findReaction(conn, postId, userId).isPresent()) {
                     deleteReactionRow(conn, postId, userId);
-                    decrementReactionCount(conn, postId, oldTypeOpt.get());
+                    decrementLikeCount(conn, postId);
                 }
                 conn.commit();
             } catch (Exception e) {
@@ -524,6 +518,11 @@ public class PostWriteRepository {
         }
     }
 
+    /**
+     * "Nie dla mnie" isn't counted as a participant, and takes back the viewer's like. A changed stance starts its time
+     * again, because the feed reads stances up to a session's start and a changed one must not act on the session it was
+     * changed in.
+     */
     public void upsertParticipation(UUID postId, UUID userId, ParticipationType newType) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
@@ -532,13 +531,16 @@ public class PostWriteRepository {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
-                if (oldTypeOpt.isPresent()) {
-                    if (oldTypeOpt.get() != newType) {
-                        updateParticipation(conn, postId, userId, newType);
-                    }
-                } else {
+                if (oldTypeOpt.isEmpty()) {
                     insertParticipation(conn, postId, userId, newType);
-                    incrementParticipantCount(conn, postId);
+                } else if (oldTypeOpt.get() != newType) {
+                    updateParticipation(conn, postId, userId, newType);
+                }
+                int countChange = (counted(newType) ? 1 : 0) - (oldTypeOpt.map(PostWriteRepository::counted).orElse(false) ? 1 : 0);
+                changeParticipantCount(conn, postId, countChange);
+                if (newType == ParticipationType.NOT_INTERESTED && findReaction(conn, postId, userId).isPresent()) {
+                    deleteReactionRow(conn, postId, userId);
+                    decrementLikeCount(conn, postId);
                 }
                 conn.commit();
             } catch (Exception e) {
@@ -558,7 +560,7 @@ public class PostWriteRepository {
                 Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
                 if (oldTypeOpt.isPresent()) {
                     deleteParticipationRow(conn, postId, userId);
-                    decrementParticipantCount(conn, postId);
+                    changeParticipantCount(conn, postId, counted(oldTypeOpt.get()) ? -1 : 0);
                 }
                 conn.commit();
             } catch (Exception e) {
@@ -566,6 +568,10 @@ public class PostWriteRepository {
                 throw e;
             }
         }
+    }
+
+    private static boolean counted(ParticipationType type) {
+        return type != ParticipationType.NOT_INTERESTED;
     }
 
     private Optional<ReactionType> findReaction(Connection conn, UUID postId, UUID userId) throws SQLException {
@@ -592,16 +598,6 @@ public class PostWriteRepository {
         }
     }
 
-    private void updateReaction(Connection conn, UUID postId, UUID userId, ReactionType type) throws SQLException {
-        String sql = "UPDATE post_reactions SET type = ? WHERE post_id = ? AND user_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, type.name());
-            stmt.setObject(2, postId);
-            stmt.setObject(3, userId);
-            stmt.executeUpdate();
-        }
-    }
-
     private void deleteReactionRow(Connection conn, UUID postId, UUID userId) throws SQLException {
         String sql = "DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -611,18 +607,16 @@ public class PostWriteRepository {
         }
     }
 
-    private void incrementReactionCount(Connection conn, UUID postId, ReactionType type) throws SQLException {
-        String col = (type == ReactionType.LIKE) ? "positive_reaction_count" : "negative_reaction_count";
-        String sql = "UPDATE posts SET " + col + " = " + col + " + 1 WHERE id = ?";
+    private void incrementLikeCount(Connection conn, UUID postId) throws SQLException {
+        String sql = "UPDATE posts SET positive_reaction_count = positive_reaction_count + 1 WHERE id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, postId);
             stmt.executeUpdate();
         }
     }
 
-    private void decrementReactionCount(Connection conn, UUID postId, ReactionType type) throws SQLException {
-        String col = (type == ReactionType.LIKE) ? "positive_reaction_count" : "negative_reaction_count";
-        String sql = "UPDATE posts SET " + col + " = GREATEST(0, " + col + " - 1) WHERE id = ?";
+    private void decrementLikeCount(Connection conn, UUID postId) throws SQLException {
+        String sql = "UPDATE posts SET positive_reaction_count = GREATEST(0, positive_reaction_count - 1) WHERE id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, postId);
             stmt.executeUpdate();
@@ -654,7 +648,7 @@ public class PostWriteRepository {
     }
 
     private void updateParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type) throws SQLException {
-        String sql = "UPDATE post_participations SET type = ? WHERE post_id = ? AND user_id = ?";
+        String sql = "UPDATE post_participations SET type = ?, created_at = now() WHERE post_id = ? AND user_id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, type.name());
             stmt.setObject(2, postId);
@@ -672,18 +666,14 @@ public class PostWriteRepository {
         }
     }
 
-    private void incrementParticipantCount(Connection conn, UUID postId) throws SQLException {
-        String sql = "UPDATE posts SET participant_count = participant_count + 1 WHERE id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.executeUpdate();
+    private void changeParticipantCount(Connection conn, UUID postId, int change) throws SQLException {
+        if (change == 0) {
+            return;
         }
-    }
-
-    private void decrementParticipantCount(Connection conn, UUID postId) throws SQLException {
-        String sql = "UPDATE posts SET participant_count = GREATEST(0, participant_count - 1) WHERE id = ?";
+        String sql = "UPDATE posts SET participant_count = GREATEST(0, participant_count + ?) WHERE id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
+            stmt.setInt(1, change);
+            stmt.setObject(2, postId);
             stmt.executeUpdate();
         }
     }

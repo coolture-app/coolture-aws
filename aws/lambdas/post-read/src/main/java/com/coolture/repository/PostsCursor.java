@@ -19,7 +19,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
             case RECENT -> new PostsCursor(sort, card.id(), card.createdAt(), null, null);
             case POPULAR -> new PostsCursor(sort, card.id(), null, card.positiveReactionCount(), null);
             case UPCOMING -> new PostsCursor(sort, card.id(), null, null, card.startsAt());
-            case NEAREST -> new PostsCursor(sort, card.id(), null, null, null);
+            case NEAREST, STANCE_NEWEST -> new PostsCursor(sort, card.id(), null, null, null);
         });
     }
 
@@ -33,7 +33,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
                 case RECENT -> c.createdAt != null;
                 case POPULAR -> c.likes != null;
                 case UPCOMING -> c.startsAt != null;
-                case NEAREST -> true;
+                case NEAREST, STANCE_NEWEST -> true;
             };
             if (c.id == null || !hasValue) {
                 throw new IllegalArgumentException("Invalid cursor");
@@ -42,8 +42,8 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
         return cursor;
     }
 
-    /** Binds the parameters of the sort's keyset condition. NEAREST needs the request's position. */
-    void bindKeyset(ParamBinder binder, Double latitude, Double longitude) throws SQLException {
+    /** Binds the parameters of the sort's keyset condition. NEAREST needs the request's position, STANCE_NEWEST the viewer. */
+    void bindKeyset(ParamBinder binder, Double latitude, Double longitude, UUID viewer) throws SQLException {
         switch (sort) {
             case RECENT -> binder.bindTimestamp(createdAt);
             case POPULAR -> binder.bindInt(likes);
@@ -51,6 +51,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
             case NEAREST -> binder.bindDouble(longitude).bindDouble(latitude)
                 .bindDouble(longitude).bindDouble(latitude)
                 .bindUUID(id);
+            case STANCE_NEWEST -> binder.bindUUID(id).bindUUID(viewer);
         }
         binder.bindUUID(id);
     }

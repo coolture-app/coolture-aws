@@ -98,6 +98,47 @@ class FeedScorerTest {
         return DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 0, similarity, null), AS_OF, 7).affinity();
     }
 
+    private static FeedScorer.Facts marked(double similarity, double nearMark) {
+        return new FeedScorer.Facts(UUID.randomUUID(), AS_OF, null, 0, similarity, null, nearMark);
+    }
+
+    @Test
+    void notForMe_takesItsWeightTimesNearMarkOffAffinity() {
+        FeedScorer.Score score = DEFAULT.score(marked(0.225, 0.4), AS_OF, 7);
+
+        assertEquals(0.5 * 0.4, score.notForMe(), 1e-12);
+        assertEquals(0.75 - 0.2, score.affinity(), 1e-12);
+    }
+
+    @Test
+    void notForMe_comesOffBeforeTheClamp_soAffinityStaysBetweenZeroAndOne() {
+        assertEquals(0.0, DEFAULT.score(marked(FeedConfig.AFFINITY_LOW, 1), AS_OF, 7).affinity());
+        assertEquals(0.5, DEFAULT.score(marked(FeedConfig.AFFINITY_HIGH, 1), AS_OF, 7).affinity(), 1e-12);
+        // Far past the band, a post keeps the top affinity despite a mark, as the penalty was measured.
+        assertEquals(1.0, DEFAULT.score(marked(1.0, 1), AS_OF, 7).affinity(), 1e-12);
+    }
+
+    @Test
+    void notForMe_appliesWithoutAViewerVectorToo() {
+        FeedScorer.Facts noVector = new FeedScorer.Facts(UUID.randomUUID(), AS_OF, null, 0, null, null, 1);
+
+        assertEquals(FeedConfig.NEUTRAL - 0.5, DEFAULT.score(noVector, AS_OF, 7).affinity(), 1e-12);
+    }
+
+    @Test
+    void notForMe_ofZero_switchesThePenaltyOff() {
+        FeedScorer off = new FeedScorer(FeedConfig.parse("notForMe=0,jitter=0"));
+
+        assertEquals(off.score(marked(0.1, 0), AS_OF, 7).total(), off.score(marked(0.1, 1), AS_OF, 7).total());
+    }
+
+    @Test
+    void aPostLikeAMarkedOne_ranksBelowAnEqualPostThatIsNot() {
+        FeedScorer scorer = new FeedScorer(NO_JITTER);
+
+        assertTrue(scorer.score(marked(0.1, 0.6), AS_OF, 1).total() < scorer.score(marked(0.1, 0), AS_OF, 1).total());
+    }
+
     @Test
     void score_whenPopularityPassesTheCap_staysAtOne() {
         assertEquals(1.0, DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 5000, null, null), AS_OF, 7).popularity());

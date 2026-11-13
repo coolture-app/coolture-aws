@@ -5,7 +5,8 @@ import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum ParticipationType {
     INTERESTED("INTERESTED"),
-    TAKES_PART("TAKES_PART");
+    TAKES_PART("TAKES_PART"),
+    NOT_INTERESTED("NOT_INTERESTED");
 
     private final String value;
 

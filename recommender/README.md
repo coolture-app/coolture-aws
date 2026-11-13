@@ -60,7 +60,7 @@ vector.
 2. Re-embed interests, then posts.
 3. Measure `AFFINITY_LOW` and `AFFINITY_HIGH` in `FeedConfig` again. They cover the cosines this model gives between
    the viewer's vector and posts once the average post and the average interest are taken out (`UserVector`), so they
-   belong to the model.
+   belong to the model. So does `NOT_FOR_ME_FROM`, the p95 cosine between two posts with the average post taken out.
 
 A new model name is what marks a vector as old. A new revision, or a change to how text is encoded, isn't visible that
 way: locally, clear `interest_embeddings` and run `make embed-posts ALL=1`. There's no equivalent on AWS yet.

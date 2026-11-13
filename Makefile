@@ -168,8 +168,9 @@ seed: seed-events embed-interests embed-posts seed-reactions ## All realistic da
 
 .NOTPARALLEL: seed
 
-test-post-read-db: build-common ## Run the post-read database tests against `make up`
+test-db: build-common ## Run the post-read and post-write database tests against `make up`
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-read/pom.xml -Dtest=PostReadDbTest
+	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-write/pom.xml -Dtest=PostWriteDbTest
 
 embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
 	@scripts/embed-posts.sh
