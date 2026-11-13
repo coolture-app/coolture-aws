@@ -20,8 +20,8 @@ import java.util.UUID;
 
 public class PostReadService {
 
-    private static final Set<String> VALID_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART", "interested", "takes_part");
-    private static final Set<String> VALID_REACTION_TYPES = Set.of("LIKE", "DISLIKE", "like", "dislike");
+    private static final Set<String> VALID_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART", "NOT_INTERESTED", "interested", "takes_part", "not_interested");
+    private static final Set<String> VALID_REACTION_TYPES = Set.of("LIKE", "like");
 
     private final PostReadRepository repository;
 
@@ -40,6 +40,9 @@ public class PostReadService {
         PostSort sort = PostSort.parse(filters.sortBy());
         if (sort.needsPosition() && (filters.latitude() == null || filters.longitude() == null)) {
             throw new IllegalArgumentException("sortBy NEAREST needs latitude and longitude");
+        }
+        if (sort.needsStances() && (filters.participationTypes() == null || filters.participationTypes().isEmpty())) {
+            throw new IllegalArgumentException("sortBy STANCE_NEWEST needs participationTypes");
         }
         PostsCursor keyset = PostsCursor.decode(cursor, sort).orElse(null);
 

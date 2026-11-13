@@ -23,7 +23,6 @@ public record PostDetailDto(
     Instant endsAt,
     List<String> tags,
     int positiveReactionCount,
-    int negativeReactionCount,
     int participantCount,
     int commentsCount,
     PostType type,

@@ -71,7 +71,7 @@ An event's end is `COALESCE(ends_at, starts_at + 3 hours)`, everywhere in this d
 | Public | Yes | Yes |
 | Or friends-only, and the viewer follows the author | Yes | No |
 | Not the viewer's own post | Yes | n/a |
-| Not liked, disliked, interested or attending | Yes | n/a |
+| Not liked, saved, attending or marked "Nie dla mnie" | Yes | n/a |
 | No block between viewer and author, in either direction | Yes | n/a |
 
 Commenting doesn't hide a post. A post liked during a session stays where it is, and leaves on the next refresh.
@@ -165,7 +165,7 @@ A `limit` above 100 is capped, and zero or below uses 20.
 | Piece | Keeps honest |
 |---|---|
 | `ContractTest` in `post-read` | The API matches `feed-api.yaml`, including no undocumented fields |
-| `PostReadDbTest` in `post-read` (`make test-post-read-db`) | The queries follow the rules in this file |
+| `PostReadDbTest` in `post-read` (`make test-db`) | The queries follow the rules in this file |
 | `npm run api-types` in the frontend | Regenerates TypeScript types, and a compile check fails if frontend models disagree |
 | A pull request | The other developer reviews the change |
 

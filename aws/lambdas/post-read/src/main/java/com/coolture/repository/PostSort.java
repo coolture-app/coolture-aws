@@ -14,7 +14,15 @@ public enum PostSort {
         "(ST_Distance(el.coordinates, " + PostFilterSql.POINT + "), p.id) > ("
             + "(SELECT ST_Distance(el2.coordinates, " + PostFilterSql.POINT + ") FROM posts p2"
             + " JOIN event_locations el2 ON el2.id = p2.event_location_id WHERE p2.id = ?::uuid), ?::uuid)",
-        "ST_Distance(el.coordinates, " + PostFilterSql.POINT + ") ASC, p.id ASC");
+        "ST_Distance(el.coordinates, " + PostFilterSql.POINT + ") ASC, p.id ASC"),
+    /**
+     * The viewer's newest stance first, among the participation types asked for. The cursor holds just the last id, and
+     * its stance time is read again here. If that stance was removed in the meantime, the next page is empty.
+     */
+    STANCE_NEWEST(
+        "(pp_my.created_at, p.id) < ("
+            + "(SELECT created_at FROM post_participations WHERE post_id = ?::uuid AND user_id = ?::uuid), ?::uuid)",
+        "pp_my.created_at DESC, p.id DESC");
 
     private final String keysetSql;
     private final String orderSql;
@@ -46,5 +54,10 @@ public enum PostSort {
     /** Whether the order needs the request's position. */
     public boolean needsPosition() {
         return this == NEAREST;
+    }
+
+    /** Whether the order needs the viewer's participation filter, as it orders by that stance. */
+    public boolean needsStances() {
+        return this == STANCE_NEWEST;
     }
 }
