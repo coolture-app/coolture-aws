@@ -21,8 +21,7 @@ PYTHON ?= $(if $(filter Windows_NT,$(OS)),python,python3)
 # One virtual environment for the scripts and the Python tests, made on first use.
 VENV_PY := .venv/$(if $(filter Windows_NT,$(OS)),Scripts/python.exe,bin/python)
 PY_REQUIREMENTS := scraper/requirements-dev.txt aws/lambdas/migrations/requirements-dev.txt \
-	aws/lambdas/authorizer/requirements-dev.txt recommender/embedding-workers/post-embedding/requirements-dev.txt \
-	recommender/embedding-workers/user-embedding/requirements-dev.txt
+	aws/lambdas/authorizer/requirements-dev.txt recommender/embedding-workers/post-embedding/requirements-dev.txt
 
 # The local Garage keys, the defaults in docker-compose.yml. Without them every upload and photo URL gets a 403.
 GARAGE_ACCESS_KEY_ID ?= GK9f23fc115cfabe3da0a5bcb5
@@ -123,7 +122,7 @@ build: build-common ## Build backend lambdas
 	sam build --template-file aws/backend.yaml --parallel --cached && echo "$$sum" > .aws-sam/common.sha1
 
 test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding workers, migrations, authorizer, geocoder proxy
-	@for dir in recommender/embedding-workers/post-embedding recommender/embedding-workers/user-embedding \
+	@for dir in recommender/embedding-workers/post-embedding \
 			aws/lambdas/migrations aws/lambdas/authorizer aws/lambdas/geo-proxy; do \
 		echo "$$dir"; (cd $$dir && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests) || exit 1; \
 	done
@@ -164,7 +163,7 @@ seed-events: $(VENV_PY) $(SNAPSHOT_DIR)/complete ## Load the snapshot through th
 seed-reactions: $(VENV_PY) ## Demo users react to posts close to their interests (after embed-interests and embed-posts)
 	@$(VENV_PY) scraper/seed.py reactions
 
-seed: seed-events embed-interests embed-posts seed-reactions embed-users ## All realistic data: events, embeddings, reactions. Waits for the API
+seed: seed-events embed-interests embed-posts seed-reactions ## All realistic data: events, embeddings, reactions. Waits for the API
 	@echo "Seeded. Run npm start in ../coolture-frontend and open http://localhost:4200"
 
 .NOTPARALLEL: seed
@@ -184,9 +183,6 @@ require-embeddings-build:
 
 embed-interests: require-embeddings-build ## Embed interests missing vectors locally
 	@out="$$(echo '{"action":"embed-interests"}' | sam local invoke PostEmbeddingFunction --template-file .aws-sam/embeddings/template.yaml --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
-
-embed-users: require-embeddings-build ## Recompute user embeddings locally (same as the schedule in AWS)
-	@out="$$(echo '{}' | sam local invoke UserEmbeddingFunction --template-file .aws-sam/embeddings/template.yaml --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
 
 local: build stop-lambdas ## Start local API on localhost:3000 (Ctrl+C stops it; make stop if containers stay)
 	@echo "API: http://localhost:3000"

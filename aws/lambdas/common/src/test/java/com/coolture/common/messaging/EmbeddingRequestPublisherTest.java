@@ -30,13 +30,6 @@ class EmbeddingRequestPublisherTest {
     }
 
     @Test
-    void requestUser_writesObjectKeyedByUserId() {
-        new EmbeddingRequestPublisher(BUCKET, s3).requestUser(ID);
-
-        assertEquals("users/11111111-1111-1111-1111-111111111111", capturedRequest().key());
-    }
-
-    @Test
     void request_whenS3Fails_doesNotThrow() {
         when(s3.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
             .thenThrow(SdkClientException.create("boom"));
@@ -46,7 +39,7 @@ class EmbeddingRequestPublisherTest {
 
     @Test
     void request_whenBucketMissing_skips() {
-        new EmbeddingRequestPublisher("", s3).requestUser(UUID.randomUUID());
+        new EmbeddingRequestPublisher("", s3).requestPost(UUID.randomUUID());
 
         verifyNoInteractions(s3);
     }

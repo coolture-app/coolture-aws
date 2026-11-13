@@ -306,42 +306,9 @@ Resources:
               StringEquals:
                 aws:SourceAccount: !Ref AWS::AccountId
 
-  UserEmbeddingDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub 'coolture-${Environment}-user-embedding-dlq'
-      MessageRetentionPeriod: 1209600
-
-  UserEmbeddingQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub 'coolture-${Environment}-user-embedding'
-      VisibilityTimeout: 1800
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt UserEmbeddingDLQ.Arn
-        maxReceiveCount: 3
-
-  UserEmbeddingQueuePolicy:
-    Type: AWS::SQS::QueuePolicy
-    Properties:
-      Queues: [!Ref UserEmbeddingQueue]
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: s3.amazonaws.com
-            Action: sqs:SendMessage
-            Resource: !GetAtt UserEmbeddingQueue.Arn
-            Condition:
-              ArnLike:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:s3:::coolture-${Environment}-embedding-requests-${AWS::AccountId}'
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-
   EmbeddingRequestsBucket:
     Type: AWS::S3::Bucket
-    DependsOn: [PostEmbeddingQueuePolicy, UserEmbeddingQueuePolicy]
+    DependsOn: [PostEmbeddingQueuePolicy]
     Properties:
       BucketName: !Sub 'coolture-${Environment}-embedding-requests-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
@@ -363,13 +330,6 @@ Resources:
                 Rules:
                   - Name: prefix
                     Value: posts/
-          - Event: s3:ObjectCreated:*
-            Queue: !GetAtt UserEmbeddingQueue.Arn
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: users/
 
   MediaBucket:
     Type: AWS::S3::Bucket
@@ -429,15 +389,10 @@ Resources:
         Variables:
           INTERESTS_MIN_SELECTIONS: '3'
           INTERESTS_MAX_SELECTIONS: '6'
-          EMBEDDING_REQUESTS_BUCKET: !If [IsAWS, !Ref EmbeddingRequestsBucket, '']
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:
             BucketName: !Ref MediaBucket
-        - Statement:
-            - Effect: Allow
-              Action: s3:PutObject
-              Resource: !Sub '${EmbeddingRequestsBucket.Arn}/users/*'
       Events:
         SearchUsers: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /users, Method: GET}}
         GetUserById: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
@@ -653,7 +608,3 @@ Outputs:
     Value: !GetAtt PostEmbeddingQueue.Arn
     Export:
       Name: !Sub '${AWS::StackName}-PostEmbeddingQueueArn'
-  UserEmbeddingQueueArn:
-    Value: !GetAtt UserEmbeddingQueue.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-UserEmbeddingQueueArn'

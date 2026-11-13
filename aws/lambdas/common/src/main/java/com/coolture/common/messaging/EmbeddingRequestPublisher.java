@@ -9,13 +9,12 @@ import java.util.UUID;
 
 /**
  * Requests embedding work by writing an empty object to the embedding requests bucket.
- * S3 forwards {@code posts/} keys to the post embedding queue and {@code users/} keys to the user embedding queue.
+ * S3 forwards {@code posts/} keys to the post embedding queue.
  */
 public class EmbeddingRequestPublisher {
 
     private static final String BUCKET_ENV = "EMBEDDING_REQUESTS_BUCKET";
     static final String POST_PREFIX = "posts/";
-    static final String USER_PREFIX = "users/";
 
     private final String bucket;
     private final S3Client s3;
@@ -37,10 +36,6 @@ public class EmbeddingRequestPublisher {
 
     public void requestPost(UUID postId) {
         publish(POST_PREFIX + postId);
-    }
-
-    public void requestUser(UUID userId) {
-        publish(USER_PREFIX + userId);
     }
 
     private void publish(String key) {
