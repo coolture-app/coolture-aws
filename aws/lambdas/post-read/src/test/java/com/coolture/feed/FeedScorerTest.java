@@ -40,7 +40,7 @@ class FeedScorerTest {
 
     @Test
     void score_computesEachPartFromTheFormula() {
-        FeedScorer.Facts post = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(14)), 100, 0.906, 20_000.0);
+        FeedScorer.Facts post = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(30)), 100, 0.906, 20_000.0);
 
         FeedScorer.Score score = DEFAULT.score(post, AS_OF, 7);
 
@@ -48,7 +48,7 @@ class FeedScorerTest {
         assertEquals(Math.exp(-1), score.proximity(), 1e-12);
         assertEquals(Math.exp(-1), score.time(), 1e-12);
         assertEquals(1.0, score.popularity(), 1e-12);
-        assertEquals(0.40 * score.affinity() + 0.20 * score.proximity() + 0.25 * score.time()
+        assertEquals(0.55 * score.affinity() + 0.20 * score.proximity() + 0.10 * score.time()
             + 0.15 * score.popularity() + 0.10 * score.jitter(), score.total(), 1e-12);
     }
 
@@ -104,8 +104,8 @@ class FeedScorerTest {
 
     @Test
     void score_whenEventEnded_timeFadesWithTheDaysSinceItsEnd() {
-        Instant start = AS_OF.minus(Duration.ofDays(20));
-        FeedScorer.Facts ended = new FeedScorer.Facts(UUID.randomUUID(), start, AS_OF.minus(Duration.ofDays(14)), 0, null, null);
+        Instant start = AS_OF.minus(Duration.ofDays(40));
+        FeedScorer.Facts ended = new FeedScorer.Facts(UUID.randomUUID(), start, AS_OF.minus(Duration.ofDays(30)), 0, null, null);
 
         assertEquals(Math.exp(-1), DEFAULT.score(ended, AS_OF, 7).time(), 1e-12);
     }

@@ -9,7 +9,7 @@ import java.util.Map;
  */
 public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter) {
 
-    public static final FeedConfig DEFAULTS = new FeedConfig(0.40, 0.20, 0.25, 0.15, 0.10);
+    public static final FeedConfig DEFAULTS = new FeedConfig(0.55, 0.20, 0.10, 0.15, 0.10);
 
     /** Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it can't change the order. */
     public static final double NEUTRAL = 0.5;
@@ -32,7 +32,7 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     public static final double INTEREST_DECAY = 10;
     public static final int ENGAGEMENT_WINDOW_DAYS = 30;
     public static final double PROXIMITY_SCALE_METERS = 20_000;
-    public static final double TIME_SCALE_DAYS = 14;
+    public static final double TIME_SCALE_DAYS = 30;
     public static final int POPULARITY_CAP = 100;
 
     public static final int QUERY_TIMEOUT_SECONDS = 5;
