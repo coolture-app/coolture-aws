@@ -43,10 +43,13 @@ public class FeedRepository {
                COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0) AS engagement,
                CASE WHEN pe.model = ? THEN 1 - ((pe.embedding - ?::vector) <=> ?::vector) END AS similarity,
                ST_Distance(el.coordinates,
-                           ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters
+                           ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters,
+               g.score AS graph
         FROM posts p
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
         LEFT JOIN event_locations el ON el.id = p.event_location_id
+        LEFT JOIN rec_graph_scores g ON g.post_id = p.id AND g.user_id = ?::uuid
+         AND g.run_number = (SELECT max(run_number) FROM rec_graph_runs WHERE finished_at <= ?::timestamptz)
         WHERE
         """;
 
@@ -163,6 +166,11 @@ public class FeedRepository {
         return new UserVector.Parts(stances, interests, categories, interestAverage, postAverage);
     }
 
+    private static Double graph(ResultSet rs) throws SQLException {
+        float score = rs.getFloat("graph");
+        return rs.wasNull() ? null : (double) score;
+    }
+
     private static double[] doubles(Array array) throws SQLException {
         Float[] values = (Float[]) array.getArray();
         double[] result = new double[values.length];
@@ -189,7 +197,10 @@ public class FeedRepository {
              .bindString(UserVector.toSql(postAverage))
              .bindString(UserVector.toSql(viewerVector))
              .bindDouble(longitude)
-             .bindDouble(latitude);
+             .bindDouble(latitude)
+             // A run finishing mid-session mustn't move its pages.
+             .bindNullableUUID(viewer)
+             .bindTimestamp(asOf);
             bindRules(b, viewer, asOf, filters);
 
             List<FeedScorer.Facts> candidates = new ArrayList<>();
@@ -201,7 +212,8 @@ public class FeedRepository {
                         ResultSetMappers.mapInstant(rs, "ends_at"),
                         rs.getInt("engagement"),
                         (Double) rs.getObject("similarity"),
-                        (Double) rs.getObject("meters")
+                        (Double) rs.getObject("meters"),
+                        graph(rs)
                     ));
                 }
             }

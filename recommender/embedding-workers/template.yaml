@@ -32,12 +32,20 @@ Parameters:
   DbPort:
     Type: String
     Default: '5430'
+  GraphScheduleEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  GraphSchedule:
+    Type: String
+    Default: 'rate(6 hours)'
   LogRetentionDays:
     Type: Number
     Default: 7
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
+  GraphScheduleOn: !And [!Condition IsAWS, !Equals [!Ref GraphScheduleEnabled, 'true']]
 
 Globals:
   Function:
@@ -93,3 +101,29 @@ Resources:
       Dockerfile: Dockerfile
       DockerContext: post-embedding
       DockerTag: python3.13-v1
+
+  GraphSignalLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-graph-signal'
+      RetentionInDays: !Ref LogRetentionDays
+
+  GraphSignalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-graph-signal'
+      LoggingConfig:
+        LogGroup: !Ref GraphSignalLogGroup
+      CodeUri: ../graph-signal/src/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      MemorySize: 1024
+      Timeout: 300
+      Policies:
+        - !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbConnectPolicyArn'}, !Ref AWS::NoValue]
+      Events:
+        Schedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: !Ref GraphSchedule
+            State: !If [GraphScheduleOn, ENABLED, DISABLED]

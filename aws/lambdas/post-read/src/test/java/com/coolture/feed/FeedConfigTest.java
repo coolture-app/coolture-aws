@@ -11,7 +11,7 @@ class FeedConfigTest {
 
     @Test
     void defaults_matchTheDesign() {
-        assertEquals(new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10), FeedConfig.DEFAULTS);
+        assertEquals(new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10, 0.10), FeedConfig.DEFAULTS);
     }
 
     @Test
@@ -23,16 +23,16 @@ class FeedConfigTest {
 
     @Test
     void parse_whenAllWeightsGiven_usesThem() {
-        FeedConfig config = FeedConfig.parse("affinity=0.1,proximity=0.2,time=0.3,popularity=0.4,jitter=0");
+        FeedConfig config = FeedConfig.parse("affinity=0.1,proximity=0.2,time=0.3,popularity=0.4,jitter=0,graph=0.5");
 
-        assertEquals(new FeedConfig(0.1, 0.2, 0.3, 0.4, 0), config);
+        assertEquals(new FeedConfig(0.1, 0.2, 0.3, 0.4, 0, 0.5), config);
     }
 
     @Test
     void parse_whenSomeWeightsGiven_keepsTheOtherDefaults() {
         FeedConfig config = FeedConfig.parse("jitter=0, affinity = 0");
 
-        assertEquals(new FeedConfig(0, 0.15, 0.10, 0.10, 0), config);
+        assertEquals(new FeedConfig(0, 0.15, 0.10, 0.10, 0, 0.10), config);
     }
 
     @ParameterizedTest

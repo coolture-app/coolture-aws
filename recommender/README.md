@@ -1,6 +1,6 @@
 # Recommender
 
-The Python side of the feed: a Lambda that embeds posts and interests. The feed turns those into the viewer's vector
+The Python side of the feed: a Lambda that embeds posts and interests, and one that scores events with a graph walk. The feed turns those into the viewer's vector
 itself (see [Interests and user vectors](#interests-and-user-vectors)). Everything here reads the app's tables in `public`
 directly. Its own tables are prefixed `rec_`, only the recommender writes them, and they're created by ordinary migrations
 in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post-read`'s
@@ -9,7 +9,8 @@ in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post
 | Path | What it does |
 |---|---|
 | `embedding-workers/post-embedding/` | Container image: embeds a post's title, description and tags, and interests, with `mmlw-roberta-base` |
-| `embedding-workers/template.yaml` | Its own stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
+| `graph-signal/` | Zip function: personalised PageRank for every user, into `rec_graph_scores` |
+| `embedding-workers/template.yaml` | Both functions' stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
 
 All commands below run from the repository root.
 
@@ -113,3 +114,29 @@ weights and the decay are in `FeedConfig`.
 | Setting | Default | Where | Meaning |
 |---|---|---|---|
 | `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 3, 6 | `aws/backend.yaml` | Selection limits, also sent to the frontend |
+
+## Graph signal
+
+`GraphSignalFunction` runs personalised PageRank from every user over one graph:
+
+| Edges | From |
+|---|---|
+| Event–venue | `event_locations`, by lower-cased name and city |
+| Event–interest, event–event | Each event's 2 nearest interests and 5 nearest events, both sides centred as in the feed |
+| User–interest | `user_interests` |
+| User–event | Likes, interested and going, faded as the feed fades them |
+| User → user | Follows, minus blocks either way |
+
+Each user's candidates (events not ended, not theirs, not reacted to) get the walk's mass as a rank from 0 to 1. A run is
+one row of `rec_graph_runs` with its rows in `rec_graph_scores`; the feed reads the latest run finished by the session's
+`asOf`, so a run landing mid-scroll doesn't move its pages, and gives a post with no score `0.5`. The feed's weight is
+`graph` in `FeedConfig`. Why this setup: the thesis spec's decisions on the graph signal, measured in its
+`benchmarks/graph-ppr`.
+
+```bash
+make graph-signal    # one run locally; make seed ends with it
+```
+
+On AWS it runs on a schedule, off by default: `GraphScheduleEnabled=true` and `GraphSchedule` (default `rate(6 hours)`)
+are parameters of the stack. Between runs a new user or post is neutral. After changing `graph-signal/src`, run
+`make build-embeddings` again.

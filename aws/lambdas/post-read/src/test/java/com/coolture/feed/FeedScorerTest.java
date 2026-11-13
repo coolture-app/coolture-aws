@@ -50,7 +50,27 @@ class FeedScorerTest {
         assertEquals(1.0, score.popularity(), 1e-12);
         FeedConfig w = FeedConfig.DEFAULTS;
         assertEquals(w.affinity() * score.affinity() + w.proximity() * score.proximity() + w.time() * score.time()
-            + w.popularity() * score.popularity() + w.jitter() * score.jitter(), score.total(), 1e-12);
+            + w.popularity() * score.popularity() + w.jitter() * score.jitter() + w.graph() * score.graph(), score.total(), 1e-12);
+    }
+
+    @Test
+    void graph_isClampedAndNeutralWhenMissing() {
+        UUID id = UUID.randomUUID();
+        Instant startsAt = AS_OF.plus(Duration.ofDays(1));
+        assertEquals(FeedConfig.NEUTRAL, DEFAULT.score(facts(id, startsAt, 0, null, null), AS_OF, 1).graph());
+        assertEquals(1.0, DEFAULT.score(new FeedScorer.Facts(id, startsAt, null, 0, null, null, 1.5), AS_OF, 1).graph());
+    }
+
+    @Test
+    void aHigherGraphScore_ranksAboveALowerOne() {
+        FeedScorer scorer = new FeedScorer(NO_JITTER);
+        UUID id = UUID.randomUUID();
+        Instant startsAt = AS_OF.plus(Duration.ofDays(1));
+
+        double high = scorer.score(new FeedScorer.Facts(id, startsAt, null, 0, 0.0, null, 0.9), AS_OF, 1).total();
+        double low = scorer.score(new FeedScorer.Facts(id, startsAt, null, 0, 0.0, null, 0.1), AS_OF, 1).total();
+
+        assertEquals(NO_JITTER.graph() * 0.8, high - low, 1e-12);
     }
 
     @Test

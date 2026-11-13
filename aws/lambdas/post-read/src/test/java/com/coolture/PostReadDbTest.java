@@ -106,6 +106,7 @@ class PostReadDbTest {
     private static void removeFixtures(Statement stmt) throws SQLException {
         stmt.execute("RESET ROLE");
         String users = "(SELECT id FROM users WHERE id::text LIKE 'a0000000-%')";
+        stmt.execute("DELETE FROM rec_graph_runs WHERE run_number IN (SELECT run_number FROM rec_graph_scores WHERE user_id IN " + users + ")");
         stmt.execute("DELETE FROM comments WHERE author_id IN " + users);
         stmt.execute("DELETE FROM post_reactions WHERE user_id IN " + users);
         stmt.execute("DELETE FROM post_participations WHERE user_id IN " + users);
@@ -305,6 +306,40 @@ class PostReadDbTest {
                 stmt.execute("SET ROLE coolture_reader");
             }
         }
+    }
+
+    /** A graph run that finished at the given time, with one score for ME. */
+    private static void graphRun(Instant finishedAt, UUID post, double score) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
+            stmt.execute("RESET ROLE");
+            try (PreparedStatement write = conn.prepareStatement("""
+                     WITH run AS (INSERT INTO rec_graph_runs (finished_at) VALUES (?) RETURNING run_number)
+                     INSERT INTO rec_graph_scores (run_number, user_id, post_id, score) SELECT run_number, ?, ?, ? FROM run""")) {
+                write.setObject(1, java.sql.Timestamp.from(finishedAt));
+                write.setObject(2, ME);
+                write.setObject(3, post);
+                write.setDouble(4, score);
+                write.executeUpdate();
+            } finally {
+                stmt.execute("SET ROLE coolture_reader");
+            }
+        }
+    }
+
+    @Test
+    void feed_readsTheLatestGraphRunFinishedByAsOf() throws SQLException {
+        Instant now = Instant.now();
+        UUID post = postTitled("future_public");
+        graphRun(now.minus(Duration.ofHours(1)), post, 0.25);
+        graphRun(now.minus(Duration.ofMinutes(10)), post, 0.75);
+
+        assertEquals(0.25, graphOf(post, now.minus(Duration.ofMinutes(30))), 1e-6);
+        assertEquals(0.75, graphOf(post, now), 1e-6);
+        assertNull(candidates(now).stream().filter(f -> f.id().equals(postTitled("commented"))).findFirst().orElseThrow().graph());
+    }
+
+    private Double graphOf(UUID post, Instant asOf) throws SQLException {
+        return candidates(asOf).stream().filter(f -> f.id().equals(post)).findFirst().orElseThrow().graph();
     }
 
     private static void like(UUID post) throws SQLException {

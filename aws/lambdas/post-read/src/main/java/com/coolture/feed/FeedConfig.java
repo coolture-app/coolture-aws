@@ -7,9 +7,9 @@ import java.util.Map;
  * Every value the feed depends on. Only the weights can be overridden, with FEED_WEIGHTS, for example
  * "affinity=0.4,jitter=0". A weight of 0 switches that signal off. FEED_WEIGHTS is never a request parameter.
  */
-public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter) {
+public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter, double graph) {
 
-    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10);
+    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10, 0.10);
 
     /** Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it can't change the order. */
     public static final double NEUTRAL = 0.5;
@@ -61,7 +61,8 @@ public record FeedConfig(double affinity, double proximity, double time, double 
                 "proximity", DEFAULTS.proximity,
                 "time", DEFAULTS.time,
                 "popularity", DEFAULTS.popularity,
-                "jitter", DEFAULTS.jitter));
+                "jitter", DEFAULTS.jitter,
+                "graph", DEFAULTS.graph));
             for (String entry : raw.split(",")) {
                 String[] pair = entry.split("=", 2);
                 String name = pair[0].trim();
@@ -75,7 +76,7 @@ public record FeedConfig(double affinity, double proximity, double time, double 
                 weights.put(name, value);
             }
             return new FeedConfig(weights.get("affinity"), weights.get("proximity"), weights.get("time"),
-                weights.get("popularity"), weights.get("jitter"));
+                weights.get("popularity"), weights.get("jitter"), weights.get("graph"));
         } catch (RuntimeException e) {
             System.err.println("Invalid FEED_WEIGHTS, using the defaults: " + e.getMessage());
             return DEFAULTS;

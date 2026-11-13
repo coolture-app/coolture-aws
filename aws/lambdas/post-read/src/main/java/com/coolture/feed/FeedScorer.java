@@ -17,17 +17,24 @@ public final class FeedScorer {
     /**
      * Null similarity means no vector for the viewer or the post, or vectors of different models. Null meters means no
      * location or an online post. endsAt is the event's end (its own, or the default length); null means not ended.
+     * Null graph means the graph job has no score for this viewer and post yet: a guest, a new user or a new post.
      */
-    public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters) {
+    public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
+                        Double graph) {
+
+        public Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters) {
+            this(id, startsAt, endsAt, engagement, similarity, meters, null);
+        }
 
         /** An event that hasn't ended, as every event in the plain feed. */
         public Facts(UUID id, Instant startsAt, int engagement, Double similarity, Double meters) {
-            this(id, startsAt, null, engagement, similarity, meters);
+            this(id, startsAt, null, engagement, similarity, meters, null);
         }
     }
 
     /** The parts before weighting, kept so that explanations can be added later, and the weighted total. */
-    public record Score(double affinity, double proximity, double time, double popularity, double jitter, double total) {}
+    public record Score(double affinity, double proximity, double time, double popularity, double jitter, double graph,
+                        double total) {}
 
     private final FeedConfig config;
 
@@ -43,14 +50,17 @@ public final class FeedScorer {
         double time = time(facts.startsAt(), facts.endsAt(), asOf);
         double popularity = StrictMath.min(StrictMath.log(1.0 + StrictMath.max(facts.engagement(), 0)) / POPULARITY_SCALE, 1.0);
         double jitter = jitter(facts.id(), seed);
+        // Graph scores are ranks from 0 to 1, so NEUTRAL is their median.
+        double graph = facts.graph() == null ? FeedConfig.NEUTRAL : StrictMath.max(0, StrictMath.min(facts.graph(), 1));
 
         double total = config.affinity() * affinity
             + config.proximity() * proximity
             + config.time() * time
             + config.popularity() * popularity
-            + config.jitter() * jitter;
+            + config.jitter() * jitter
+            + config.graph() * graph;
 
-        return new Score(affinity, proximity, time, popularity, jitter, total);
+        return new Score(affinity, proximity, time, popularity, jitter, graph, total);
     }
 
     private static double affinity(Double similarity) {
