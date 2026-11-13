@@ -4,8 +4,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum ReactionType {
-    LIKE("LIKE"),
-    DISLIKE("DISLIKE");
+    LIKE("LIKE");
 
     private final String value;
 

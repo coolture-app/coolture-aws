@@ -17,19 +17,25 @@ public final class FeedScorer {
     /**
      * Null similarity means no vector for the viewer or the post, or vectors of different models. Null meters means no
      * location or an online post. endsAt is the event's end (its own, or the default length); null means not ended.
-     * Null graph means the graph job has no score for this viewer and post yet: a guest, a new user or a new post.
+     * nearMark is 0 to 1: how far past NOT_FOR_ME_FROM the post is to its closest "Nie dla mnie" mark, that mark's fade
+     * included (FeedRepository). Null graph means no graph score for this viewer and post.
      */
     public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
-                        Double graph) {
+                        double nearMark, Double graph) {
+
+        public Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters) {
+            this(id, startsAt, endsAt, engagement, similarity, meters, 0, null);
+        }
 
         /** An event that hasn't ended, as every event in the plain feed. */
         public Facts(UUID id, Instant startsAt, int engagement, Double similarity, Double meters) {
-            this(id, startsAt, null, engagement, similarity, meters, null);
+            this(id, startsAt, null, engagement, similarity, meters);
         }
     }
 
     /** The parts before weighting, kept so that explanations can be added later, and the weighted total. */
-    public record Score(double affinity, double proximity, double time, double popularity, double jitter, double graph,
+    public record Score(double affinity, double notForMe, double proximity, double time, double popularity, double jitter,
+                        double graph,
                         double total) {}
 
     private final FeedConfig config;
@@ -39,7 +45,8 @@ public final class FeedScorer {
     }
 
     public Score score(Facts facts, Instant asOf, long seed) {
-        double affinity = affinity(facts.similarity());
+        double notForMe = config.notForMe() * StrictMath.max(0, StrictMath.min(facts.nearMark(), 1));
+        double affinity = affinity(facts.similarity(), notForMe);
         double proximity = facts.meters() == null
             ? FeedConfig.NEUTRAL
             : StrictMath.exp(-facts.meters() / FeedConfig.PROXIMITY_SCALE_METERS);
@@ -56,16 +63,19 @@ public final class FeedScorer {
             + config.jitter() * jitter
             + config.graph() * graph;
 
-        return new Score(affinity, proximity, time, popularity, jitter, graph, total);
+        return new Score(affinity, notForMe, proximity, time, popularity, jitter, graph, total);
     }
 
-    private static double affinity(Double similarity) {
+    /** The penalty comes off before the clamp, as it was measured, so affinity stays within 0 to 1. */
+    private static double affinity(Double similarity, double notForMe) {
+        double scaled;
         // pgvector returns NaN for a zero vector, which says as little as having no vector.
         if (similarity == null || similarity.isNaN()) {
-            return FeedConfig.NEUTRAL;
+            scaled = FeedConfig.NEUTRAL;
+        } else {
+            scaled = (similarity - FeedConfig.AFFINITY_LOW) / (FeedConfig.AFFINITY_HIGH - FeedConfig.AFFINITY_LOW);
         }
-        double scaled = (similarity - FeedConfig.AFFINITY_LOW) / (FeedConfig.AFFINITY_HIGH - FeedConfig.AFFINITY_LOW);
-        return StrictMath.max(0, StrictMath.min(scaled, 1));
+        return StrictMath.max(0, StrictMath.min(scaled - notForMe, 1));
     }
 
     /**

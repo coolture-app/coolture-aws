@@ -301,7 +301,6 @@ class ResultSetMappersTest {
         when(rs.getTimestamp("ends_at")).thenReturn(Timestamp.from(now.plusSeconds(3600)));
         when(rs.getArray("tags")).thenReturn(null);
         when(rs.getInt("positive_reaction_count")).thenReturn(42);
-        when(rs.getInt("negative_reaction_count")).thenReturn(1);
         when(rs.getInt("participant_count")).thenReturn(10);
         when(rs.getInt("comments_count")).thenReturn(5);
         when(rs.getString("type")).thenReturn("ONLINE");

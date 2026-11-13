@@ -69,7 +69,7 @@ class ContractTest {
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, Instant.now(), 0, 0),
             null, "Koncert", null, null, Instant.now(), null, List.of(),
-            0, 0, 0, 0, PostType.ONLINE, PostStatus.ACTIVE, PostVisibility.PUBLIC,
+            0, 0, 0, PostType.ONLINE, PostStatus.ACTIVE, PostVisibility.PUBLIC,
             Instant.now(), null, null, null, null, null, null
         );
     }
@@ -86,7 +86,7 @@ class ContractTest {
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", "Anna", "Nowak", avatar, now, 1, 2),
             location, "Koncert", "Opis", "https://example.com", now, now.plusSeconds(60), List.of("jazz"),
-            1, 2, 3, 4, PostType.OFFLINE, PostStatus.EDITED, PostVisibility.FRIENDS,
+            1, 3, 4, PostType.OFFLINE, PostStatus.EDITED, PostVisibility.FRIENDS,
             now, now, null, cover, ReactionType.LIKE, ParticipationType.TAKES_PART, List.of(cover)
         );
     }

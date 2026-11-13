@@ -41,7 +41,7 @@ A local stack gets its events from a snapshot, so nobody waits for a live scrape
   start at least two hours ahead, so the snapshot's days keep their order and each event its hour.
 - **`seed.py reactions`** (`make seed-reactions`) ranks the bot's posts by cosine distance between each post's
   embedding and the mean of a demo user's interest embeddings. The user likes the posts ranked 4, 7, 10, 13 and 16,
-  marks 5 and 11 as interesting, and dislikes the two farthest. The closest three stay unreacted, because reacted posts
+  marks 5 and 11 as interesting, and the two farthest as "Nie dla mnie". The closest three stay unreacted, because reacted posts
   leave the feed. A user who has any reaction or participation already is skipped, so a second run adds nothing.
 
 The snapshot is gitignored, like the ledger, because scraped text and photos stay out of the public repository.

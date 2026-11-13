@@ -61,15 +61,10 @@ class FeedScorerTest {
     }
 
     @Test
-    void aHigherGraphScore_ranksAboveALowerOne() {
-        FeedScorer scorer = new FeedScorer(NO_JITTER);
-        UUID id = UUID.randomUUID();
-        Instant startsAt = AS_OF.plus(Duration.ofDays(1));
+    void graph_whenPresent_isUsedAsIs() {
+        FeedScorer.Facts post = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(1)), null, 0, null, null, 0, 0.9);
 
-        double high = scorer.score(new FeedScorer.Facts(id, startsAt, null, 0, 0.0, null, 0.9), AS_OF, 1).total();
-        double low = scorer.score(new FeedScorer.Facts(id, startsAt, null, 0, 0.0, null, 0.1), AS_OF, 1).total();
-
-        assertEquals(NO_JITTER.graph() * 0.8, high - low, 1e-12);
+        assertEquals(0.9, DEFAULT.score(post, AS_OF, 1).graph());
     }
 
     @Test
@@ -117,6 +112,47 @@ class FeedScorerTest {
         return DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 0, similarity, null), AS_OF, 7).affinity();
     }
 
+    private static FeedScorer.Facts marked(double similarity, double nearMark) {
+        return new FeedScorer.Facts(UUID.randomUUID(), AS_OF, null, 0, similarity, null, nearMark, null);
+    }
+
+    @Test
+    void notForMe_takesItsWeightTimesNearMarkOffAffinity() {
+        FeedScorer.Score score = DEFAULT.score(marked(0.225, 0.4), AS_OF, 7);
+
+        assertEquals(0.5 * 0.4, score.notForMe(), 1e-12);
+        assertEquals(0.75 - 0.2, score.affinity(), 1e-12);
+    }
+
+    @Test
+    void notForMe_comesOffBeforeTheClamp_soAffinityStaysBetweenZeroAndOne() {
+        assertEquals(0.0, DEFAULT.score(marked(FeedConfig.AFFINITY_LOW, 1), AS_OF, 7).affinity());
+        assertEquals(0.5, DEFAULT.score(marked(FeedConfig.AFFINITY_HIGH, 1), AS_OF, 7).affinity(), 1e-12);
+        // Far past the band, a post keeps the top affinity despite a mark, as the penalty was measured.
+        assertEquals(1.0, DEFAULT.score(marked(1.0, 1), AS_OF, 7).affinity(), 1e-12);
+    }
+
+    @Test
+    void notForMe_appliesWithoutAViewerVectorToo() {
+        FeedScorer.Facts noVector = new FeedScorer.Facts(UUID.randomUUID(), AS_OF, null, 0, null, null, 1, null);
+
+        assertEquals(FeedConfig.NEUTRAL - 0.5, DEFAULT.score(noVector, AS_OF, 7).affinity(), 1e-12);
+    }
+
+    @Test
+    void notForMe_ofZero_switchesThePenaltyOff() {
+        FeedScorer off = new FeedScorer(FeedConfig.parse("notForMe=0,jitter=0"));
+
+        assertEquals(off.score(marked(0.1, 0), AS_OF, 7).total(), off.score(marked(0.1, 1), AS_OF, 7).total());
+    }
+
+    @Test
+    void aPostLikeAMarkedOne_ranksBelowAnEqualPostThatIsNot() {
+        FeedScorer scorer = new FeedScorer(NO_JITTER);
+
+        assertTrue(scorer.score(marked(0.1, 0.6), AS_OF, 1).total() < scorer.score(marked(0.1, 0), AS_OF, 1).total());
+    }
+
     @Test
     void score_whenPopularityPassesTheCap_staysAtOne() {
         assertEquals(1.0, DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 5000, null, null), AS_OF, 7).popularity());
@@ -125,7 +161,7 @@ class FeedScorerTest {
     @Test
     void score_whenEventEnded_timeFadesWithTheDaysSinceItsEnd() {
         Instant start = AS_OF.minus(Duration.ofDays(40));
-        FeedScorer.Facts ended = new FeedScorer.Facts(UUID.randomUUID(), start, AS_OF.minus(Duration.ofDays(30)), 0, null, null, null);
+        FeedScorer.Facts ended = new FeedScorer.Facts(UUID.randomUUID(), start, AS_OF.minus(Duration.ofDays(30)), 0, null, null);
 
         assertEquals(Math.exp(-1), DEFAULT.score(ended, AS_OF, 7).time(), 1e-12);
     }
@@ -133,7 +169,7 @@ class FeedScorerTest {
     @Test
     void score_whenEventRunsAtAsOf_timeIsAtItsMaximumEvenWithAnEnd() {
         FeedScorer.Facts running = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.minus(Duration.ofDays(30)),
-            AS_OF.plus(Duration.ofDays(30)), 0, null, null, null);
+            AS_OF.plus(Duration.ofDays(30)), 0, null, null);
 
         assertEquals(1.0, DEFAULT.score(running, AS_OF, 7).time());
     }

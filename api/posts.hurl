@@ -137,6 +137,70 @@ HTTP *
 [Asserts]
 status < 300
 
+# Ola marks it "Nie dla mnie". It isn't counted as taking part, and only she sees it, newest first in her hidden posts.
+PUT {{api}}/posts/{{post}}/participation
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+{ "type": "NOT_INTERESTED" }
+HTTP *
+[Asserts]
+status < 300
+
+GET {{api}}/posts/{{post}}
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+HTTP 200
+[Asserts]
+jsonpath "$.myParticipation" == "NOT_INTERESTED"
+jsonpath "$.participantCount" == 0
+
+GET {{api}}/posts?participationTypes=NOT_INTERESTED&sortBy=STANCE_NEWEST&includePast=true&limit=1
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+HTTP 200
+[Asserts]
+jsonpath "$.items[0].id" == "{{post}}"
+
+# A like takes the mark back, and a mark the like.
+PUT {{api}}/posts/{{post}}/reaction
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+{ "type": "LIKE" }
+HTTP *
+[Asserts]
+status < 300
+
+GET {{api}}/posts/{{post}}
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+HTTP 200
+[Asserts]
+jsonpath "$.myParticipation" not exists
+jsonpath "$.positiveReactionCount" == 1
+
+PUT {{api}}/posts/{{post}}/participation
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+{ "type": "NOT_INTERESTED" }
+HTTP *
+[Asserts]
+status < 300
+
+GET {{api}}/posts/{{post}}
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+HTTP 200
+[Asserts]
+jsonpath "$.myReaction" not exists
+jsonpath "$.positiveReactionCount" == 0
+
+DELETE {{api}}/posts/{{post}}/participation
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+HTTP *
+[Asserts]
+status < 300
+
 # Only Anna can delete her post. It's soft-deleted, so it's gone for readers.
 DELETE {{api}}/posts/{{post}}
 X-User-Id: {{jan}}

@@ -88,13 +88,13 @@ def test_no_snapshot_is_one_clear_error(tmp_path):
         seed_events(tmp_path, 'http://api.test', api_factory=FakeApi)
 
 
-def test_picks_leave_the_closest_posts_for_the_feed_and_dislike_the_farthest():
+def test_picks_leave_the_closest_posts_for_the_feed_and_mark_the_farthest_not_for_me():
     ranking = [f'p{rank}' for rank in range(30)]
 
     assert picks(ranking) == [('p3', 'reaction', 'LIKE'), ('p6', 'reaction', 'LIKE'), ('p9', 'reaction', 'LIKE'),
                               ('p12', 'reaction', 'LIKE'), ('p15', 'reaction', 'LIKE'),
                               ('p4', 'participation', 'INTERESTED'), ('p10', 'participation', 'INTERESTED'),
-                              ('p28', 'reaction', 'DISLIKE'), ('p29', 'reaction', 'DISLIKE')]
+                              ('p28', 'participation', 'NOT_INTERESTED'), ('p29', 'participation', 'NOT_INTERESTED')]
 
 
 def test_picks_from_a_short_ranking_never_react_twice_to_one_post():
@@ -134,7 +134,7 @@ def test_each_demo_user_reacts_as_themself():
 
     stats = seed_reactions('http://api.test', query=fake_query(), session_factory=lambda: session)
 
-    assert stats['users'] == 3 and stats['like'] == 15 and stats['interested'] == 6 and stats['dislike'] == 6
+    assert stats['users'] == 3 and stats['like'] == 15 and stats['interested'] == 6 and stats['not_interested'] == 6
     assert ('anna_demo', 'http://api.test/posts/p3/reaction', 'LIKE') in session.sent
     assert ('ola_demo', 'http://api.test/posts/p4/participation', 'INTERESTED') in session.sent
 

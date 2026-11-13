@@ -119,13 +119,24 @@ class PostReadServiceTest {
         verify(repository).findFeed(eq(filters), eq(PostSort.RECENT), eq(callerId), isNull(), eq(101));
     }
 
-    /** NEAREST gets a position, which it needs. */
+    /** NEAREST gets a position and STANCE_NEWEST a participation filter, which they need. */
     private static PostFeedFilters sortedBy(String sortBy) {
         boolean nearest = "NEAREST".equals(sortBy);
+        boolean stances = "STANCE_NEWEST".equals(sortBy);
         return new PostFeedFilters(
             null, null, null, null, null, null, null, null, nearest ? 54.35 : null, nearest ? 18.65 : null, null,
-            null, null, null, 20, sortBy
+            stances ? List.of("NOT_INTERESTED") : null, null, null, 20, sortBy
         );
+    }
+
+    @Test
+    void getFeed_whenStanceNewestHasNoParticipationTypes_throws() {
+        PostFeedFilters noStances = new PostFeedFilters(
+            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, "STANCE_NEWEST"
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), noStances, null, 20));
     }
 
     @Test
@@ -141,7 +152,7 @@ class PostReadServiceTest {
     private static PostCardDto card(int likes) {
         Instant now = Instant.parse("2026-11-02T12:00:00.123456Z");
         return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, now.plusSeconds(60), null, List.of(),
-            likes, 0, 0, 0, null, null, null, now, null, null, null, null, null, null);
+            likes, 0, 0, null, null, null, now, null, null, null, null, null, null);
     }
 
     @ParameterizedTest
@@ -176,12 +187,13 @@ class PostReadServiceTest {
         List<PostCardDto> rows = List.of(card(9), card(5), card(1));
         when(repository.findFeed(any(), eq(sort), any(), isNull(), eq(3))).thenReturn(rows);
 
-        CursorPage<PostCardDto> page = service.getFeed(null, filters, null, 2);
+        UUID caller = UUID.randomUUID();
+        CursorPage<PostCardDto> page = service.getFeed(caller, filters, null, 2);
 
         assertEquals(rows.subList(0, 2), page.items());
         assertTrue(page.page().hasMore());
 
-        service.getFeed(null, filters, page.page().nextCursor(), 2);
+        service.getFeed(caller, filters, page.page().nextCursor(), 2);
 
         ArgumentCaptor<PostsCursor> cursor = ArgumentCaptor.forClass(PostsCursor.class);
         verify(repository, times(2)).findFeed(any(), eq(sort), any(), cursor.capture(), eq(3));
