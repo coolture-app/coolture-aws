@@ -629,6 +629,7 @@ class PostReadDbTest {
         assertEquals("Hala Fixturowa", far.venueName());
         assertEquals("Fixturowo", far.city());
         assertNotNull(far.startsAt());
+        assertTrue(far.excerpt() == null || far.excerpt().length() <= 200);
     }
 
     @Test

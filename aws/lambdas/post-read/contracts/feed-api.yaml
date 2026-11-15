@@ -301,16 +301,22 @@ components:
       type: object
       additionalProperties: false
       description: >
-        What a pin and its preview need. No description: the map loads every post in view at once, and the description
-        was over half of the answer.
-      required: [id, title, startsAt, positiveReactionCount, coordinates]
+        What a pin and its preview need. Only the description's start: the map loads every post in view at once, and
+        whole descriptions were over half of the answer.
+      required: [id, title, startsAt, positiveReactionCount, interestedCount, goingCount, coordinates]
       properties:
         id: {type: string, format: uuid}
         title: {type: string}
         startsAt: {type: string, format: date-time}
         endsAt: {type: string, format: date-time}
         coverMediaUrl: {type: string}
+        excerpt:
+          type: string
+          maxLength: 200
+          description: The description's first 200 characters, with runs of whitespace as one space. Left out when empty.
         positiveReactionCount: {type: integer}
+        interestedCount: {type: integer, description: People who marked it Interesuje mnie.}
+        goingCount: {type: integer, description: People who marked it Wezmę udział.}
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
         venueName: {type: string}
         city: {type: string}

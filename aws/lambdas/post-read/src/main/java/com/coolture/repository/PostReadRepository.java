@@ -29,6 +29,10 @@ import static com.coolture.common.db.ResultSetMappers.*;
 
 public class PostReadRepository {
 
+    /** Enough for three lines of the map's preview, so a pin's preview needs no request of its own. */
+    static final int EXCERPT_CHARS = 200;
+
+
     public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit) throws SQLException {
         // UPCOMING never shows an ended event. The other sorts hide only long-ended ones, and can show those too.
         boolean upcoming = sort == PostSort.UPCOMING;
@@ -185,6 +189,9 @@ public class PostReadRepository {
         boolean hidesMine = excludeMine && callerId != null;
         String sql = """
             SELECT p.id, p.title, p.starts_at, p.ends_at, p.positive_reaction_count,
+                   stances.interested, stances.going,
+                   left(regexp_replace(btrim(coalesce(p.description, '')), '\\s+', ' ', 'g'), """ + EXCERPT_CHARS + """
+                   ) AS excerpt,
                    ST_Y(el.coordinates::geometry) AS latitude,
                    ST_X(el.coordinates::geometry) AS longitude,
                    cover_m.object_key AS cover_url,
@@ -199,6 +206,13 @@ public class PostReadRepository {
                 ORDER BY pm.position ASC
                 LIMIT 1
             ) cover_m ON true
+            LEFT JOIN LATERAL (
+                -- posts.participant_count adds the two together, and the preview shows them apart.
+                SELECT count(*) FILTER (WHERE pp.type = 'INTERESTED') AS interested,
+                       count(*) FILTER (WHERE pp.type = 'TAKES_PART') AS going
+                FROM post_participations pp
+                WHERE pp.post_id = p.id
+            ) stances ON true
             WHERE p.deleted_at IS NULL
               AND el.coordinates IS NOT NULL
             """
@@ -247,7 +261,10 @@ public class PostReadRepository {
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
                         MediaUrls.presign(rs.getString("cover_url")),
+                        blankToNull(rs.getString("excerpt")),
                         rs.getInt("positive_reaction_count"),
+                        rs.getInt("interested"),
+                        rs.getInt("going"),
                         new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
                         rs.getString("venue_name"),
                         rs.getString("city")
@@ -267,4 +284,8 @@ public class PostReadRepository {
         return list;
     }
 
+
+    private static String blankToNull(String text) {
+        return text == null || text.isEmpty() ? null : text;
+    }
 }
