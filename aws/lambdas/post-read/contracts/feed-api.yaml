@@ -154,7 +154,8 @@ components:
       in: query
       description: >
         Send together with longitude, rounded to 2 decimals. The centre of radiusKm and of NEAREST. On /feed, the first
-        page's position is also used for proximity, and later pages send it again only with radiusKm.
+        page's position is also used for proximity, and later pages send it again only with radiusKm. Without it, /feed
+        measures proximity from the viewer's home, if they set one.
       schema: {type: number, format: double, minimum: -90, maximum: 90}
     Longitude:
       name: longitude

@@ -53,7 +53,8 @@ GET /feed?limit=20&cursor=eyJ2Ijox...                 every later page
   like `RANKED`, so new modes can be added. It exists for logs, tests and evaluation.
 - **Location** is optional. `latitude` and `longitude` come together or the request gets `400`. The frontend rounds them to 2 decimals
   and the server rounds again. For proximity, the first page's position stays in the cursor. With `radiusKm`, every page sends
-  the position again, as the radius's centre.
+  the position again, as the radius's centre. With no position, a signed-in viewer's home (`PUT /users/{userId}/home` in the
+  users contract) takes its place in the cursor; a guest or someone with no home gets neutral proximity.
 - **Filters** are sent with every page, like `/posts`, and narrow which posts are ranked. They never show what the rules below
   hide, except that `includePast`, `startsFrom` or `startsTo` let ended events in.
 
