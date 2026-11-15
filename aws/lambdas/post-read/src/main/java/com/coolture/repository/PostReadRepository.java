@@ -184,7 +184,7 @@ public class PostReadRepository {
     public List<PostMarkDto> findPostMarks(PostFeedFilters f, MapBoundsDto bounds, UUID callerId, boolean excludeMine) throws SQLException {
         boolean hidesMine = excludeMine && callerId != null;
         String sql = """
-            SELECT p.id, p.title, p.description, p.positive_reaction_count,
+            SELECT p.id, p.title, p.starts_at, p.ends_at, p.positive_reaction_count,
                    ST_Y(el.coordinates::geometry) AS latitude,
                    ST_X(el.coordinates::geometry) AS longitude,
                    cover_m.object_key AS cover_url,
@@ -244,7 +244,8 @@ public class PostReadRepository {
                     list.add(new PostMarkDto(
                         (UUID) rs.getObject("id"),
                         rs.getString("title"),
-                        rs.getString("description"),
+                        mapInstant(rs, "starts_at"),
+                        mapInstant(rs, "ends_at"),
                         MediaUrls.presign(rs.getString("cover_url")),
                         rs.getInt("positive_reaction_count"),
                         new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),

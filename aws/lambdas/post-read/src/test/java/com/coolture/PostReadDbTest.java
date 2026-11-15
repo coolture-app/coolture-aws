@@ -56,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -622,11 +623,12 @@ class PostReadDbTest {
     }
 
     @Test
-    void mapMarks_carryThePlace() throws SQLException {
+    void mapMarks_carryThePlaceAndTheStart() throws SQLException {
         PostMarkDto far = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, ME, false).get(0);
 
         assertEquals("Hala Fixturowa", far.venueName());
         assertEquals("Fixturowo", far.city());
+        assertNotNull(far.startsAt());
     }
 
     @Test

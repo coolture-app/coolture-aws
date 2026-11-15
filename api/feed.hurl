@@ -67,3 +67,6 @@ leftUpper.longitude: 18.3
 rightBottom.latitude: 54.3
 rightBottom.longitude: 18.8
 HTTP 200
+[Asserts]
+jsonpath "$[0].startsAt" exists
+jsonpath "$[0].description" not exists

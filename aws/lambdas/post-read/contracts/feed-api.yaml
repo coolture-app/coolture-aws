@@ -300,11 +300,15 @@ components:
     PostMark:
       type: object
       additionalProperties: false
-      required: [id, title, positiveReactionCount, coordinates]
+      description: >
+        What a pin and its preview need. No description: the map loads every post in view at once, and the description
+        was over half of the answer.
+      required: [id, title, startsAt, positiveReactionCount, coordinates]
       properties:
         id: {type: string, format: uuid}
         title: {type: string}
-        description: {type: string}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
         coverMediaUrl: {type: string}
         positiveReactionCount: {type: integer}
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
