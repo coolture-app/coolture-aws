@@ -76,3 +76,52 @@ X-User-Name: anna_demo
 HTTP 200
 [Asserts]
 jsonpath "$.interests" contains "concerts"
+
+# Ola says where she lives. Only she sees it: in /auth/me, never on her profile, and nobody else can change it.
+PUT {{api}}/users/{{ola}}/home
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+{ "name": "Oliwa, Gdańsk", "coordinates": { "latitude": 54.41123, "longitude": 18.56012 } }
+HTTP 200
+[Asserts]
+jsonpath "$.name" == "Oliwa, Gdańsk"
+jsonpath "$.coordinates.latitude" == 54.41
+
+GET {{api}}/auth/me
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+HTTP 200
+[Asserts]
+jsonpath "$.home.name" == "Oliwa, Gdańsk"
+jsonpath "$.home.coordinates.longitude" == 18.56
+
+GET {{api}}/users/{{ola}}
+X-User-Id: {{jan}}
+X-User-Name: jan_demo
+HTTP 200
+[Asserts]
+jsonpath "$.home" not exists
+
+PUT {{api}}/users/{{ola}}/home
+X-User-Id: {{jan}}
+X-User-Name: jan_demo
+{ "name": "Gdynia", "coordinates": { "latitude": 54.52, "longitude": 18.54 } }
+HTTP 403
+
+PUT {{api}}/users/{{ola}}/home
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+{ "name": "Gdynia" }
+HTTP 400
+
+DELETE {{api}}/users/{{ola}}/home
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+HTTP 204
+
+GET {{api}}/auth/me
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+HTTP 200
+[Asserts]
+jsonpath "$.home" not exists

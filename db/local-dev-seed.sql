@@ -48,3 +48,9 @@ INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
     ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000004', 'FOLLOW'),
     ('00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000002', 'FOLLOW')
 ON CONFLICT DO NOTHING;
+
+-- Jan lives in Gdynia, so his feed shows the home fallback when the browser gives no position. Only while he has none,
+-- so a change made in the app survives the next `make up`.
+UPDATE users
+SET home_name = 'Gdynia', home_location = ST_SetSRID(ST_MakePoint(18.54, 54.52), 4326)::geography
+WHERE id = '00000000-0000-0000-0000-000000000003' AND home_name IS NULL;

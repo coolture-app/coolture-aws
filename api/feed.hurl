@@ -27,6 +27,17 @@ HTTP 200
 [Asserts]
 jsonpath "$.items" count == 5
 
+# Jan sends no position, so proximity measures from his home in Gdynia (the seed's). The cursor is opaque to clients;
+# it's read here only because nothing else shows where the session measures from.
+GET {{api}}/feed
+X-User-Id: {{jan}}
+X-User-Name: jan_demo
+[Query]
+limit: 5
+HTTP 200
+[Asserts]
+jsonpath "$.page.nextCursor" base64UrlSafeDecode charsetDecode "utf-8" contains "\"lat\":54.52"
+
 # A guest gets a feed too, ranked without a taste.
 GET {{api}}/feed?limit=5
 X-Anonymous: true
