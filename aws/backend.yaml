@@ -400,6 +400,8 @@ Resources:
         UpdateUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}', Method: PATCH}}
         SetProfileImage: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/profile-image', Method: PUT}}
         DeleteProfileImage: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/profile-image', Method: DELETE}}
+        SetHome: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/home', Method: PUT}}
+        ClearHome: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/home', Method: DELETE}}
         GetMe: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /auth/me, Method: GET}}
         GetInterestCatalog: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/interests, Method: GET}}
         GetUserInterests: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/interests', Method: GET}}

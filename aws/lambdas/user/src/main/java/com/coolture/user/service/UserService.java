@@ -1,5 +1,6 @@
 package com.coolture.user.service;
 
+import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.UserProfileDto;
 import com.coolture.common.dto.UserSummaryDto;
@@ -7,11 +8,13 @@ import com.coolture.common.pagination.CursorCodec;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.CursorPayload;
 import com.coolture.common.storage.S3StorageService;
+import com.coolture.user.dto.HomeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.repository.UserRepository.AvatarRecord;
+import com.coolture.user.repository.UserRepository.HomeRecord;
 import com.coolture.user.repository.UserRepository.UserEntity;
 
 import java.sql.SQLException;
@@ -160,6 +163,44 @@ public class UserService {
         String lName = lastName != null ? lastName : "";
         userRepository.createUserIfAbsent(callerId, uname, fName, lName);
         return getByIdForCaller(callerId, callerId);
+    }
+
+    public Optional<HomeDto> getHome(UUID callerId) throws SQLException {
+        return userRepository.findHome(callerId)
+                .map(home -> new HomeDto(home.name(), new GeoPointDto(home.latitude(), home.longitude())));
+    }
+
+    /**
+     * Stores the place as the client picked it: Lambdas can't reach a geocoder to check it, and a wrong point only
+     * affects the owner's own ranking.
+     */
+    public HomeDto setHome(UUID targetId, UUID callerId, HomeDto request) throws SQLException {
+        requireSelf(targetId, callerId, "You can only set your own home");
+        HomeRecord home = new HomeRecord(request.name().trim(),
+                roundToKilometre(request.coordinates().latitude()), roundToKilometre(request.coordinates().longitude()));
+        if (!userRepository.setHome(targetId, home)) {
+            throw new IllegalArgumentException("User " + targetId + " not found");
+        }
+        return new HomeDto(home.name(), new GeoPointDto(home.latitude(), home.longitude()));
+    }
+
+    public void clearHome(UUID targetId, UUID callerId) throws SQLException {
+        requireSelf(targetId, callerId, "You can only remove your own home");
+        userRepository.clearHome(targetId);
+    }
+
+    private static void requireSelf(UUID targetId, UUID callerId, String refusal) {
+        if (callerId == null) {
+            throw new SecurityException("User not authenticated: missing 'sub' claim");
+        }
+        if (!targetId.equals(callerId)) {
+            throw new SecurityException(refusal);
+        }
+    }
+
+    /** 2 decimals, about 1.1 km, as the feed rounds a browser position. */
+    private static double roundToKilometre(double coordinate) {
+        return Math.round(coordinate * 100) / 100.0;
     }
 
     public CursorPage<UserSummaryDto> getFollowers(UUID targetUserId, String cursor, int limit) throws SQLException {

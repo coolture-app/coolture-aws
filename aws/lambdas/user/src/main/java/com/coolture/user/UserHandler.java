@@ -10,6 +10,7 @@ import com.coolture.common.json.JsonUtils;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
+import com.coolture.user.dto.HomeDto;
 import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
@@ -63,6 +64,14 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
                     case "PUT" -> setProfileImage(event);
                     case "DELETE" -> removeProfileImage(event);
                     default -> ApiResponse.badRequest("Unsupported method for profile-image: " + method);
+                };
+            }
+
+            if (path.endsWith("/home")) {
+                return switch (method.toUpperCase()) {
+                    case "PUT" -> setHome(event);
+                    case "DELETE" -> clearHome(event);
+                    default -> ApiResponse.badRequest("Unsupported method for home: " + method);
                 };
             }
 
@@ -230,7 +239,22 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         String firstName = SecurityContext.getClaim(event, "given_name").orElse(null);
         String lastName = SecurityContext.getClaim(event, "family_name").orElse(null);
         UserProfileDto profile = service.getMe(callerId, username, firstName, lastName);
-        return ApiResponse.ok(new MeDto(profile, interestService.hasSelection(callerId)));
+        return ApiResponse.ok(new MeDto(profile, interestService.hasSelection(callerId), service.getHome(callerId).orElse(null)));
+    }
+
+    private APIGatewayV2HTTPResponse setHome(APIGatewayV2HTTPEvent event) throws Exception {
+        UUID callerId = SecurityContext.getUserId(event);
+        UUID userId = extractUserId(event);
+        if (event.getBody() == null || event.getBody().isBlank()) {
+            return ApiResponse.badRequest("Request body is required");
+        }
+        HomeDto request = JsonUtils.fromJsonAndValidate(event.getBody(), HomeDto.class);
+        return ApiResponse.ok(service.setHome(userId, callerId, request));
+    }
+
+    private APIGatewayV2HTTPResponse clearHome(APIGatewayV2HTTPEvent event) throws Exception {
+        service.clearHome(extractUserId(event), SecurityContext.getUserId(event));
+        return ApiResponse.noContent();
     }
 
     private APIGatewayV2HTTPResponse getFollowers(APIGatewayV2HTTPEvent event) throws Exception {
