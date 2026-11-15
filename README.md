@@ -113,7 +113,7 @@ The seed users' ids are in [`api/local.env`](api/local.env).
 
 | | What | Where |
 |---|---|---|
-| **Contract** | Shapes, parameters and examples (OpenAPI), and the rules a schema can't say | `aws/lambdas/<area>/contracts/`. Today: [post-read](aws/lambdas/post-read/contracts/README.md), the feed, lists and map |
+| **Contract** | Shapes, parameters and examples (OpenAPI), and the rules a schema can't say | `aws/lambdas/<area>/contracts/`. Today: [post-read](aws/lambdas/post-read/contracts/README.md), the feed, lists and map; [user](aws/lambdas/user/contracts/users-api.yaml), accounts, profiles, interests, follows and blocks |
 | **Docs** | Every contract in the browser, with a client to try requests | `make api-docs`, then http://localhost:8081. Add an `X-User-Id` header to act as someone |
 | **Flows** | Runnable examples of how the API is used: who may do what, uploading a photo, a post's life | [`api/`](api/README.md). `make api-test` runs them all as a smoke test |
 
@@ -131,8 +131,9 @@ aws/
 │   frontend.yaml, waf.yaml
 └── lambdas/
     ├── common/                 # Shared Maven module in every Java Lambda: DB pool, DTOs, security, S3, paging
-    ├── post-read/, post-write/ # Posts, the feed, the map, event locations. post-read holds the contract
-    ├── comment-read/, comment-write/, media/, user/
+    ├── post-read/, post-write/ # Posts, the feed, the map, event locations. post-read holds their contract
+    ├── user/                   # Accounts, profiles, the home area, interests, follows, blocks. Holds its contract
+    ├── comment-read/, comment-write/, media/
     ├── authorizer/             # Python: lets a route take a Cognito token optionally
     ├── geo-proxy/              # Python: lets the scheduled scraper, outside the VPC, ask Photon inside it
     ├── migrations/             # Python: applies migrations/ on AWS, and locally in make up
