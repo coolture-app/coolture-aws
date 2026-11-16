@@ -153,3 +153,53 @@ def test_a_stronger_stance_pulls_harder():
 def test_what_every_interest_shares_doesnt_choose_an_events_interests():
     shift = np.random.default_rng(1).normal(size=DIM)
     assert content_edges(inputs(interest_vectors=INTERESTS + shift))[0] == content_edges(inputs())[0]
+
+
+def test_the_walk_keeps_all_its_mass():
+    friends = inputs(user_ids=["u0", "u1"], picks=[(0, 1)], stances=[(1, 12, 1.0)], follows=[(0, 1), (1, 0)])
+    graph = adjacency(friends)
+    seed = np.zeros((graph.shape[0], 1))
+    seed[-2] = 1
+    mass = ppr.walk(ppr.transition(graph), seed)
+    assert np.isfinite(mass).all() and (mass >= 0).all() and mass.sum() == pytest.approx(1)
+
+
+def test_an_event_the_walk_cant_reach_ranks_last():
+    vectors = EVENTS.copy()
+    vectors[7] = EVENTS.mean(axis=0)  # no content edges, no venue, no stances: cut off
+    got = by_event(scores(inputs(picks=[(0, 0)], event_vectors=vectors, post_average=vectors[7])))
+    assert got[7] == 0
+
+
+def test_matches_a_walk_over_edges_written_by_hand():
+    # Two interests, so every event with content is near both; three upcoming events, all each other's neighbours;
+    # event 3 has ended and shares a venue with event 0. u0 picked interest 0, is going to event 3 and is friends
+    # with u1, who likes event 1.
+    rng = np.random.default_rng(3)
+    small = Inputs(event_ids=["e0", "e1", "e2", "e3"], event_vectors=np.array([unit(v) for v in rng.normal(size=(4, 5))]),
+                   not_ended=np.array([True, True, True, False]), venues=["hall", None, None, "hall"],
+                   post_average=np.zeros(5), interest_vectors=np.array([unit(v) for v in rng.normal(size=(2, 5))]),
+                   user_ids=["u0", "u1"], picks=[(0, 0)], stances=[(0, 3, 2.0), (1, 1, 1.0)],
+                   follows=[(0, 1), (1, 0)], hidden={})
+    both_ways = [("e0", "hall", 1), ("e3", "hall", 1), ("e0", "e1", 1), ("e0", "e2", 1), ("e1", "e2", 1),
+                 ("u0", "i0", 1), ("u0", "e3", 2), ("u1", "e1", 1)]
+    both_ways += [(e, i, 1) for e in ("e0", "e1", "e2", "e3") for i in ("i0", "i1")]
+    edges = {}
+    for a, b, w in both_ways:
+        edges.setdefault(a, {})[b] = w
+        edges.setdefault(b, {})[a] = w
+    edges["u0"]["u1"] = edges["u1"]["u0"] = 1
+
+    restart = ppr.RESTART_PROBABILITY
+    mass = {"u0": 1.0}
+    for _ in range(500):
+        moved = {"u0": restart}
+        for node, m in mass.items():
+            total = sum(edges[node].values())
+            for other, w in edges[node].items():
+                moved[other] = moved.get(other, 0) + (1 - restart) * m * w / total
+        mass = moved
+
+    got = {small.event_ids[e]: s for e, s in by_event(scores(small)).items()}
+    assert sorted(got, key=got.get) == sorted(["e0", "e1", "e2"], key=mass.get)
+    assert len({round(mass[e], 9) for e in ("e0", "e1", "e2")}) == 3

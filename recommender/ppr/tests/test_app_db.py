@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 
 import psycopg
 import pytest
@@ -119,3 +120,52 @@ def test_the_job_and_the_feed_have_their_grants(conn):
                   has_table_privilege('coolture_reader', 'rec_ppr_scores', 'SELECT'),
                   has_table_privilege('coolture_reader', 'rec_ppr_runs', 'SELECT')""").fetchone()
     assert all(granted)
+
+
+def test_a_run_as_of_an_earlier_time_leaves_out_what_came_after(conn):
+    user, friend = users(conn, 2)
+    post, fresh = [p for (p,) in conn.execute("SELECT post_id FROM post_embeddings WHERE model = %s ORDER BY post_id LIMIT 2",
+                                              (app.EMBEDDING_MODEL,))]
+    conn.execute("UPDATE posts SET created_at = now() - interval '1 day'")
+    conn.execute("UPDATE posts SET created_at = now() WHERE id = %s", (fresh,))
+    conn.execute("DELETE FROM post_reactions WHERE user_id = %s", (user,))
+    conn.execute("DELETE FROM post_participations WHERE user_id = %s", (user,))
+    conn.execute("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (%s, %s, 'LIKE', now())",
+                 (post, user))
+    for a, b in ((user, friend), (friend, user)):
+        relate(conn, a, b, "FOLLOW")
+    # Friends only since now; the other side's follow has no time and counts as always there.
+    conn.execute("UPDATE user_relations SET created_at = now() WHERE source_user_id = %s AND target_user_id = %s",
+                 (user, friend))
+    conn.execute("UPDATE user_relations SET created_at = NULL WHERE source_user_id = %s AND target_user_id = %s",
+                 (friend, user))
+    conn.execute("UPDATE users SET share_stances = true WHERE id IN (%s, %s)", (user, friend))
+    (now,) = conn.execute("SELECT now()").fetchone()
+
+    earlier = app.load(conn, now - timedelta(minutes=30))
+    u, f = earlier.user_ids.index(user), earlier.user_ids.index(friend)
+    assert not any(s == u for s, _, _ in earlier.stances)
+    assert earlier.event_ids.index(post) not in earlier.hidden[u]
+    assert (u, f) not in earlier.follows and (f, u) not in earlier.follows
+    assert fresh not in earlier.event_ids
+
+
+def test_a_run_that_fails_while_writing_leaves_no_trace(conn, monkeypatch):
+    inputs = app.load(conn)
+    runs_before = conn.execute("SELECT count(*) FROM rec_ppr_runs").fetchone()[0]
+    rows_before = conn.execute("SELECT count(*) FROM rec_ppr_scores").fetchone()[0]
+
+    real_scores = app.scores
+
+    def fails_halfway(given):
+        rows = real_scores(given)
+        yield next(rows)
+        raise MemoryError
+
+    with monkeypatch.context() as patch:
+        patch.setattr(app, "scores", fails_halfway)
+        with pytest.raises(MemoryError):
+            app.write(conn, inputs)
+
+    assert conn.execute("SELECT count(*) FROM rec_ppr_runs").fetchone()[0] == runs_before
+    assert conn.execute("SELECT count(*) FROM rec_ppr_scores").fetchone()[0] == rows_before

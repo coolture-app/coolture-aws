@@ -3,6 +3,7 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -28,30 +29,31 @@ POST_AVERAGE = """
 SELECT avg(pe.embedding)::real[]
 FROM post_embeddings pe
 JOIN posts p ON p.id = pe.post_id
-WHERE pe.model = %s AND p.created_at <= now()
+WHERE pe.model = %(model)s AND p.created_at <= %(as_of)s
 """
 
 # Ended events stay while their stances count, to connect people and places.
 EVENTS = f"""
 SELECT p.id,
        vector_send(pe.embedding) AS vector,
-       {EVENT_END} >= now() AS not_ended,
+       {EVENT_END} >= %(as_of)s AS not_ended,
        p.author_id,
        CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
             THEN lower(btrim(el.venue_name)) || ' | ' || lower(btrim(coalesce(el.city, ''))) END AS venue
 FROM posts p
-JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
+JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %(model)s
 LEFT JOIN event_locations el ON el.id = p.event_location_id
-WHERE p.deleted_at IS NULL AND {EVENT_END} >= now() - make_interval(days => %s)
+WHERE p.created_at <= %(as_of)s AND (p.deleted_at IS NULL OR p.deleted_at > %(as_of)s)
+  AND {EVENT_END} >= %(as_of)s - make_interval(days => %(max_age_days)s)
 ORDER BY p.id
 """
 
 STANCES = """
-SELECT user_id, post_id, type, floor(extract(epoch FROM now() - created_at) / 86400)::int AS age_days
+SELECT user_id, post_id, type, floor(extract(epoch FROM %(as_of)s - created_at) / 86400)::int AS age_days
 FROM (SELECT user_id, post_id, type, created_at FROM post_reactions
       UNION ALL
       SELECT user_id, post_id, type, created_at FROM post_participations) s
-WHERE type = ANY(%s) AND created_at > now() - make_interval(days => %s)
+WHERE type = ANY(%(types)s) AND created_at <= %(as_of)s AND created_at > %(as_of)s - make_interval(days => %(max_age_days)s)
 """
 
 # Runs older than the newest one finished over a day ago, which no session still reads.
@@ -123,10 +125,15 @@ def _hidden(user_index: dict[UUID, int], event_index: dict[UUID, int], authors: 
     return hidden
 
 
-def load(conn: psycopg.Connection) -> Inputs | None:
-    """None when there are no events or no interests with vectors of EMBEDDING_MODEL."""
-    (average,) = conn.execute(POST_AVERAGE, (EMBEDDING_MODEL,)).fetchone()
-    events = conn.execute(EVENTS, (EMBEDDING_MODEL, STANCE_MAX_AGE_DAYS)).fetchall()
+def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | None:
+    """What the app knew at as_of, the database's now by default. None when there are no events or no interests with
+    vectors of EMBEDDING_MODEL. An earlier as_of is approximate: interest picks have no time, a changed stance keeps
+    only its latest time, and removed stances, follows and edited posts leave no trace."""
+    if as_of is None:
+        (as_of,) = conn.execute("SELECT now()").fetchone()
+    at = {"as_of": as_of, "model": EMBEDDING_MODEL, "max_age_days": STANCE_MAX_AGE_DAYS, "types": list(STANCE_WEIGHTS)}
+    (average,) = conn.execute(POST_AVERAGE, at).fetchone()
+    events = conn.execute(EVENTS, at).fetchall()
     interests = conn.execute(
         "SELECT interest_key, vector_send(embedding) FROM interest_embeddings WHERE model = %s ORDER BY interest_key",
         (EMBEDDING_MODEL,)).fetchall()
@@ -136,11 +143,15 @@ def load(conn: psycopg.Connection) -> Inputs | None:
     interest_keys, interest_vectors = zip(*interests)
 
     picks = conn.execute("SELECT user_id, interest_key FROM user_interests").fetchall()
-    stances = conn.execute(STANCES, (list(STANCE_WEIGHTS), STANCE_MAX_AGE_DAYS)).fetchall()
-    relations = conn.execute("SELECT source_user_id, target_user_id, type FROM user_relations").fetchall()
+    stances = conn.execute(STANCES, at).fetchall()
+    # A row with no time counts as always there, so a block is never dropped.
+    relations = conn.execute("""SELECT source_user_id, target_user_id, type FROM user_relations
+                                WHERE COALESCE(created_at, '-infinity') <= %(as_of)s""", at).fetchall()
     sharing = {u for (u,) in conn.execute("SELECT id FROM users WHERE share_stances")}
-    reacted = conn.execute(
-        "SELECT user_id, post_id FROM post_reactions UNION SELECT user_id, post_id FROM post_participations").fetchall()
+    reacted = conn.execute("""SELECT user_id, post_id FROM post_reactions WHERE COALESCE(created_at, '-infinity') <= %(as_of)s
+                              UNION
+                              SELECT user_id, post_id FROM post_participations
+                              WHERE COALESCE(created_at, '-infinity') <= %(as_of)s""", at).fetchall()
 
     following = {(a, b) for a, b, kind in relations if kind == "FOLLOW"}
     blocks = [(a, b) for a, b, kind in relations if kind == "BLOCK"]

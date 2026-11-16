@@ -123,15 +123,21 @@ def candidates(inputs: Inputs, user: int) -> np.ndarray:
     return np.flatnonzero(allowed)
 
 
+def transition(graph: sparse.csr_matrix) -> sparse.csr_matrix:
+    """Column j spreads node j's mass over its edges by weight. Every edge but a follow goes both ways, and follows
+    are between friends, so a node the walk reaches always has one and no mass is lost."""
+    out_weight = np.asarray(graph.sum(axis=1)).ravel()
+    out_weight[out_weight == 0] = 1
+    return (sparse.diags(1 / out_weight) @ graph).T.tocsr()
+
+
 def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
     """(user, event, score): the walk's mass ranked among the user's candidates, 0 to 1. A user whose walk can't tell
     them apart gets no rows, which the feed reads as NEUTRAL for all."""
     graph = adjacency(inputs)
     first_user = graph.shape[0] - len(inputs.user_ids)
-    out_weight = np.asarray(graph.sum(axis=1)).ravel()
-    users_with_edges = [u for u in range(len(inputs.user_ids)) if out_weight[first_user + u] > 0]
-    out_weight[out_weight == 0] = 1
-    step = (sparse.diags(1 / out_weight) @ graph).T.tocsr()
+    users_with_edges = [u for u in range(len(inputs.user_ids)) if graph[first_user + u].nnz]
+    step = transition(graph)
 
     for start in range(0, len(users_with_edges), USERS_PER_BATCH):
         batch = users_with_edges[start:start + USERS_PER_BATCH]
