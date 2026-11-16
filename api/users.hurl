@@ -55,14 +55,14 @@ X-User-Id: {{anna}}
 X-User-Name: anna_demo
 HTTP 200
 [Asserts]
-jsonpath "$.items[?(@.username == 'iza_demo')].followsYou" contains true
+jsonpath "$.items[?(@.username == 'iza_demo')].followsYou" == true
 
 GET {{api}}/users/{{iza}}/following?limit=100
 X-User-Id: {{iza}}
 X-User-Name: iza_demo
 HTTP 200
 [Asserts]
-jsonpath "$.items[?(@.username == 'anna_demo')].followsYou" contains false
+jsonpath "$.items[?(@.username == 'anna_demo')].followsYou" == false
 
 # Ola edits her bio, and nobody else can.
 PATCH {{api}}/users/{{ola}}
