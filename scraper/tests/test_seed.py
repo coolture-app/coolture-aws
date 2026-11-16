@@ -1,3 +1,5 @@
+import json
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -6,8 +8,8 @@ import requests
 import seed
 from api import Outcome
 from images import Image
-from seed import (BOT_ID, HISTORY_DAYS, SeedError, history, moved, picks, seed_events, seed_reactions, shift_days, shifted,
-                  wait_for_api)
+from seed import (AVATAR_SIZES, AVATARS, BOT_ID, FRIEND_CASES, FRIENDS, HISTORY_DAYS, SeedError, friend_stances, history,
+                  moved, picks, seed_events, seed_friends, seed_reactions, shift_days, shifted, wait_for_api)
 from snapshot import Snapshot
 
 UTC = timezone.utc
@@ -205,3 +207,98 @@ def test_waiting_for_the_api_gives_up_with_a_hint(monkeypatch):
 
     with pytest.raises(SeedError, match='make local'):
         wait_for_api('http://api.test', timeout_s=15, sleep=lambda s: None, monotonic=lambda: next(clock))
+
+
+def test_each_friends_line_case_gets_its_own_post():
+    planned = friend_stances([f'p{number}' for number in range(len(FRIEND_CASES))])
+
+    assert [(name, kind) for post_id, name, kind in planned if post_id == 'p0'] == [('kasia_demo', 'TAKES_PART')]
+    assert [(name, kind) for post_id, name, kind in planned if post_id == 'p1'] == [('piotr_demo', 'INTERESTED')]
+    by_post = Counter((post_id, kind) for post_id, _, kind in planned)
+    assert by_post[('p4', 'TAKES_PART')] == 5
+    assert by_post[('p5', 'TAKES_PART')] == 3 and by_post[('p5', 'INTERESTED')] == 4
+    assert [name for post_id, name, _ in planned if post_id == 'p6'] == ['bartek_demo', 'iza_demo']
+
+
+def test_no_one_takes_two_stances_on_one_post():
+    planned = friend_stances([f'p{number}' for number in range(len(FRIEND_CASES))])
+
+    assert len({(post_id, name) for post_id, name, _ in planned}) == len(planned)
+
+
+class FakeFriendSession:
+    def __init__(self, log, avatars=()):
+        self.headers = {}
+        self.log = log
+        self.avatars = avatars
+
+    def _response(self, body=None):
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(body or {}).encode()
+        return response
+
+    def put(self, url, json, timeout):
+        self.log.append(('PUT', self.headers['X-User-Name'], url, json['type']))
+        return self._response()
+
+    def delete(self, url, timeout):
+        self.log.append(('DELETE', self.headers['X-User-Name'], url, None))
+        return self._response()
+
+    def get(self, url, timeout):
+        if '/users/' in url:
+            return self._response({'avatar': {'id': 'm'}} if self.headers['X-User-Name'] in self.avatars else {})
+        return self._response({'title': 'Koncert'})
+
+
+class FakeAvatarApi:
+    def __init__(self):
+        self.set = []
+
+    def set_profile_image(self, user_id, full, thumbnail):
+        self.set.append((user_id, full.width, thumbnail.width))
+
+
+def friends_query(post_count=len(FRIEND_CASES), stances=()):
+    def query(sql):
+        if 'ORDER BY p.starts_at' in sql:
+            assert BOT_ID in sql and FRIENDS['iza_demo'] in sql
+            return [f'p{number}' for number in range(post_count)]
+        return list(stances)
+    return query
+
+
+def test_friends_take_their_stances_as_themselves_and_get_photos():
+    sent = []
+    api = FakeAvatarApi()
+
+    stats = seed_friends('http://api.test', query=friends_query(), session_factory=lambda: FakeFriendSession(sent),
+                         api_factory=lambda user_id: api)
+
+    assert ('PUT', 'kasia_demo', 'http://api.test/posts/p0/participation', 'TAKES_PART') in sent
+    assert ('PUT', 'iza_demo', 'http://api.test/posts/p6/participation', 'INTERESTED') in sent
+    assert stats['takes_part'] + stats['interested'] == len(friend_stances(['p'] * len(FRIEND_CASES)))
+    assert [user_id for user_id, _, _ in api.set] == [FRIENDS[name] for name in AVATARS]
+    assert api.set[0][1:] == AVATAR_SIZES
+
+
+def test_a_second_run_takes_back_stray_stances_and_keeps_photos():
+    sent = []
+    api = FakeAvatarApi()
+    stray = f"old,{FRIENDS['kasia_demo']}"
+    kept = f"p0,{FRIENDS['kasia_demo']}"
+
+    stats = seed_friends('http://api.test', query=friends_query(stances=[stray, kept]),
+                         session_factory=lambda: FakeFriendSession(sent, avatars=set(AVATARS)),
+                         api_factory=lambda user_id: api)
+
+    assert [entry for entry in sent if entry[0] == 'DELETE'] == [
+        ('DELETE', 'kasia_demo', 'http://api.test/posts/old/participation', None)]
+    assert stats['taken_back'] == 1
+    assert not api.set
+
+
+def test_friends_without_enough_posts_say_what_to_run():
+    with pytest.raises(SeedError, match='make seed-events'):
+        seed_friends('http://api.test', query=friends_query(post_count=2), session_factory=lambda: FakeFriendSession([]))

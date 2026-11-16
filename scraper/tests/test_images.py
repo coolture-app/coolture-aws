@@ -1,8 +1,9 @@
 import struct
+import zlib
 
 import pytest
 
-from images import Image, image_size
+from images import Image, image_size, solid_png
 
 
 def webp_lossy(width, height):
@@ -50,3 +51,11 @@ def test_an_image_whose_size_is_unknown_or_zero_has_none():
 
 def test_an_image_keeps_its_size():
     assert Image.read(png(640, 480), 'image/png', 'a.png') == Image(png(640, 480), 'image/png', 'a.png', 640, 480)
+
+
+def test_a_solid_png_is_a_valid_png_of_its_size():
+    data = solid_png(64, (214, 96, 77))
+
+    assert image_size(data) == (64, 64)
+    # The first pixel, after the filter byte of the first row.
+    assert zlib.decompressobj().decompress(data[data.index(b'IDAT') + 4:])[1:4] == bytes((214, 96, 77))

@@ -2,8 +2,9 @@
 
     python scraper/seed.py events       # make seed-events
     python scraper/seed.py reactions    # make seed-reactions, after make embed-interests and make embed-posts
+    python scraper/seed.py friends      # make seed-friends, after make seed-events
 
-Both can run again and add only what's missing.
+Each can run again. events and reactions add only what's missing; friends puts its cases back as they were.
 """
 import argparse
 import logging
@@ -21,6 +22,7 @@ from pathlib import Path
 import requests
 
 from api import TIMEOUT_S, ApiError, CooltureApi, Outcome
+from images import Image, solid_png
 from scrape import DEFAULT_API_URL, http_session, utc_now
 from snapshot import DEFAULT_DIR, Entry, is_complete, load_images, read
 from trojmiasto import WARSAW
@@ -69,6 +71,47 @@ ORDER BY pe.embedding <=> taste.vector, p.id
 DATED_SQL = """
 UPDATE post_{table}s SET created_at = now() - make_interval(days => {days})
 WHERE user_id = '{user_id}' AND post_id = '{post_id}';
+"""
+# The demo users' friends in db/local-dev-seed.sql. Bartek doesn't share his stances and Iza isn't followed back.
+FRIENDS = {
+    'kasia_demo': '00000000-0000-0000-0000-000000000005',
+    'piotr_demo': '00000000-0000-0000-0000-000000000006',
+    'ewa_demo': '00000000-0000-0000-0000-000000000007',
+    'tomek_demo': '00000000-0000-0000-0000-000000000008',
+    'zofia_demo': '00000000-0000-0000-0000-000000000009',
+    'marek_demo': '00000000-0000-0000-0000-000000000010',
+    'magda_demo': '00000000-0000-0000-0000-000000000011',
+    'bartek_demo': '00000000-0000-0000-0000-000000000012',
+    'iza_demo': '00000000-0000-0000-0000-000000000013',
+}
+# One shape of a card's friends line per post: (what it shows, going, interested). A card names the newest two of each.
+FRIEND_CASES = (
+    ('going 1', ('kasia_demo',), ()),
+    ('interested 1', (), ('piotr_demo',)),
+    ('going 1, interested 1', ('ewa_demo',), ('tomek_demo',)),
+    ('going 2, a photo and initials', ('kasia_demo', 'zofia_demo'), ()),
+    ('going 5, +3', ('kasia_demo', 'piotr_demo', 'ewa_demo', 'tomek_demo', 'zofia_demo'), ()),
+    ('going 3 and interested 4, both counted', ('zofia_demo', 'marek_demo', 'magda_demo'),
+     ('kasia_demo', 'piotr_demo', 'ewa_demo', 'tomek_demo')),
+    ('no line: a friend who keeps stances to himself, and a one-way follower', ('bartek_demo',), ('iza_demo',)),
+)
+# Some faces are photos and some initials. Plain colours, so nobody's picture is needed.
+AVATARS = {'kasia_demo': (214, 96, 77), 'tomek_demo': (61, 120, 170), 'magda_demo': (88, 150, 92)}
+AVATAR_SIZES = (512, 128)
+# The soonest posts the Upcoming sort shows that nobody outside FRIENDS took a stance on, so a viewer's own stance, or
+# a stance of Anna or Jan, who are friends too, can't change a case.
+FRIEND_POSTS_SQL = """
+SELECT p.id
+FROM posts p
+WHERE p.author_id = '{bot_id}' AND p.deleted_at IS NULL
+  AND COALESCE(p.ends_at, p.starts_at + interval '3 hours') >= now()
+  AND NOT EXISTS (SELECT 1 FROM post_participations pp
+                  WHERE pp.post_id = p.id AND pp.user_id <> ALL('{{{friends}}}'::uuid[]))
+ORDER BY p.starts_at, p.id
+LIMIT {count}
+"""
+FRIEND_STANCES_SQL = """
+SELECT pp.post_id || ',' || pp.user_id FROM post_participations pp WHERE pp.user_id = ANY('{{{friends}}}'::uuid[])
 """
 HAS_REACTED_SQL = """
 SELECT (SELECT count(*) FROM post_reactions WHERE user_id = '{user_id}')
@@ -213,9 +256,73 @@ def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
     return stats
 
 
+def friend_stances(post_ids: list[str]) -> list[tuple[str, str, str]]:
+    """(post id, username, type) for each stance of FRIEND_CASES, a post per case, in the order they're taken."""
+    return [(post_id, name, kind)
+            for post_id, (_, going, interested) in zip(post_ids, FRIEND_CASES)
+            for kind, names in (('TAKES_PART', going), ('INTERESTED', interested))
+            for name in names]
+
+
+def _sent(response: requests.Response, request: str, username: str) -> requests.Response:
+    if not response.ok:
+        raise SeedError(f'{request} as {username} returned {response.status_code}: {response.text[:300]}')
+    return response
+
+
+def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
+                 session_factory: Callable[[], requests.Session] = http_session,
+                 api_factory: Callable[[str], CooltureApi] | None = None) -> Counter:
+    """Gives the friends their stances on the soonest posts, a case of the friends line per post, and takes back any
+    other stance of theirs, so a later run puts each case back as it was."""
+    friends = ','.join(FRIENDS.values())
+    post_ids = query(FRIEND_POSTS_SQL.format(bot_id=BOT_ID, friends=friends, count=len(FRIEND_CASES)))
+    if len(post_ids) < len(FRIEND_CASES):
+        raise SeedError(f'Only {len(post_ids)} upcoming posts without stances. Load events first: `make seed-events`.')
+    planned = friend_stances(post_ids)
+
+    sessions: dict[str, requests.Session] = {}
+
+    def session(username: str) -> requests.Session:
+        if username not in sessions:
+            sessions[username] = session_factory()
+            sessions[username].headers.update({'X-User-Id': FRIENDS[username], 'X-User-Name': username})
+        return sessions[username]
+
+    stats: Counter = Counter()
+    keep = {(post_id, FRIENDS[name]) for post_id, name, _ in planned}
+    names = {user_id: name for name, user_id in FRIENDS.items()}
+    for row in query(FRIEND_STANCES_SQL.format(friends=friends)):
+        post_id, user_id = row.split(',')
+        if (post_id, user_id) not in keep:
+            _sent(session(names[user_id]).delete(f'{base_url}/posts/{post_id}/participation', timeout=TIMEOUT_S),
+                  f'DELETE /posts/{post_id}/participation', names[user_id])
+            stats['taken_back'] += 1
+    for post_id, name, kind in planned:
+        _sent(session(name).put(f'{base_url}/posts/{post_id}/participation', json={'type': kind}, timeout=TIMEOUT_S),
+              f'PUT /posts/{post_id}/participation', name)
+        stats[kind.lower()] += 1
+
+    new_api = api_factory or (lambda user_id: CooltureApi(http_session(), http_session(), base_url, user_id=user_id))
+    for name, colour in AVATARS.items():
+        profile = _sent(session(name).get(f'{base_url}/users/{FRIENDS[name]}', timeout=TIMEOUT_S),
+                        f'GET /users/{FRIENDS[name]}', name).json()
+        if profile.get('avatar'):
+            continue
+        full, thumbnail = (Image.read(solid_png(size, colour), 'image/png', f'{name}-{size}.png') for size in AVATAR_SIZES)
+        new_api(FRIENDS[name]).set_profile_image(FRIENDS[name], full, thumbnail)
+        stats['photos'] += 1
+
+    for post_id, (shows, _, _) in zip(post_ids, FRIEND_CASES):
+        post = _sent(session('kasia_demo').get(f'{base_url}/posts/{post_id}', timeout=TIMEOUT_S),
+                     f'GET /posts/{post_id}', 'kasia_demo').json()
+        log.info('%s: %s (%s)', shows, post.get('title'), post_id)
+    return stats
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Fill the local stack with realistic data')
-    parser.add_argument('step', choices=['events', 'reactions'])
+    parser.add_argument('step', choices=['events', 'reactions', 'friends'])
     parser.add_argument('--snapshot', type=Path, default=DEFAULT_DIR, metavar='DIR', help='the snapshot to load')
     parser.add_argument('--workers', type=int, default=WORKERS, help=f'posts loaded at a time (default {WORKERS})')
     args = parser.parse_args()
@@ -226,7 +333,10 @@ def main() -> int:
     stats: Counter = Counter()
     try:
         wait_for_api(base_url)
-        stats = seed_events(args.snapshot, base_url, args.workers) if args.step == 'events' else seed_reactions(base_url)
+        if args.step == 'events':
+            stats = seed_events(args.snapshot, base_url, args.workers)
+        else:
+            stats = seed_reactions(base_url) if args.step == 'reactions' else seed_friends(base_url)
     except (SeedError, ApiError) as error:
         log.error('%s', error)
         return 1

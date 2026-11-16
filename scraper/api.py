@@ -171,22 +171,39 @@ class CooltureApi:
         self._ledger.add(post['eventUrl'])
         return Outcome(photos=len(media_ids))
 
-    def _upload(self, image: Image) -> str | None:
+    def set_profile_image(self, user_id: str, full: Image, thumbnail: Image) -> None:
+        media_ids = []
+        try:
+            for image, purpose in ((full, 'PROFILE_IMAGE'), (thumbnail, 'PROFILE_IMAGE_THUMBNAIL')):
+                media_id = self._upload(image, purpose)
+                if not media_id:
+                    raise ApiError(f'Uploading {image.file_name} failed')
+                media_ids.append(media_id)
+            response = self._session.put(f'{self._base_url}/users/{user_id}/profile-image',
+                                         json={'fullMediaId': media_ids[0], 'thumbnailMediaId': media_ids[1]},
+                                         timeout=TIMEOUT_S)
+            if response.status_code != 200:
+                raise ApiError(f'PUT /users/{user_id}/profile-image returned {_answer(response)}')
+        except BaseException:
+            self._delete_media(media_ids)
+            raise
+
+    def _upload(self, image: Image, purpose: str = 'EVENT_MEDIA') -> str | None:
         """Gives the new media's id, or None when this image is left out."""
         for attempt in range(UPLOAD_TRIES):
             if attempt:
                 time.sleep(RETRY_PAUSE_S)
             try:
-                return self._upload_once(image)
+                return self._upload_once(image, purpose)
             except (requests.RequestException, *WRONG_SHAPE) as error:
                 log.warning('Image upload failed file=%s reason=%s', image.file_name, error)
                 if not _transient(error):
                     break
         return None
 
-    def _upload_once(self, image: Image) -> str:
+    def _upload_once(self, image: Image, purpose: str) -> str:
         """The new media's id. A failure after the media was made deletes it before raising."""
-        fields = {'purpose': 'EVENT_MEDIA', 'mimeType': image.mime_type, 'sizeBytes': len(image.content),
+        fields = {'purpose': purpose, 'mimeType': image.mime_type, 'sizeBytes': len(image.content),
                   'fileName': image.file_name}
         if image.width and image.height:
             fields |= {'width': image.width, 'height': image.height}
