@@ -24,6 +24,8 @@ public record PostCardDto(
     List<String> tags,
     int positiveReactionCount,
     int participantCount,
+    int interestedCount,
+    int goingCount,
     int commentsCount,
     PostType type,
     PostStatus status,
@@ -39,7 +41,7 @@ public record PostCardDto(
 ) {
     public PostCardDto withPhotos(List<MediaResourceDto> newPhotos) {
         return new PostCardDto(id, author, location, title, description, eventUrl, startsAt, endsAt, tags,
-            positiveReactionCount, participantCount, commentsCount, type, status, visibility,
+            positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status, visibility,
             createdAt, lastModifiedAt, deletedAt, coverMedia, myReaction, myParticipation,
             newPhotos == null || newPhotos.isEmpty() ? null : newPhotos);
     }
