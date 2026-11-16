@@ -7,6 +7,7 @@ X-User-Name: anna_demo
 HTTP 200
 [Asserts]
 jsonpath "$.items[0].username" == "jan_demo"
+jsonpath "$.items[0].followsYou" == true
 
 GET {{api}}/users/by-username/ola_demo
 HTTP 200
@@ -22,6 +23,46 @@ HTTP 200
 [Asserts]
 jsonpath "$.username" == "ola_demo"
 jsonpath "$.isFollowing" == true
+
+# followsYou is the other way round from isFollowing. Jan and Anna follow each other, so they're friends. Iza follows
+# Anna, who doesn't follow her back.
+GET {{api}}/users/{{jan}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 200
+[Asserts]
+jsonpath "$.isFollowing" == true
+jsonpath "$.followsYou" == true
+
+GET {{api}}/users/{{iza}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 200
+[Asserts]
+jsonpath "$.isFollowing" == false
+jsonpath "$.followsYou" == true
+
+GET {{api}}/users/by-username/anna_demo
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+HTTP 200
+[Asserts]
+jsonpath "$.isFollowing" == true
+jsonpath "$.followsYou" == false
+
+GET {{api}}/users/{{anna}}/followers?limit=100
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 200
+[Asserts]
+jsonpath "$.items[?(@.username == 'iza_demo')].followsYou" contains true
+
+GET {{api}}/users/{{iza}}/following?limit=100
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+HTTP 200
+[Asserts]
+jsonpath "$.items[?(@.username == 'anna_demo')].followsYou" contains false
 
 # Ola edits her bio, and nobody else can.
 PATCH {{api}}/users/{{ola}}
