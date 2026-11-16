@@ -34,7 +34,7 @@ WHERE pe.model = %s AND p.created_at <= now()
 # Ended events stay while their stances count, to connect people and places.
 EVENTS = f"""
 SELECT p.id,
-       pe.embedding::real[] AS vector,
+       vector_send(pe.embedding) AS vector,
        {EVENT_END} >= now() AS not_ended,
        p.author_id,
        CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
@@ -56,8 +56,12 @@ WHERE type = ANY(%s) AND created_at > now() - make_interval(days => %s)
 
 # Runs older than the newest one finished over a day ago, which no session still reads.
 DELETE_OLD_RUNS = """
-DELETE FROM rec_ppr_runs
-WHERE finished_at < (SELECT max(finished_at) FROM rec_ppr_runs WHERE finished_at < now() - interval '1 day')
+WITH old AS (
+    DELETE FROM rec_ppr_runs
+    WHERE finished_at < (SELECT max(finished_at) FROM rec_ppr_runs WHERE finished_at < now() - interval '1 day')
+    RETURNING run_number
+)
+DELETE FROM rec_ppr_scores WHERE run_number IN (SELECT run_number FROM old)
 """
 
 
@@ -83,6 +87,12 @@ def _db_credentials() -> dict[str, str]:
         DBHostname=settings.db_host, Port=settings.db_port, DBUsername=settings.db_username
     )
     return {"password": token, "sslmode": "require"}
+
+
+def _matrix(sent: Sequence[bytes]) -> np.ndarray:
+    # pgvector's binary form: dimensions and an unused int16, then big-endian float4. Text arrays took four times as
+    # long and three times the memory.
+    return np.array([np.frombuffer(v, dtype=">f4", offset=4) for v in sent], dtype=float)
 
 
 def _positions(items: Sequence) -> dict[Any, int]:
@@ -118,7 +128,7 @@ def load(conn: psycopg.Connection) -> Inputs | None:
     (average,) = conn.execute(POST_AVERAGE, (EMBEDDING_MODEL,)).fetchone()
     events = conn.execute(EVENTS, (EMBEDDING_MODEL, STANCE_MAX_AGE_DAYS)).fetchall()
     interests = conn.execute(
-        "SELECT interest_key, embedding::real[] FROM interest_embeddings WHERE model = %s ORDER BY interest_key",
+        "SELECT interest_key, vector_send(embedding) FROM interest_embeddings WHERE model = %s ORDER BY interest_key",
         (EMBEDDING_MODEL,)).fetchall()
     if average is None or not events or not interests:
         return None
@@ -145,11 +155,11 @@ def load(conn: psycopg.Connection) -> Inputs | None:
 
     return Inputs(
         event_ids=list(event_ids),
-        event_vectors=np.array(event_vectors, dtype=float),
+        event_vectors=_matrix(event_vectors),
         not_ended=np.array(not_ended, dtype=bool),
         venues=list(venues),
         post_average=np.array(average, dtype=float),
-        interest_vectors=np.array(interest_vectors, dtype=float),
+        interest_vectors=_matrix(interest_vectors),
         user_ids=user_ids,
         picks=[(user_index[u], interest_index[k]) for u, k in picks if k in interest_index],
         stances=[(user_index[u], event_index[p], _stance_weight(kind, age_days))
@@ -176,9 +186,10 @@ def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
     return run, rows
 
 
-def lambda_handler(_event: dict[str, Any], _context: Any) -> dict[str, Any]:
+def lambda_handler(_event: dict[str, Any], context: Any) -> dict[str, Any]:
     started = time.monotonic()
     with _connect() as conn:
+        logger.info("connected in %.1f s", time.monotonic() - started)
         inputs = load(conn)
         if inputs is None:
             logger.info("nothing to score: no events or no interests with %s vectors", EMBEDDING_MODEL)
@@ -186,6 +197,9 @@ def lambda_handler(_event: dict[str, Any], _context: Any) -> dict[str, Any]:
         loaded = time.monotonic()
         logger.info("loaded %d events (%d not ended), %d interests, %d users in %.1f s", len(inputs.event_ids),
                     inputs.not_ended.sum(), len(inputs.interest_vectors), len(inputs.user_ids), loaded - started)
+        # The database ends the run's transaction itself, before Lambda stops this process.
+        conn.execute("SELECT set_config('statement_timeout', %s, false)",
+                     (f"{context.get_remaining_time_in_millis() - 15_000}ms",))
         run, rows = write(conn, inputs)
     logger.info("run %s: %d rows, scored and written in %.1f s", run, rows, time.monotonic() - loaded)
     return {"run": run, "rows": rows}

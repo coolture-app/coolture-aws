@@ -114,8 +114,14 @@ Resources:
       CodeUri: ../ppr/src/
       Handler: app.lambda_handler
       Runtime: python3.13
-      MemorySize: 1024
+      # One full vCPU: the walk and the copy into the database run on one thread.
+      MemorySize: 1769
       Timeout: 300
+      # A run started by hand waits for the scheduled one. One retry covers Aurora resuming from a pause; the feed keeps
+      # reading the newest finished run anyway.
+      ReservedConcurrentExecutions: 1
+      EventInvokeConfig:
+        MaximumRetryAttempts: 1
       Policies:
         - !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbConnectPolicyArn'}, !Ref AWS::NoValue]
       Events:

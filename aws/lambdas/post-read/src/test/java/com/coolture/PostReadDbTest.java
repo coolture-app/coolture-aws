@@ -361,6 +361,7 @@ class PostReadDbTest {
             assertEquals(0.75, pprOf(post, base.plus(Duration.ofHours(2))), 1e-6);
             assertNull(pprOf(commented, base), "another user's score");
         } finally {
+            writeAsTheApp("DELETE FROM rec_ppr_scores WHERE run_number IN (?, ?)", earlier, later);
             writeAsTheApp("DELETE FROM rec_ppr_runs WHERE run_number IN (?, ?)", earlier, later);
         }
     }

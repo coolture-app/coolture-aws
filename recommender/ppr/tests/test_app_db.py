@@ -102,11 +102,14 @@ def test_a_run_keeps_the_newest_run_finished_over_a_day_ago_and_deletes_older_on
         return conn.execute("INSERT INTO rec_ppr_runs (finished_at) VALUES (now() - %s::interval) RETURNING run_number",
                             (ago,)).fetchone()[0]
 
+    conn.execute("DELETE FROM rec_ppr_scores")
     conn.execute("DELETE FROM rec_ppr_runs")
     day_old, oldest, recent = run_finished("2 days"), run_finished("3 days"), run_finished("1 hour")
+    conn.execute("INSERT INTO rec_ppr_scores VALUES (%s, gen_random_uuid(), gen_random_uuid(), 0.5)", (oldest,))
     new, _ = app.write(conn, app.load(conn))
 
     assert {r for (r,) in conn.execute("SELECT run_number FROM rec_ppr_runs")} == {day_old, recent, new}
+    assert not conn.execute("SELECT 1 FROM rec_ppr_scores WHERE run_number = %s", (oldest,)).fetchone()
 
 
 def test_the_job_and_the_feed_have_their_grants(conn):
