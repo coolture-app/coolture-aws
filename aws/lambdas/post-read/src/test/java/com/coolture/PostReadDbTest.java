@@ -4,6 +4,7 @@ import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.enums.ParticipationType;
@@ -285,6 +286,26 @@ class PostReadDbTest {
     }
 
     // ===== The viewer's vector =====
+
+    @Test
+    void aPostCountsInterestedAndGoingApart_onItsPageAndItsCard() throws SQLException {
+        UUID post = postTitled("walk_3");
+        try {
+            writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'INTERESTED', now())", post);
+            PostDetailDto page = postRepository.findById(post, ME).orElseThrow();
+            PostCardDto card = postRepository.findFeed(searching("walk_3"), PostSort.RECENT, ME, null, 10).stream()
+                .filter(c -> c.id().equals(post)).findFirst().orElseThrow();
+
+            assertEquals(1, page.interestedCount());
+            assertEquals(0, page.goingCount());
+            assertEquals(1, page.participantCount());
+            assertEquals(1, card.interestedCount());
+            assertEquals(0, card.goingCount());
+            assertEquals(1, card.participantCount());
+        } finally {
+            unmark(post);
+        }
+    }
 
     private static UUID postTitled(String title) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement();

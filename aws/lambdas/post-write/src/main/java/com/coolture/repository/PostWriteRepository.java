@@ -4,6 +4,7 @@ import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.StanceCounts;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
@@ -319,7 +320,8 @@ public class PostWriteRepository {
     private PostDetailDto getPostDetail(Connection conn, UUID postId) throws SQLException {
         String sql = """
             SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
-                   p.positive_reaction_count, p.participant_count, p.comments_count,
+                   p.positive_reaction_count, p.comments_count,
+                   stances.participant_count, stances.interested_count, stances.going_count,
                    p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
                    u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
                    avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
@@ -331,6 +333,7 @@ public class PostWriteRepository {
                    ST_X(el.coordinates::geometry) AS longitude
             FROM posts p
             JOIN users u ON u.id = p.author_id
+            """ + StanceCounts.JOIN + """
             LEFT JOIN profile_images pi ON pi.user_id = u.id AND pi.is_active = true
             LEFT JOIN media avatar_m ON avatar_m.id = pi.thumbnail_media_id
             LEFT JOIN event_locations el ON el.id = p.event_location_id
@@ -362,6 +365,8 @@ public class PostWriteRepository {
                     mapTags(rs),
                     rs.getInt("positive_reaction_count"),
                     rs.getInt("participant_count"),
+                    rs.getInt("interested_count"),
+                    rs.getInt("going_count"),
                     rs.getInt("comments_count"),
                     mapEnum(rs, "type", PostType.class),
                     mapEnum(rs, "status", PostStatus.class),

@@ -24,6 +24,8 @@ public record PostDetailDto(
     List<String> tags,
     int positiveReactionCount,
     int participantCount,
+    int interestedCount,
+    int goingCount,
     int commentsCount,
     PostType type,
     PostStatus status,
