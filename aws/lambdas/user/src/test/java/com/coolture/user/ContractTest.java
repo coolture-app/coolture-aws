@@ -70,11 +70,12 @@ class ContractTest {
     }
 
     private static UserProfileDto minimalProfile(UUID id) {
-        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false);
+        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false, List.of());
     }
 
     private static UserProfileDto fullProfile(UUID id) {
-        return new UserProfileDto(id, "jan", "Jan", "Demo", avatar(), 1, 2, "Teatr", Instant.now(), true, false);
+        return new UserProfileDto(id, "jan", "Jan", "Demo", avatar(), 1, 2, "Teatr", Instant.now(), true, false,
+            List.of("theatre", "cinema"));
     }
 
     private static CursorPage<UserSummaryDto> page() {
@@ -116,7 +117,6 @@ class ContractTest {
     @Test
     void me_withAndWithoutAHome_matches() throws Exception {
         when(users.getMe(any(), any(), any(), any())).thenReturn(fullProfile(CALLER));
-        when(interests.hasSelection(CALLER)).thenReturn(true);
         when(users.getHome(CALLER)).thenReturn(Optional.of(new HomeDto("Gdynia", new GeoPointDto(54.52, 18.54))));
         assertMatches(report("/auth/me", Request.Method.GET, signedIn("GET", "/auth/me", null, null)));
 
@@ -242,13 +242,22 @@ class ContractTest {
     @Test
     void anUndocumentedField_failsTheCheck() {
         String extraOnMe = "{\"id\":\"" + CALLER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"interestsSelected\":true,\"email\":\"jan@example.com\"}";
+            + "\"isFollowing\":false,\"isBlocked\":false,\"interests\":[],\"interestsSelected\":true,\"email\":\"jan@example.com\"}";
         String homeOnAPublicProfile = "{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"home\":{\"name\":\"Gdynia\",\"coordinates\":{\"latitude\":54.5,\"longitude\":18.5}}}";
+            + "\"isFollowing\":false,\"isBlocked\":false,\"interests\":[],\"home\":{\"name\":\"Gdynia\",\"coordinates\":{\"latitude\":54.5,\"longitude\":18.5}}}";
 
         assertTrue(VALIDATOR.validateResponse("/auth/me", Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(extraOnMe).build()).hasErrors());
         assertTrue(VALIDATOR.validateResponse("/users/" + OTHER, Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(homeOnAPublicProfile).build()).hasErrors());
+    }
+
+    @Test
+    void aProfileWithoutInterests_failsTheCheck() {
+        String withoutInterests = "{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
+            + "\"isFollowing\":false,\"isBlocked\":false}";
+
+        assertTrue(VALIDATOR.validateResponse("/users/" + OTHER, Request.Method.GET,
+            SimpleResponse.Builder.ok().withContentType("application/json").withBody(withoutInterests).build()).hasErrors());
     }
 }

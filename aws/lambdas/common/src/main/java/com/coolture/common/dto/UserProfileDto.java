@@ -3,6 +3,7 @@ package com.coolture.common.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -17,5 +18,6 @@ public record UserProfileDto(
     String bio,
     Instant createdAt,
     boolean isFollowing,
-    boolean isBlocked
+    boolean isBlocked,
+    List<String> interests
 ) {}

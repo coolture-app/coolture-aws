@@ -384,7 +384,8 @@ public class UserService {
                 user.bio(),
                 user.createdAt(),
                 isFollowing,
-                isBlocked
+                isBlocked,
+                userRepository.findInterestKeys(user.id())
         );
     }
 

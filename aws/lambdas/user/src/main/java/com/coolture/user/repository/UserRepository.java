@@ -286,6 +286,29 @@ public class UserRepository {
         return 0;
     }
 
+    /** In the order /dicts/interests lists them. */
+    public List<String> findInterestKeys(UUID userId) throws SQLException {
+        String sql = """
+            SELECT ui.interest_key
+            FROM user_interests ui
+            JOIN interests i ON i.key = ui.interest_key
+            JOIN interest_categories c ON c.key = i.category_key
+            WHERE ui.user_id = ?
+            ORDER BY c.position, c.key, i.position, i.key
+            """;
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                List<String> keys = new ArrayList<>();
+                while (rs.next()) {
+                    keys.add(rs.getString(1));
+                }
+                return keys;
+            }
+        }
+    }
+
     public int countFollowing(UUID userId) throws SQLException {
         String sql = "SELECT COUNT(*) FROM user_relations WHERE source_user_id = ? AND type = 'FOLLOW'";
         try (Connection conn = DatabaseConfig.getConnection();

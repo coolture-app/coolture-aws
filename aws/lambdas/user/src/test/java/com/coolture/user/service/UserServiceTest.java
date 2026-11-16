@@ -164,6 +164,7 @@ class UserServiceTest {
         when(repository.countFollowing(USER_ID)).thenReturn(3);
         when(repository.isFollowing(CALLER_ID, USER_ID)).thenReturn(true);
         when(repository.isBlocked(CALLER_ID, USER_ID)).thenReturn(false);
+        when(repository.findInterestKeys(USER_ID)).thenReturn(List.of("theatre", "cinema"));
 
         UserProfileDto profile = service.getByIdForCaller(USER_ID, CALLER_ID);
 
@@ -175,6 +176,7 @@ class UserServiceTest {
         assertFalse(profile.isBlocked());
         assertNotNull(profile.avatar());
         assertEquals("http://localhost:3900/full.jpg", profile.avatar().url());
+        assertEquals(List.of("theatre", "cinema"), profile.interests());
     }
 
     @Test
@@ -195,6 +197,7 @@ class UserServiceTest {
         assertNotNull(profile);
         assertEquals("testuser", profile.username());
         assertNull(profile.avatar());
+        assertEquals(List.of(), profile.interests());
     }
 
     @Test

@@ -80,18 +80,6 @@ public class InterestRepository {
         }
     }
 
-    public boolean hasSelection(UUID userId) throws SQLException {
-        String sql = "SELECT 1 FROM user_interests WHERE user_id = ? LIMIT 1";
-
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, userId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                return rs.next();
-            }
-        }
-    }
-
     public void replaceSelection(UUID userId, Collection<String> keys) throws SQLException {
         String lockSql = "SELECT 1 FROM users WHERE id = ? FOR NO KEY UPDATE";
         String deleteSql = "DELETE FROM user_interests WHERE user_id = ?";
