@@ -50,21 +50,21 @@ class FeedScorerTest {
         assertEquals(1.0, score.popularity(), 1e-12);
         FeedConfig w = FeedConfig.DEFAULTS;
         assertEquals(w.affinity() * score.affinity() + w.proximity() * score.proximity() + w.time() * score.time()
-            + w.popularity() * score.popularity() + w.jitter() * score.jitter() + w.graph() * score.graph(), score.total(), 1e-12);
+            + w.popularity() * score.popularity() + w.jitter() * score.jitter() + w.ppr() * score.ppr(), score.total(), 1e-12);
     }
 
     @Test
-    void graph_whenMissing_isNeutral() {
+    void ppr_whenMissing_isNeutral() {
         FeedScorer.Facts post = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(1)), 0, null, null);
 
-        assertEquals(FeedConfig.NEUTRAL, DEFAULT.score(post, AS_OF, 1).graph());
+        assertEquals(FeedConfig.NEUTRAL, DEFAULT.score(post, AS_OF, 1).ppr());
     }
 
     @Test
-    void graph_whenPresent_isUsedAsIs() {
+    void ppr_whenPresent_isUsedAsIs() {
         FeedScorer.Facts post = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(1)), null, 0, null, null, 0, 0.9);
 
-        assertEquals(0.9, DEFAULT.score(post, AS_OF, 1).graph());
+        assertEquals(0.9, DEFAULT.score(post, AS_OF, 1).ppr());
     }
 
     @Test

@@ -1,6 +1,6 @@
 import numpy as np
 
-from graph import Inputs, adjacency, content_edges, scores
+from ppr import Inputs, adjacency, content_edges, scores
 
 DIM, GROUPS, PER_GROUP = 12, 6, 4
 # Six interests along six axes, and four events near each, with a little seeded noise so no two are alike.
@@ -93,11 +93,11 @@ def test_a_venue_links_its_events():
 
 
 def test_batches_give_the_same_scores(monkeypatch):
-    import graph
+    import ppr
 
     many = inputs(user_ids=["u0", "u1", "u2"], picks=[(0, 0), (1, 2), (2, 4)])
     whole = sorted(scores(many))
-    monkeypatch.setattr(graph, "BATCH", 1)
+    monkeypatch.setattr(ppr, "BATCH", 1)
     assert sorted(scores(many)) == whole
 
 
@@ -119,3 +119,11 @@ def test_a_single_event_still_links_to_interests():
     single = inputs(event_ids=["e0"], event_vectors=EVENTS[:1], scorable=np.ones(1, dtype=bool), venues=[None])
     to_interest, to_event = content_edges(single)
     assert to_interest and not to_event
+
+
+def test_event_neighbours_dont_depend_on_the_chunk_size(monkeypatch):
+    import ppr
+
+    whole = content_edges(inputs())
+    monkeypatch.setattr(ppr, "CHUNK", 5)
+    assert content_edges(inputs()) == whole

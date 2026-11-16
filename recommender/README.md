@@ -1,8 +1,8 @@
 # Recommender
 
 The Python side of the feed: a Lambda that embeds posts and interests, which the feed turns into the viewer's vector
-itself (see [Interests and user vectors](#interests-and-user-vectors)), and one that scores events with a graph walk
-(see [Graph signal](#graph-signal)). Everything here reads the app's tables in `public`
+itself (see [Interests and user vectors](#interests-and-user-vectors)), and one that scores events with personalised PageRank
+(see [Personalised PageRank](#personalised-pagerank)). Everything here reads the app's tables in `public`
 directly. Its own tables are prefixed `rec_`, only the recommender writes them, and they're created by ordinary migrations
 in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post-read`'s
 [contract](../aws/lambdas/post-read/contracts/README.md).
@@ -10,7 +10,7 @@ in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post
 | Path | What it does |
 |---|---|
 | `embedding-workers/post-embedding/` | Container image: embeds a post's title, description and tags, and interests, with `mmlw-roberta-base` |
-| `graph-signal/` | Zip function: personalised PageRank for every user, into `rec_graph_scores` |
+| `ppr/` | Zip function: personalised PageRank for every user, into `rec_ppr_scores` |
 | `embedding-workers/template.yaml` | Both functions' stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
 
 All commands below run from the repository root.
@@ -116,9 +116,9 @@ weights and the decay are in `FeedConfig`.
 |---|---|---|---|
 | `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 3, 6 | `aws/backend.yaml` | Selection limits, also sent to the frontend |
 
-## Graph signal
+## Personalised PageRank
 
-`GraphSignalFunction` runs personalised PageRank from every user over one graph:
+The thesis's graph signal. `PprFunction` runs personalised PageRank from every user over one graph:
 
 | Edges | From |
 |---|---|
@@ -131,11 +131,11 @@ weights and the decay are in `FeedConfig`.
 
 Each user's candidates, the posts the feed may show them as new, get the walk's mass as a rank from 0 to 1. The feed
 reads the latest run finished a minute before the session's `asOf`, so a run landing mid-scroll doesn't move its pages;
-a post with no score gets `0.5` (weight `graph` in `FeedConfig`). Runs are kept a day.
+a post with no score gets `0.5` (weight `ppr` in `FeedConfig`). Runs are kept a day.
 
 ```bash
-make graph-signal                  # one run locally; make seed ends with it
+make ppr                           # one run locally; make seed ends with it
 DB_TEST=true make test-python      # with its database tests, after make seed
 ```
 
-On AWS it runs every 6 hours once the stack's `GraphScheduleEnabled` is `true`; it's off by default.
+On AWS it runs every 6 hours once the stack's `PprScheduleEnabled` is `true`; it's off by default.

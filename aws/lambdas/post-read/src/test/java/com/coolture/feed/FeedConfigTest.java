@@ -23,7 +23,7 @@ class FeedConfigTest {
 
     @Test
     void parse_whenAllWeightsGiven_usesThem() {
-        FeedConfig config = FeedConfig.parse("affinity=0.1,proximity=0.2,time=0.3,popularity=0.4,jitter=0,notForMe=0.7,graph=0.5");
+        FeedConfig config = FeedConfig.parse("affinity=0.1,proximity=0.2,time=0.3,popularity=0.4,jitter=0,notForMe=0.7,ppr=0.5");
 
         assertEquals(new FeedConfig(0.1, 0.2, 0.3, 0.4, 0, 0.7, 0.5), config);
     }

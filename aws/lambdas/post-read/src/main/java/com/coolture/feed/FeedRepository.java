@@ -65,14 +65,14 @@ public class FeedRepository {
                 FROM marks m) AS near_mark,
                ST_Distance(el.coordinates,
                            ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters,
-               g.score::float8 AS graph
+               pr.score::float8 AS ppr
         FROM posts p
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
         LEFT JOIN event_locations el ON el.id = p.event_location_id
         CROSS JOIN LATERAL (SELECT CASE WHEN pe.model = ? THEN pe.embedding - ?::vector END AS centred OFFSET 0) c
-        LEFT JOIN rec_graph_scores g ON g.post_id = p.id AND g.user_id = ?::uuid
+        LEFT JOIN rec_ppr_scores pr ON pr.post_id = p.id AND pr.user_id = ?::uuid
          -- The minute covers clock skew between this Lambda and the database, and the commit after a run is marked finished.
-         AND g.run_number = (SELECT run_number FROM rec_graph_runs
+         AND pr.run_number = (SELECT run_number FROM rec_ppr_runs
                              WHERE finished_at <= ?::timestamptz - interval '1 minute' ORDER BY finished_at DESC LIMIT 1)
         WHERE
         """;
@@ -264,7 +264,7 @@ public class FeedRepository {
                         (Double) rs.getObject("similarity"),
                         (Double) rs.getObject("meters"),
                         nearMark((Double) rs.getObject("near_mark")),
-                        (Double) rs.getObject("graph")
+                        (Double) rs.getObject("ppr")
                     ));
                 }
             }

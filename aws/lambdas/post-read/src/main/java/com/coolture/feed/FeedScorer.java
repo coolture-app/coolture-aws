@@ -18,10 +18,10 @@ public final class FeedScorer {
      * Null similarity means no vector for the viewer or the post, or vectors of different models. Null meters means no
      * location or an online post. endsAt is the event's end (its own, or the default length); null means not ended.
      * nearMark is 0 to 1: how far past NOT_FOR_ME_FROM the post is to its closest "Nie dla mnie" mark, that mark's fade
-     * included (FeedRepository). Null graph means no graph score for this viewer and post.
+     * included (FeedRepository). Null ppr means no PageRank score for this viewer and post.
      */
     public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
-                        double nearMark, Double graph) {
+                        double nearMark, Double ppr) {
 
         public Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters) {
             this(id, startsAt, endsAt, engagement, similarity, meters, 0, null);
@@ -35,7 +35,7 @@ public final class FeedScorer {
 
     /** The parts before weighting, kept so that explanations can be added later, and the weighted total. */
     public record Score(double affinity, double notForMe, double proximity, double time, double popularity, double jitter,
-                        double graph,
+                        double ppr,
                         double total) {}
 
     private final FeedConfig config;
@@ -53,17 +53,17 @@ public final class FeedScorer {
         double time = time(facts.startsAt(), facts.endsAt(), asOf);
         double popularity = StrictMath.min(StrictMath.log(1.0 + StrictMath.max(facts.engagement(), 0)) / POPULARITY_SCALE, 1.0);
         double jitter = jitter(facts.id(), seed);
-        // Graph scores are ranks from 0 to 1, so NEUTRAL is their median.
-        double graph = facts.graph() == null ? FeedConfig.NEUTRAL : facts.graph();
+        // PageRank scores are ranks from 0 to 1, so NEUTRAL is their median.
+        double ppr = facts.ppr() == null ? FeedConfig.NEUTRAL : facts.ppr();
 
         double total = config.affinity() * affinity
             + config.proximity() * proximity
             + config.time() * time
             + config.popularity() * popularity
             + config.jitter() * jitter
-            + config.graph() * graph;
+            + config.ppr() * ppr;
 
-        return new Score(affinity, notForMe, proximity, time, popularity, jitter, graph, total);
+        return new Score(affinity, notForMe, proximity, time, popularity, jitter, ppr, total);
     }
 
     /** The penalty comes off before the clamp, as it was measured, so affinity stays within 0 to 1. */

@@ -22,7 +22,7 @@ PYTHON ?= $(if $(filter Windows_NT,$(OS)),python,python3)
 VENV_PY := .venv/$(if $(filter Windows_NT,$(OS)),Scripts/python.exe,bin/python)
 PY_REQUIREMENTS := scraper/requirements-dev.txt aws/lambdas/migrations/requirements-dev.txt \
 	aws/lambdas/authorizer/requirements-dev.txt recommender/embedding-workers/post-embedding/requirements-dev.txt \
-	recommender/graph-signal/requirements-dev.txt
+	recommender/ppr/requirements-dev.txt
 
 # The local Garage keys, the defaults in docker-compose.yml. Without them every upload and photo URL gets a 403.
 GARAGE_ACCESS_KEY_ID ?= GK9f23fc115cfabe3da0a5bcb5
@@ -122,8 +122,8 @@ build: build-common ## Build backend lambdas
 	fi; \
 	sam build --template-file aws/backend.yaml --parallel --cached && echo "$$sum" > .aws-sam/common.sha1
 
-test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding worker, graph signal, migrations, authorizer, geocoder proxy
-	@for dir in recommender/embedding-workers/post-embedding recommender/graph-signal \
+test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding worker, PageRank, migrations, authorizer, geocoder proxy
+	@for dir in recommender/embedding-workers/post-embedding recommender/ppr \
 			aws/lambdas/migrations aws/lambdas/authorizer aws/lambdas/geo-proxy; do \
 		echo "$$dir"; (cd $$dir && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests) || exit 1; \
 	done
@@ -179,13 +179,13 @@ test-db: build-common ## Run the post-read and post-write database tests against
 embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
 	@scripts/embed-posts.sh
 
-# Built on first use, when its image was removed, or when the template or the graph signal's code changed. After
+# Built on first use, when its image was removed, or when the template or the PageRank code changed. After
 # changing post-embedding's code, run make build-embeddings again.
 # Invokes a worker locally with an event, and fails when it returns an error.
 invoke-worker = out="$$(echo '$(2)' | sam local invoke $(1) --template-file $(EMBEDDINGS_TEMPLATE) --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
 
 require-embeddings-build:
-	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ -n "$$(find recommender/embedding-workers/template.yaml recommender/graph-signal/src -type f -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
+	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ -n "$$(find recommender/embedding-workers/template.yaml recommender/ppr/src -type f -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
 		echo "Building the embedding workers. The first build downloads the model into a 3.5 GB image."; \
 		$(MAKE) --no-print-directory build-embeddings; \
 	fi
@@ -193,8 +193,8 @@ require-embeddings-build:
 embed-interests: require-embeddings-build ## Embed interests missing vectors locally
 	@$(call invoke-worker,PostEmbeddingFunction,{"action":"embed-interests"})
 
-graph-signal: require-embeddings-build ## Score every user's events with the graph walk locally (after embed-posts)
-	@$(call invoke-worker,GraphSignalFunction,{})
+ppr: require-embeddings-build ## Score every user's events with personalised PageRank locally (after embed-posts)
+	@$(call invoke-worker,PprFunction,{})
 
 local: build stop-lambdas ## Start local API on localhost:3000 (Ctrl+C stops it; make stop if containers stay)
 	@echo "API: http://localhost:3000"
@@ -216,7 +216,7 @@ deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to
 deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
 	@scripts/deploy.sh dev auth
 
-build-embeddings: ## Build the embedding worker and the graph signal for local runs (x86_64; needs Docker and Python 3.13)
+build-embeddings: ## Build the embedding worker and PageRank for local runs (x86_64; needs Docker and Python 3.13)
 	@sam build --template-file recommender/embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
 deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs mgmt-stack-networking + backend deployed

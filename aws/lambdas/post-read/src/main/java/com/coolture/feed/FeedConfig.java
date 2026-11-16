@@ -9,7 +9,7 @@ import java.util.Map;
  * notForMe is how much affinity a post loses at most for being like what the viewer marked "Nie dla mnie" (FeedScorer).
  */
 public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter, double notForMe,
-                         double graph) {
+                         double ppr) {
 
     public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10, 0.5, 0.10);
 
@@ -73,7 +73,7 @@ public record FeedConfig(double affinity, double proximity, double time, double 
                 "popularity", DEFAULTS.popularity,
                 "jitter", DEFAULTS.jitter,
                 "notForMe", DEFAULTS.notForMe,
-                "graph", DEFAULTS.graph));
+                "ppr", DEFAULTS.ppr));
             for (String entry : raw.split(",")) {
                 String[] pair = entry.split("=", 2);
                 String name = pair[0].trim();
@@ -87,7 +87,7 @@ public record FeedConfig(double affinity, double proximity, double time, double 
                 weights.put(name, value);
             }
             return new FeedConfig(weights.get("affinity"), weights.get("proximity"), weights.get("time"),
-                weights.get("popularity"), weights.get("jitter"), weights.get("notForMe"), weights.get("graph"));
+                weights.get("popularity"), weights.get("jitter"), weights.get("notForMe"), weights.get("ppr"));
         } catch (RuntimeException e) {
             System.err.println("Invalid FEED_WEIGHTS, using the defaults: " + e.getMessage());
             return DEFAULTS;

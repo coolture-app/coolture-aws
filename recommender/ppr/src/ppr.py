@@ -11,6 +11,7 @@ EVENT_NEIGHBOURS = 5
 RESTART = 0.3
 ITERATIONS = 60
 BATCH = 256
+CHUNK = 1024
 
 
 @dataclass(frozen=True)
@@ -47,11 +48,15 @@ def content_edges(inputs: Inputs) -> tuple[list, list]:
     to_interest = [(int(e), int(i)) for e in np.flatnonzero(has_content) for i in nearest[e]]
 
     live = np.flatnonzero(inputs.scorable & has_content)
-    pairs = events[live] @ events[live].T
-    np.fill_diagonal(pairs, -np.inf)
-    k = max(0, min(EVENT_NEIGHBOURS, len(live) - 1))
-    neighbours = np.argsort(-pairs, axis=1)[:, :k]
-    to_event = {tuple(sorted((int(live[a]), int(live[b])))) for a in range(len(live)) for b in neighbours[a]}
+    k = min(EVENT_NEIGHBOURS, len(live) - 1)
+    to_event = set()
+    # In blocks of rows, so memory doesn't grow with the square of the events.
+    for start in range(0, len(live) if k > 0 else 0, CHUNK):
+        rows = np.arange(start, min(start + CHUNK, len(live)))
+        pairs = events[live[rows]] @ events[live].T
+        pairs[np.arange(len(rows)), rows] = -np.inf
+        for row, nearest_events in zip(rows, np.argpartition(pairs, -k, axis=1)[:, -k:]):
+            to_event.update(tuple(sorted((int(live[row]), int(live[b])))) for b in nearest_events)
     return to_interest, sorted(to_event)
 
 

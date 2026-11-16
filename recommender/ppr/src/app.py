@@ -1,14 +1,14 @@
-"""Reads the app's tables, runs the walk for every user, and writes one run of rec_graph_scores."""
+"""Reads the app's tables, runs personalised PageRank for every user, and writes one run of rec_ppr_scores."""
 import logging
 from typing import Any
 
 import numpy as np
 import psycopg
 
-from graph import Inputs, scores
+from ppr import Inputs, scores
 from settings import settings
 
-logger = logging.getLogger("graph-signal")
+logger = logging.getLogger("ppr")
 logger.setLevel(logging.INFO)
 
 # The feed's own rules, from FeedConfig and PostSql. tests/test_feed_constants.py checks they agree.
@@ -22,9 +22,9 @@ EVENT_END = f"COALESCE(p.ends_at, p.starts_at + interval '{DEFAULT_EVENT_HOURS} 
 
 # Runs whose scores landed but which never finished, and runs older than one finished a day ago.
 PRUNE = """
-DELETE FROM rec_graph_runs
+DELETE FROM rec_ppr_runs
 WHERE (finished_at IS NULL AND started_at < now() - interval '1 hour')
-   OR finished_at < (SELECT max(finished_at) FROM rec_graph_runs WHERE finished_at < now() - interval '1 day')
+   OR finished_at < (SELECT max(finished_at) FROM rec_ppr_runs WHERE finished_at < now() - interval '1 day')
 """
 
 
@@ -59,7 +59,7 @@ def load(conn: psycopg.Connection) -> Inputs | None:
            WHERE pe.model = %s AND p.created_at <= now()""", (EMBEDDING_MODEL,)).fetchone()
     # Ended events stay while their stances count, to connect people and places.
     events = conn.execute(
-        f"""SELECT p.id, pe.embedding::real[], {EVENT_END} >= now(), p.author_id, p.visibility,
+        f"""SELECT p.id, pe.embedding::real[], {EVENT_END} >= now(), p.author_id,
                    CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
                         THEN lower(btrim(el.venue_name)) || ' | ' || lower(btrim(coalesce(el.city, ''))) END
             FROM posts p
@@ -92,24 +92,24 @@ def load(conn: psycopg.Connection) -> Inputs | None:
     user_ids = sorted({u for u, _ in picks} | {row[0] for row in stances} | {u for pair in follows for u in pair})
     user_index = {u: j for j, u in enumerate(user_ids)}
 
-    # What the feed never shows a user as new: PostSql's NOT_MINE, VISIBLE and NOT_BLOCKED.
+    # What the feed never shows a user as new: PostSql's NOT_MINE and NOT_BLOCKED.
     hidden: dict[int, set[int]] = {}
     for user, post in reacted:
         if user in user_index and post in event_index:
             hidden.setdefault(user_index[user], set()).add(event_index[post])
-    for e, (_, _, scorable, author, visibility, _) in enumerate(events):
-        if not scorable:
-            continue
-        for user, u in user_index.items():
-            unseen = visibility != "PUBLIC" and not (visibility == "FRIENDS" and (user, author) in following)
-            if user == author or (unseen and user != author) or (user, author) in blocked:
-                hidden.setdefault(u, set()).add(e)
+    by_author: dict[Any, list[int]] = {}
+    for e, (_, _, scorable, author, _) in enumerate(events):
+        if scorable:
+            by_author.setdefault(author, []).append(e)
+    for user, u in user_index.items():
+        for author in {user} | {b for a, b in blocked if a == user}:
+            hidden.setdefault(u, set()).update(by_author.get(author, ()))
 
     return Inputs(
         event_ids=[row[0] for row in events],
         event_vectors=np.array([row[1] for row in events], dtype=float),
         scorable=np.array([row[2] for row in events], dtype=bool),
-        venues=[row[5] for row in events],
+        venues=[row[4] for row in events],
         post_average=np.array(average, dtype=float),
         interest_vectors=np.array([row[1] for row in interests], dtype=float),
         user_ids=user_ids,
@@ -125,12 +125,12 @@ def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
     """The scores land first and the run is marked finished after, so the feed never reads a run half written."""
     rows = 0
     with conn.transaction():
-        (run,) = conn.execute("INSERT INTO rec_graph_runs DEFAULT VALUES RETURNING run_number").fetchone()
-        with conn.cursor().copy("COPY rec_graph_scores (run_number, user_id, post_id, score) FROM STDIN") as copy:
+        (run,) = conn.execute("INSERT INTO rec_ppr_runs DEFAULT VALUES RETURNING run_number").fetchone()
+        with conn.cursor().copy("COPY rec_ppr_scores (run_number, user_id, post_id, score) FROM STDIN") as copy:
             for user, event, score in scores(inputs):
                 copy.write_row((run, inputs.user_ids[user], inputs.event_ids[event], score))
                 rows += 1
-    conn.execute("UPDATE rec_graph_runs SET finished_at = now() WHERE run_number = %s", (run,))
+    conn.execute("UPDATE rec_ppr_runs SET finished_at = now() WHERE run_number = %s", (run,))
     conn.execute(PRUNE)
     return run, rows
 

@@ -32,7 +32,7 @@ Parameters:
   DbPort:
     Type: String
     Default: '5430'
-  GraphScheduleEnabled:
+  PprScheduleEnabled:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
@@ -42,7 +42,7 @@ Parameters:
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
-  GraphScheduleOn: !Equals [!Ref GraphScheduleEnabled, 'true']
+  PprScheduleOn: !Equals [!Ref PprScheduleEnabled, 'true']
 
 Globals:
   Function:
@@ -99,19 +99,19 @@ Resources:
       DockerContext: post-embedding
       DockerTag: python3.13-v1
 
-  GraphSignalLogGroup:
+  PprLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-graph-signal'
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-ppr'
       RetentionInDays: !Ref LogRetentionDays
 
-  GraphSignalFunction:
+  PprFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'coolture-${Environment}-graph-signal'
+      FunctionName: !Sub 'coolture-${Environment}-ppr'
       LoggingConfig:
-        LogGroup: !Ref GraphSignalLogGroup
-      CodeUri: ../graph-signal/src/
+        LogGroup: !Ref PprLogGroup
+      CodeUri: ../ppr/src/
       Handler: app.lambda_handler
       Runtime: python3.13
       MemorySize: 1024
@@ -123,4 +123,4 @@ Resources:
           Type: ScheduleV2
           Properties:
             ScheduleExpression: rate(6 hours)
-            State: !If [GraphScheduleOn, ENABLED, DISABLED]
+            State: !If [PprScheduleOn, ENABLED, DISABLED]
