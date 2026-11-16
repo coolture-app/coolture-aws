@@ -50,6 +50,11 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     public static final int POPULARITY_CAP = 100;
 
     public static final int QUERY_TIMEOUT_SECONDS = 5;
+    /**
+     * A PageRank run counts for a session once it finished this long before asOf: clock skew between this Lambda and the
+     * database, and the commit after a run is stamped finished.
+     */
+    public static final int PPR_RUN_MARGIN_SECONDS = 60;
 
     /** An event with no end time has ended this long after it starts. */
     public static final int DEFAULT_EVENT_HOURS = 3;

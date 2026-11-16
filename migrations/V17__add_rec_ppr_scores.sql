@@ -1,9 +1,9 @@
--- Written by recommender/ppr; see its README. No keys to users or posts: rows are rebuilt every run, and a
+-- Written by recommender/ppr; see recommender/README.md, Personalised PageRank. No keys to users or posts: rows are rebuilt every run, and a
 -- cascade from a user or post delete would scan this table.
 
 CREATE TABLE rec_ppr_runs (
     run_number BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    finished_at TIMESTAMPTZ
+    finished_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 
 CREATE TABLE rec_ppr_scores (

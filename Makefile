@@ -172,9 +172,10 @@ seed: seed-events embed-interests embed-posts seed-reactions seed-friends ppr ##
 
 .NOTPARALLEL: seed
 
-test-db: build-common ## Run the post-read and post-write database tests against `make up`
+test-db: build-common $(VENV_PY) ## Run the post-read, post-write and PageRank database tests against `make up`
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-read/pom.xml -Dtest=PostReadDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-write/pom.xml -Dtest=PostWriteDbTest
+	@cd recommender/ppr && DB_TEST=true "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests/test_app_db.py
 
 embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
 	@scripts/embed-posts.sh
@@ -182,10 +183,13 @@ embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/s
 # sam local invoke exits 0 when the function raises, so the output decides. The payload can't hold a comma.
 invoke-worker = out="$$(echo '$(2)' | sam local invoke $(1) --template-file $(EMBEDDINGS_TEMPLATE) --skip-pull-image --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
 
-# Built on first use, when its image was removed, or when the template or the PageRank code changed. After
-# changing post-embedding's code, run make build-embeddings again.
+# Built on first use, when its image was removed, or when the template or either function's code changed.
+RECOMMENDER_SOURCES := recommender/embedding-workers/template.yaml recommender/embedding-workers/post-embedding/Dockerfile \
+	recommender/embedding-workers/post-embedding/src recommender/ppr/src
 require-embeddings-build:
-	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || [ -n "$$(find recommender/embedding-workers/template.yaml recommender/ppr/src -type f -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
+	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] \
+		|| [ -n "$$(find $(RECOMMENDER_SOURCES) -type f -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] \
+		|| ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
 		echo "Building the embedding worker and PageRank. The first build downloads the model into a 3.5 GB image."; \
 		$(MAKE) --no-print-directory build-embeddings; \
 	fi
@@ -219,7 +223,7 @@ deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
 build-embeddings: ## Build the embedding worker and PageRank for local runs (x86_64; needs Docker and Python 3.13)
 	@sam build --template-file recommender/embedding-workers/template.yaml --build-dir .aws-sam/embeddings
 
-deploy-embeddings: ## Deploy the embedding worker and PageRank to AWS (dev, arm64; PPR_SCHEDULE=true runs PageRank every 6 hours) - needs mgmt-stack-networking + backend deployed
+deploy-embeddings: ## Deploy the embedding worker and PageRank to AWS (dev, arm64; PPR_SCHEDULE=true turns PageRank's schedule on) - needs mgmt-stack-networking + backend deployed
 	@scripts/deploy.sh dev embeddings
 
 deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="auth backend embeddings waf frontend")

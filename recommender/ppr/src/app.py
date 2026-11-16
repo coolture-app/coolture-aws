@@ -1,6 +1,10 @@
 """Reads the app's tables, runs personalised PageRank for every user, and writes one run of rec_ppr_scores."""
 import logging
+import time
+from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any
+from uuid import UUID
 
 import numpy as np
 import psycopg
@@ -20,8 +24,38 @@ DEFAULT_EVENT_HOURS = 3
 
 EVENT_END = f"COALESCE(p.ends_at, p.starts_at + interval '{DEFAULT_EVENT_HOURS} hours')"
 
+POST_AVERAGE = """
+SELECT avg(pe.embedding)::real[]
+FROM post_embeddings pe
+JOIN posts p ON p.id = pe.post_id
+WHERE pe.model = %s AND p.created_at <= now()
+"""
+
+# Ended events stay while their stances count, to connect people and places.
+EVENTS = f"""
+SELECT p.id,
+       pe.embedding::real[] AS vector,
+       {EVENT_END} >= now() AS not_ended,
+       p.author_id,
+       CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
+            THEN lower(btrim(el.venue_name)) || ' | ' || lower(btrim(coalesce(el.city, ''))) END AS venue
+FROM posts p
+JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
+LEFT JOIN event_locations el ON el.id = p.event_location_id
+WHERE p.deleted_at IS NULL AND {EVENT_END} >= now() - make_interval(days => %s)
+ORDER BY p.id
+"""
+
+STANCES = """
+SELECT user_id, post_id, type, floor(extract(epoch FROM now() - created_at) / 86400)::int AS age_days
+FROM (SELECT user_id, post_id, type, created_at FROM post_reactions
+      UNION ALL
+      SELECT user_id, post_id, type, created_at FROM post_participations) s
+WHERE type = ANY(%s) AND created_at > now() - make_interval(days => %s)
+"""
+
 # Runs older than the newest one finished over a day ago, which no session still reads.
-PRUNE = """
+DELETE_OLD_RUNS = """
 DELETE FROM rec_ppr_runs
 WHERE finished_at < (SELECT max(finished_at) FROM rec_ppr_runs WHERE finished_at < now() - interval '1 day')
 """
@@ -51,98 +85,107 @@ def _db_credentials() -> dict[str, str]:
     return {"password": token, "sslmode": "require"}
 
 
+def _positions(items: Sequence) -> dict[Any, int]:
+    return {item: i for i, item in enumerate(items)}
+
+
+def _stance_weight(kind: str, age_days: int) -> float:
+    return STANCE_WEIGHTS[kind] * 0.5 ** (age_days / STANCE_HALF_LIFE_DAYS)
+
+
+def _hidden(user_index: dict[UUID, int], event_index: dict[UUID, int], authors: Sequence[UUID],
+            reacted: list[tuple[UUID, UUID]], blocks: list[tuple[UUID, UUID]]) -> dict[int, set[int]]:
+    """What the feed never shows a user as new: PostSql's NOT_MINE and NOT_BLOCKED."""
+    events_by_author = defaultdict(list)
+    for e, author in enumerate(authors):
+        events_by_author[author].append(e)
+    unseen_authors = defaultdict(set)
+    for a, b in blocks:
+        unseen_authors[a].add(b)
+        unseen_authors[b].add(a)
+
+    hidden = {}
+    for user, u in user_index.items():
+        hidden[u] = {e for author in {user} | unseen_authors[user] for e in events_by_author[author]}
+    for user, post in reacted:
+        if user in user_index and post in event_index:
+            hidden[user_index[user]].add(event_index[post])
+    return hidden
+
+
 def load(conn: psycopg.Connection) -> Inputs | None:
-    """None when there are no post or interest vectors to build a graph from."""
-    (average,) = conn.execute(
-        """SELECT avg(pe.embedding)::real[] FROM post_embeddings pe JOIN posts p ON p.id = pe.post_id
-           WHERE pe.model = %s AND p.created_at <= now()""", (EMBEDDING_MODEL,)).fetchone()
-    # Ended events stay while their stances count, to connect people and places.
-    events = conn.execute(
-        f"""SELECT p.id, pe.embedding::real[], {EVENT_END} >= now(), p.author_id,
-                   CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
-                        THEN lower(btrim(el.venue_name)) || ' | ' || lower(btrim(coalesce(el.city, ''))) END
-            FROM posts p
-            JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
-            LEFT JOIN event_locations el ON el.id = p.event_location_id
-            WHERE p.deleted_at IS NULL AND {EVENT_END} >= now() - make_interval(days => %s)
-            ORDER BY p.id""", (EMBEDDING_MODEL, STANCE_MAX_AGE_DAYS)).fetchall()
+    """None when there are no events or no interests with vectors of EMBEDDING_MODEL."""
+    (average,) = conn.execute(POST_AVERAGE, (EMBEDDING_MODEL,)).fetchone()
+    events = conn.execute(EVENTS, (EMBEDDING_MODEL, STANCE_MAX_AGE_DAYS)).fetchall()
     interests = conn.execute(
         "SELECT interest_key, embedding::real[] FROM interest_embeddings WHERE model = %s ORDER BY interest_key",
         (EMBEDDING_MODEL,)).fetchall()
     if average is None or not events or not interests:
         return None
+    event_ids, event_vectors, not_ended, authors, venues = zip(*events)
+    interest_keys, interest_vectors = zip(*interests)
 
     picks = conn.execute("SELECT user_id, interest_key FROM user_interests").fetchall()
-    stances = conn.execute(
-        """SELECT user_id, post_id, type, floor(extract(epoch FROM now() - created_at) / 86400)
-           FROM (SELECT user_id, post_id, type, created_at FROM post_reactions
-                 UNION ALL SELECT user_id, post_id, type, created_at FROM post_participations) s
-           WHERE type = ANY(%s) AND created_at > now() - make_interval(days => %s)""",
-        (list(STANCE_WEIGHTS), STANCE_MAX_AGE_DAYS)).fetchall()
+    stances = conn.execute(STANCES, (list(STANCE_WEIGHTS), STANCE_MAX_AGE_DAYS)).fetchall()
     relations = conn.execute("SELECT source_user_id, target_user_id, type FROM user_relations").fetchall()
     sharing = {u for (u,) in conn.execute("SELECT id FROM users WHERE share_stances")}
     reacted = conn.execute(
         "SELECT user_id, post_id FROM post_reactions UNION SELECT user_id, post_id FROM post_participations").fetchall()
 
-    following = {(a, b) for a, b, t in relations if t == "FOLLOW"}
-    blocked = {pair for a, b, t in relations if t == "BLOCK" for pair in ((a, b), (b, a))}
+    following = {(a, b) for a, b, kind in relations if kind == "FOLLOW"}
+    blocks = [(a, b) for a, b, kind in relations if kind == "BLOCK"]
     # Only to friends who share their stances, the people whose stances the cards show: a one-way follow must not
-    # reveal where someone goes.
-    follows = sorted((a, b) for a, b in following if (b, a) in following and b in sharing and (a, b) not in blocked)
-    event_index = {row[0]: e for e, row in enumerate(events)}
-    interest_index = {row[0]: i for i, row in enumerate(interests)}
-    user_ids = sorted({u for u, _ in picks} | {row[0] for row in stances} | {u for pair in follows for u in pair})
-    user_index = {u: j for j, u in enumerate(user_ids)}
+    # reveal where someone goes. A block replaces the blocker's follow, so friends never block each other.
+    follows = sorted((a, b) for a, b in following if (b, a) in following and b in sharing)
 
-    # What the feed never shows a user as new: PostSql's NOT_MINE and NOT_BLOCKED.
-    hidden: dict[int, set[int]] = {}
-    for user, post in reacted:
-        if user in user_index and post in event_index:
-            hidden.setdefault(user_index[user], set()).add(event_index[post])
-    by_author: dict[Any, list[int]] = {}
-    for e, (_, _, scorable, author, _) in enumerate(events):
-        if scorable:
-            by_author.setdefault(author, []).append(e)
-    for user, u in user_index.items():
-        for author in {user} | {b for a, b in blocked if a == user}:
-            hidden.setdefault(u, set()).update(by_author.get(author, ()))
+    event_index = _positions(event_ids)
+    interest_index = _positions(interest_keys)
+    user_ids = sorted({u for u, _ in picks} | {u for u, _, _, _ in stances} | {u for pair in follows for u in pair})
+    user_index = _positions(user_ids)
 
     return Inputs(
-        event_ids=[row[0] for row in events],
-        event_vectors=np.array([row[1] for row in events], dtype=float),
-        scorable=np.array([row[2] for row in events], dtype=bool),
-        venues=[row[4] for row in events],
+        event_ids=list(event_ids),
+        event_vectors=np.array(event_vectors, dtype=float),
+        not_ended=np.array(not_ended, dtype=bool),
+        venues=list(venues),
         post_average=np.array(average, dtype=float),
-        interest_vectors=np.array([row[1] for row in interests], dtype=float),
+        interest_vectors=np.array(interest_vectors, dtype=float),
         user_ids=user_ids,
         picks=[(user_index[u], interest_index[k]) for u, k in picks if k in interest_index],
-        stances=[(user_index[u], event_index[p], STANCE_WEIGHTS[t] * 0.5 ** (float(age) / STANCE_HALF_LIFE_DAYS))
-                 for u, p, t, age in stances if p in event_index],
+        stances=[(user_index[u], event_index[p], _stance_weight(kind, age_days))
+                 for u, p, kind, age_days in stances if p in event_index],
         follows=[(user_index[a], user_index[b]) for a, b in follows],
-        hidden=hidden,
+        hidden=_hidden(user_index, event_index, authors, reacted, blocks),
     )
 
 
 def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
+    """Scores while it copies, so the rows never all sit in memory."""
+    # Before the run's transaction, which then ends right after the run is stamped finished.
+    conn.execute(DELETE_OLD_RUNS)
     rows = 0
     with conn.transaction():
         (run,) = conn.execute("INSERT INTO rec_ppr_runs DEFAULT VALUES RETURNING run_number").fetchone()
-        with conn.cursor().copy("COPY rec_ppr_scores (run_number, user_id, post_id, score) FROM STDIN") as copy:
-            for user, event, score in scores(inputs):
-                copy.write_row((run, inputs.user_ids[user], inputs.event_ids[event], score))
-                rows += 1
+        with conn.cursor() as cursor:
+            with cursor.copy("COPY rec_ppr_scores (run_number, user_id, post_id, score) FROM STDIN") as copy:
+                for user, event, score in scores(inputs):
+                    copy.write_row((run, inputs.user_ids[user], inputs.event_ids[event], score))
+                    rows += 1
         # Not now(), which is when the transaction began, before the scores were written.
         conn.execute("UPDATE rec_ppr_runs SET finished_at = clock_timestamp() WHERE run_number = %s", (run,))
-        conn.execute(PRUNE)
     return run, rows
 
 
 def lambda_handler(_event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    started = time.monotonic()
     with _connect() as conn:
         inputs = load(conn)
         if inputs is None:
-            logger.info("no post or interest vectors of %s yet, nothing to score", EMBEDDING_MODEL)
+            logger.info("nothing to score: no events or no interests with %s vectors", EMBEDDING_MODEL)
             return {"run": None, "rows": 0}
+        loaded = time.monotonic()
+        logger.info("loaded %d events (%d not ended), %d interests, %d users in %.1f s", len(inputs.event_ids),
+                    inputs.not_ended.sum(), len(inputs.interest_vectors), len(inputs.user_ids), loaded - started)
         run, rows = write(conn, inputs)
-    logger.info("run %s: %d events, %d users, %d rows", run, len(inputs.event_ids), len(inputs.user_ids), rows)
+    logger.info("run %s: %d rows, scored and written in %.1f s", run, rows, time.monotonic() - loaded)
     return {"run": run, "rows": rows}

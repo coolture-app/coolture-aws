@@ -27,7 +27,7 @@ def inputs(**kw):
     base = dict(
         event_ids=[f"e{i}" for i in range(N)],
         event_vectors=EVENTS,
-        scorable=np.ones(N, dtype=bool),
+        not_ended=np.ones(N, dtype=bool),
         venues=[None] * N,
         post_average=EVENTS.mean(axis=0),
         interest_vectors=INTERESTS,
@@ -58,9 +58,9 @@ def test_scores_are_ranks_from_0_to_1():
 
 
 def test_hidden_and_ended_events_get_no_score():
-    scorable = np.ones(N, dtype=bool)
-    scorable[5] = False
-    got = by_event(scores(inputs(picks=[(0, 0)], scorable=scorable, hidden={0: {1}})))
+    not_ended = np.ones(N, dtype=bool)
+    not_ended[5] = False
+    got = by_event(scores(inputs(picks=[(0, 0)], not_ended=not_ended, hidden={0: {1}})))
     assert set(got) == set(range(N)) - {1, 5}
 
 
@@ -101,14 +101,14 @@ def test_a_venue_links_its_events():
 def test_batches_give_the_same_scores(monkeypatch):
     many = inputs(user_ids=["u0", "u1", "u2"], picks=[(0, 0), (1, 2), (2, 4)])
     whole = sorted(scores(many))
-    monkeypatch.setattr(ppr, "BATCH", 1)
+    monkeypatch.setattr(ppr, "USERS_PER_BATCH", 1)
     assert sorted(scores(many)) == whole
 
 
 def test_ended_events_have_no_event_neighbours():
-    scorable = np.ones(N, dtype=bool)
-    scorable[list(group(0))] = False
-    _, to_event = content_edges(inputs(scorable=scorable))
+    not_ended = np.ones(N, dtype=bool)
+    not_ended[list(group(0))] = False
+    _, to_event = content_edges(inputs(not_ended=not_ended))
     assert not any(e in group(0) or f in group(0) for e, f in to_event)
 
 
@@ -120,7 +120,7 @@ def test_an_event_equal_to_the_average_post_gets_no_content_edges():
 
 
 def test_a_single_event_still_links_to_interests():
-    single = inputs(event_ids=["e0"], event_vectors=EVENTS[:1], scorable=np.ones(1, dtype=bool), venues=[None])
+    single = inputs(event_ids=["e0"], event_vectors=EVENTS[:1], not_ended=np.ones(1, dtype=bool), venues=[None])
     to_interest, to_event = content_edges(single)
     assert to_interest and not to_event
 
@@ -128,7 +128,7 @@ def test_a_single_event_still_links_to_interests():
 @pytest.mark.parametrize("chunk", [1, 5, 7])
 def test_event_neighbours_dont_depend_on_the_chunk_size(monkeypatch, chunk):
     whole = content_edges(inputs())
-    monkeypatch.setattr(ppr, "CHUNK", chunk)
+    monkeypatch.setattr(ppr, "EVENTS_PER_BLOCK", chunk)
     assert content_edges(inputs()) == whole
 
 
@@ -138,7 +138,7 @@ def test_the_walk_is_personalised_pagerank():
     p = a / np.maximum(a.sum(axis=1, keepdims=True), 1)
     seed = np.zeros(len(a))
     seed[len(a) - 2] = 1
-    exact = np.linalg.solve(np.eye(len(a)) - (1 - ppr.RESTART) * p.T, ppr.RESTART * seed)[:N]
+    exact = np.linalg.solve(np.eye(len(a)) - (1 - ppr.RESTART_PROBABILITY) * p.T, ppr.RESTART_PROBABILITY * seed)[:N]
     got = by_event(scores(many))
     assert sorted(got, key=got.get) == sorted(range(N), key=lambda e: exact[e])
 

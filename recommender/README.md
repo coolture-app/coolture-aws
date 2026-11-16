@@ -46,7 +46,7 @@ make embed-posts ALL=1               # every post that isn't deleted
 make embed-posts DRY_RUN=1           # print the SQS/S3 events it would send
 ```
 
-They build the worker on first use (`make build-embeddings`; run it again after changing it). `embed-posts`
+They build the worker on first use, and again when its code or the template changed (`make build-embeddings`). `embed-posts`
 (`scripts/embed-posts.sh`) wraps posts in the same events AWS delivers, 50 per invocation (`BATCH_SIZE=`), and exits
 non-zero if any fails. `make test-python` runs the worker's unit tests.
 
@@ -57,7 +57,7 @@ Vectors of different models are never compared: the feed builds the viewer's vec
 `FeedConfig.EMBEDDING_MODEL` only, and gives a post of another model a neutral affinity of `0.5`, as for a post with no
 vector.
 
-1. Set the model in the `Dockerfile`, in `post-embedding/src/settings.py` and in `FeedConfig.EMBEDDING_MODEL`
+1. Set the model in the `Dockerfile`, in `post-embedding/src/settings.py`, in `ppr/src/app.py` and in `FeedConfig.EMBEDDING_MODEL`
    (`test_model_name.py` checks they agree). Keep it 768-dimensional, or add a migration for the vector columns.
 2. Re-embed interests, then posts.
 3. Measure `AFFINITY_LOW` and `AFFINITY_HIGH` in `FeedConfig` again. They cover the cosines this model gives between
@@ -136,7 +136,7 @@ a day ago.
 
 ```bash
 make ppr                           # one run locally; make seed ends with it
-DB_TEST=true make test-python      # with its database tests, after make seed
+make test-db                       # its database tests, with the others, after make seed
 ```
 
 On AWS it runs on a schedule once deployed with `PPR_SCHEDULE=true make deploy-embeddings`, and keeps that setting on

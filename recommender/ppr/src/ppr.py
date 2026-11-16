@@ -1,6 +1,7 @@
 """Personalised PageRank over users, events, venues and interests. No I/O."""
 from collections.abc import Iterator
 from dataclasses import dataclass
+from uuid import UUID
 
 import numpy as np
 from scipy import sparse
@@ -8,115 +9,139 @@ from scipy.stats import rankdata
 
 INTERESTS_PER_EVENT = 2
 EVENT_NEIGHBOURS = 5
-RESTART = 0.3
+RESTART_PROBABILITY = 0.3
+# (1 - RESTART_PROBABILITY) ** ITERATIONS < 1e-9: what the walk would still move is too little to swap two ranks.
 ITERATIONS = 60
-BATCH = 256
-CHUNK = 1024
+USERS_PER_BATCH = 256
+EVENTS_PER_BLOCK = 1024
+
+Pairs = list[tuple[int, int]]
 
 
 @dataclass(frozen=True)
 class Inputs:
-    """Indices are positions in the lists. Vectors are one model's, unit length. Only scorable events get scores."""
+    """Users, events and interests are numbered by their position in user_ids, event_ids and interest_vectors.
+    Vectors are one model's, unit length. Only events that haven't ended get scores."""
 
-    event_ids: list
+    event_ids: list[UUID]
     event_vectors: np.ndarray
-    scorable: np.ndarray
-    venues: list
+    not_ended: np.ndarray
+    venues: list[str | None]
     post_average: np.ndarray
     interest_vectors: np.ndarray
-    user_ids: list
-    picks: list
-    stances: list
-    follows: list
-    hidden: dict
+    user_ids: list[UUID]
+    picks: Pairs  # (user, interest)
+    stances: list[tuple[int, int, float]]  # (user, event, weight)
+    follows: Pairs  # (follower, followed)
+    hidden: dict[int, set[int]]  # user: events the feed never shows them as new
 
 
-def centred(vectors: np.ndarray, average: np.ndarray) -> np.ndarray:
+def centred_and_normalised(vectors: np.ndarray, average: np.ndarray) -> np.ndarray:
     out = vectors - average
     lengths = np.linalg.norm(out, axis=1, keepdims=True)
     lengths[lengths == 0] = 1
     return out / lengths
 
 
-def content_edges(inputs: Inputs) -> tuple[list, list]:
-    """By rank, not by a cosine threshold: the model's cosines sit in a narrow band. Event–event edges join scorable
-    events only, as measured; ended ones keep their other edges. An event equal to the average post has no content."""
-    events = centred(inputs.event_vectors, inputs.post_average)
-    interests = centred(inputs.interest_vectors, inputs.interest_vectors.mean(axis=0))
+def content_edges(inputs: Inputs) -> tuple[Pairs, Pairs]:
+    """(event, interest) and (event, event) pairs, from the vectors. An event equal to the average post has none."""
+    events = centred_and_normalised(inputs.event_vectors, inputs.post_average)
+    interests = centred_and_normalised(inputs.interest_vectors, inputs.interest_vectors.mean(axis=0))
     has_content = events.any(axis=1)
-    nearest = np.argsort(-(events @ interests.T), axis=1)[:, :INTERESTS_PER_EVENT]
-    to_interest = [(int(e), int(i)) for e in np.flatnonzero(has_content) for i in nearest[e]]
+    return (nearest_interests(events, interests, np.flatnonzero(has_content)),
+            nearest_events(events, np.flatnonzero(inputs.not_ended & has_content)))
 
-    live = np.flatnonzero(inputs.scorable & has_content)
-    k = min(EVENT_NEIGHBOURS, len(live) - 1)
+
+def nearest_interests(events: np.ndarray, interests: np.ndarray, linked: np.ndarray) -> Pairs:
+    """By rank, not by a cosine threshold: the model's cosines sit in a narrow band."""
+    nearest = np.argsort(-(events @ interests.T), axis=1)[:, :INTERESTS_PER_EVENT]
+    return [(int(e), int(i)) for e in linked for i in nearest[e]]
+
+
+def nearest_events(events: np.ndarray, linked: np.ndarray) -> Pairs:
+    """Only among events that haven't ended, as measured; ended ones keep their other edges. Each pair once."""
+    k = min(EVENT_NEIGHBOURS, len(linked) - 1)
     if k < 1:
-        return to_interest, []
-    to_event = set()
+        return []
+    pairs = set()
     # In blocks of rows, so memory doesn't grow with the square of the events.
-    for start in range(0, len(live), CHUNK):
-        rows = np.arange(start, min(start + CHUNK, len(live)))
-        pairs = events[live[rows]] @ events[live].T
-        pairs[np.arange(len(rows)), rows] = -np.inf
-        for row, nearest_events in zip(rows, np.argpartition(pairs, -k, axis=1)[:, -k:]):
-            to_event.update(tuple(sorted((int(live[row]), int(live[b])))) for b in nearest_events)
-    return to_interest, sorted(to_event)
+    for start in range(0, len(linked), EVENTS_PER_BLOCK):
+        block = np.arange(start, min(start + EVENTS_PER_BLOCK, len(linked)))
+        similarity = events[linked[block]] @ events[linked].T
+        similarity[np.arange(len(block)), block] = -np.inf  # an event isn't its own neighbour
+        for row, neighbours in zip(block, np.argpartition(similarity, -k, axis=1)[:, -k:]):
+            pairs.update(tuple(sorted((int(linked[row]), int(linked[n])))) for n in neighbours)
+    return sorted(pairs)
 
 
 def adjacency(inputs: Inputs) -> sparse.csr_matrix:
-    n_events, n_interests = len(inputs.event_ids), len(inputs.interest_vectors)
-    venue_index = {v: j for j, v in enumerate(sorted({v for v in inputs.venues if v}))}
-    interest_at, venue_at = n_events, n_events + n_interests
-    user_at = venue_at + len(venue_index)
-    size = user_at + len(inputs.user_ids)
-    rows, cols, vals = [], [], []
+    """Nodes are the events, then the interests, the venues, and last the users."""
+    venue_names = sorted({v for v in inputs.venues if v})
+    venue_index = {name: j for j, name in enumerate(venue_names)}
+    first_interest = len(inputs.event_ids)
+    first_venue = first_interest + len(inputs.interest_vectors)
+    first_user = first_venue + len(venue_names)
+    size = first_user + len(inputs.user_ids)
+    sources, targets, weights = [], [], []
 
-    def edge(a, b, weight=1.0, both=True):
-        rows.append(a)
-        cols.append(b)
-        vals.append(weight)
-        if both:
-            edge(b, a, weight, both=False)
+    def add_one_way(a, b, weight=1.0):
+        sources.append(a)
+        targets.append(b)
+        weights.append(weight)
+
+    def add_both_ways(a, b, weight=1.0):
+        add_one_way(a, b, weight)
+        add_one_way(b, a, weight)
 
     for e, venue in enumerate(inputs.venues):
         if venue:
-            edge(e, venue_at + venue_index[venue])
-    to_interest, to_event = content_edges(inputs)
-    for e, i in to_interest:
-        edge(e, interest_at + i)
-    for e, f in to_event:
-        edge(e, f)
+            add_both_ways(e, first_venue + venue_index[venue])
+    event_interest, event_event = content_edges(inputs)
+    for e, i in event_interest:
+        add_both_ways(e, first_interest + i)
+    for e, other in event_event:
+        add_both_ways(e, other)
     for u, i in inputs.picks:
-        edge(user_at + u, interest_at + i)
+        add_both_ways(first_user + u, first_interest + i)
     for u, e, weight in inputs.stances:
-        edge(user_at + u, e, weight)
+        add_both_ways(first_user + u, e, weight)
     for follower, followed in inputs.follows:
-        edge(user_at + follower, user_at + followed, both=False)
-    return sparse.csr_matrix((vals, (rows, cols)), shape=(size, size))
+        add_one_way(first_user + follower, first_user + followed)
+    return sparse.csr_matrix((weights, (sources, targets)), shape=(size, size))
+
+
+def walk(step: sparse.csr_matrix, seed: np.ndarray) -> np.ndarray:
+    mass = seed.copy()
+    for _ in range(ITERATIONS):
+        mass = RESTART_PROBABILITY * seed + (1 - RESTART_PROBABILITY) * (step @ mass)
+    return mass
+
+
+def candidates(inputs: Inputs, user: int) -> np.ndarray:
+    allowed = inputs.not_ended.copy()
+    allowed[list(inputs.hidden.get(user, ()))] = False
+    return np.flatnonzero(allowed)
 
 
 def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
     """(user, event, score): the walk's mass ranked among the user's candidates, 0 to 1. A user whose walk can't tell
-    them apart gets no rows, which the feed reads as 0.5 for all."""
-    a = adjacency(inputs)
-    user_at = a.shape[0] - len(inputs.user_ids)
-    degree = np.asarray(a.sum(axis=1)).ravel()
-    walkers = [u for u in range(len(inputs.user_ids)) if degree[user_at + u] > 0]
-    degree[degree == 0] = 1
-    step = (sparse.diags(1 / degree) @ a).T.tocsr()
+    them apart gets no rows, which the feed reads as NEUTRAL for all."""
+    graph = adjacency(inputs)
+    first_user = graph.shape[0] - len(inputs.user_ids)
+    out_weight = np.asarray(graph.sum(axis=1)).ravel()
+    users_with_edges = [u for u in range(len(inputs.user_ids)) if out_weight[first_user + u] > 0]
+    out_weight[out_weight == 0] = 1
+    step = (sparse.diags(1 / out_weight) @ graph).T.tocsr()
 
-    for start in range(0, len(walkers), BATCH):
-        batch = walkers[start:start + BATCH]
-        seed = np.zeros((a.shape[0], len(batch)))
-        seed[[user_at + u for u in batch], range(len(batch))] = 1
-        mass = seed.copy()
-        for _ in range(ITERATIONS):
-            mass = RESTART * seed + (1 - RESTART) * (step @ mass)
+    for start in range(0, len(users_with_edges), USERS_PER_BATCH):
+        batch = users_with_edges[start:start + USERS_PER_BATCH]
+        seed = np.zeros((graph.shape[0], len(batch)))
+        seed[[first_user + u for u in batch], range(len(batch))] = 1
+        mass = walk(step, seed)
         for column, u in enumerate(batch):
-            allowed = inputs.scorable.copy()
-            allowed[list(inputs.hidden.get(u, ()))] = False
-            candidates = np.flatnonzero(allowed)
-            values = mass[candidates, column]
-            if len(candidates) < 2 or np.ptp(values) == 0:
+            events = candidates(inputs, u)
+            values = mass[events, column]
+            if len(events) < 2 or values.min() == values.max():
                 continue
-            ranked = (rankdata(values) - 1) / (len(candidates) - 1)
-            yield from ((u, int(e), float(s)) for e, s in zip(candidates, ranked))
+            ranks = (rankdata(values) - 1) / (len(events) - 1)
+            yield from ((u, int(e), float(r)) for e, r in zip(events, ranks))

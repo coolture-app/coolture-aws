@@ -296,7 +296,7 @@ class PostReadDbTest {
     void aPostCountsInterestedAndGoingApart_onItsPageAndItsCard() throws SQLException {
         UUID post = postTitled("walk_3");
         try {
-            writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'INTERESTED', now())", post);
+            writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'INTERESTED', now())", post, ME);
             PostDetailDto page = postRepository.findById(post, ME).orElseThrow();
             PostCardDto card = postRepository.findFeed(searching("walk_3"), PostSort.RECENT, ME, null, 10).stream()
                 .filter(c -> c.id().equals(post)).findFirst().orElseThrow();
@@ -321,21 +321,7 @@ class PostReadDbTest {
     }
 
     /** As the app's role, because the tests read as the read-only one. */
-    private static void writeAsTheApp(String sql, UUID post) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute("RESET ROLE");
-            try (PreparedStatement write = conn.prepareStatement(sql)) {
-                write.setObject(1, post);
-                write.setObject(2, ME);
-                write.executeUpdate();
-            } finally {
-                stmt.execute("SET ROLE coolture_reader");
-            }
-        }
-    }
-
-    /** As the admin role, which writes what the PageRank job writes. Returns the first column of a returned row, else 0. */
-    private static long asAdmin(String sql, Object... params) throws SQLException {
+    private static long writeAsTheApp(String sql, Object... params) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("RESET ROLE");
             try (PreparedStatement write = conn.prepareStatement(sql)) {
@@ -364,18 +350,18 @@ class PostReadDbTest {
         String run = "INSERT INTO rec_ppr_runs (finished_at) VALUES (?) RETURNING run_number";
         String score = "INSERT INTO rec_ppr_scores (run_number, user_id, post_id, score) VALUES (?, ?, ?, ?)";
         // The later run is made first, so the latest isn't simply the highest number.
-        long later = asAdmin(run, Timestamp.from(base.plus(Duration.ofHours(1))));
-        long earlier = asAdmin(run, Timestamp.from(base.minus(Duration.ofHours(1))));
-        asAdmin(score, later, ME, post, 0.75);
-        asAdmin(score, earlier, ME, post, 0.25);
-        asAdmin(score, earlier, UUID.fromString("a0000000-0000-0000-0000-000000000002"), commented, 0.9);
+        long later = writeAsTheApp(run, Timestamp.from(base.plus(Duration.ofHours(1))));
+        long earlier = writeAsTheApp(run, Timestamp.from(base.minus(Duration.ofHours(1))));
+        writeAsTheApp(score, later, ME, post, 0.75);
+        writeAsTheApp(score, earlier, ME, post, 0.25);
+        writeAsTheApp(score, earlier, UUID.fromString("a0000000-0000-0000-0000-000000000002"), commented, 0.9);
         try {
             assertEquals(0.25, pprOf(post, base), 1e-6);
             assertEquals(0.25, pprOf(post, base.plus(Duration.ofHours(1)).plusSeconds(30)), 1e-6);
             assertEquals(0.75, pprOf(post, base.plus(Duration.ofHours(2))), 1e-6);
             assertNull(pprOf(commented, base), "another user's score");
         } finally {
-            asAdmin("DELETE FROM rec_ppr_runs WHERE run_number IN (?, ?)", earlier, later);
+            writeAsTheApp("DELETE FROM rec_ppr_runs WHERE run_number IN (?, ?)", earlier, later);
         }
     }
 
@@ -384,21 +370,21 @@ class PostReadDbTest {
     }
 
     private static void like(UUID post) throws SQLException {
-        writeAsTheApp("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (?, ?, 'LIKE', now())", post);
+        writeAsTheApp("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (?, ?, 'LIKE', now())", post, ME);
     }
 
     private static void unlike(UUID post) throws SQLException {
-        writeAsTheApp("DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?", post);
+        writeAsTheApp("DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?", post, ME);
     }
 
     /** "Nie dla mnie" at the given SQL time. */
     private static void mark(UUID post, String createdAt) throws SQLException {
         writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'NOT_INTERESTED', "
-            + createdAt + ")", post);
+            + createdAt + ")", post, ME);
     }
 
     private static void unmark(UUID post) throws SQLException {
-        writeAsTheApp("DELETE FROM post_participations WHERE post_id = ? AND user_id = ?", post);
+        writeAsTheApp("DELETE FROM post_participations WHERE post_id = ? AND user_id = ?", post, ME);
     }
 
     private double nearMark(UUID post, Instant asOf) throws SQLException {

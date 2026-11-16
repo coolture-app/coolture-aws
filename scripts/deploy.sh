@@ -13,7 +13,7 @@ Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (def
 Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url),
   FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack),
   SCRAPER_SCHEDULE=true|false and SCRAPER_END_DATE=2027-06-30T00:00:00Z (both keep their deployed values when unset),
-  PPR_SCHEDULE=true|false (runs PageRank every 6 hours; keeps its deployed value when unset)
+  PPR_SCHEDULE=true|false (PageRank's schedule; keeps its deployed value when unset)
 EOF
 }
 
@@ -109,9 +109,9 @@ overrides_for() {
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\""
             ;;
         embeddings)
-            local ppr
-            ppr="${PPR_SCHEDULE:-$(stack_param embeddings PprScheduleEnabled 2> /dev/null || true)}"
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT PprScheduleEnabled=${ppr:-false}"
+            local enabled
+            enabled="${PPR_SCHEDULE:-$(stack_param embeddings PprScheduleEnabled 2> /dev/null || true)}"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT PprScheduleEnabled=${enabled:-false}"
             ;;
         geocoder)
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK CloudFrontPrefixListId=$(cloudfront_prefix_list)"

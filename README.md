@@ -1,7 +1,7 @@
 # Coolture backend
 
 The API, database, photo storage, recommender and event scraper of Coolture: Java Lambdas behind API Gateway, PostgreSQL
-(Aurora on AWS), S3, and a Python worker that embeds posts and interests for the feed. The web app is
+(Aurora on AWS), S3, and Python functions that embed posts and interests and score events with PageRank for the feed. The web app is
 [coolture-frontend](https://github.com/coolture-app/coolture-frontend).
 
 ## Run locally
