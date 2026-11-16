@@ -105,12 +105,7 @@ public class UserService {
     }
 
     public UserProfileDto update(UUID targetId, UUID callerId, UserProfileUpdateRequest request) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
-        if (!targetId.equals(callerId)) {
-            throw new SecurityException("You can only update your own profile");
-        }
+        requireSelf(targetId, callerId, "You can only update your own profile");
         if (request.username() != null && request.username().length() > 32) {
             throw new IllegalArgumentException("Username must not exceed 32 characters");
         }
@@ -127,12 +122,7 @@ public class UserService {
     }
 
     public ProfileImageResponse setProfileImage(UUID targetId, UUID callerId, SetProfileImageRequest request) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
-        if (!targetId.equals(callerId)) {
-            throw new SecurityException("You can only manage your own profile image");
-        }
+        requireSelf(targetId, callerId, "You can only manage your own profile image");
 
         userRepository.validateMediaOwnedAndNotDeleted(request.fullMediaId(), targetId);
         userRepository.validateMediaOwnedAndNotDeleted(request.thumbnailMediaId(), targetId);
@@ -144,12 +134,7 @@ public class UserService {
     }
 
     public void removeProfileImage(UUID targetId, UUID callerId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
-        if (!targetId.equals(callerId)) {
-            throw new SecurityException("You can only manage your own profile image");
-        }
+        requireSelf(targetId, callerId, "You can only manage your own profile image");
 
         userRepository.deactivateProfileImages(targetId, Instant.now());
     }

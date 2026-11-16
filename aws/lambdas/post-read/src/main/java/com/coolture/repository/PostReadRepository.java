@@ -33,7 +33,6 @@ public class PostReadRepository {
     /** Enough for three lines of the map's preview, so a pin's preview needs no request of its own. */
     static final int EXCERPT_CHARS = 200;
 
-
     public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit) throws SQLException {
         // UPCOMING never shows an ended event. The other sorts hide only long-ended ones, and can show those too.
         boolean upcoming = sort == PostSort.UPCOMING;
@@ -194,9 +193,9 @@ public class PostReadRepository {
         boolean hidesMine = excludeMine && callerId != null;
         String sql = """
             SELECT p.id, p.title, p.starts_at, p.ends_at, p.positive_reaction_count,
-                   stances.interested, stances.going,
-                   left(regexp_replace(btrim(coalesce(p.description, '')), '\\s+', ' ', 'g'), """ + EXCERPT_CHARS + """
-                   ) AS excerpt,
+                   stances.interested_count, stances.going_count,
+                   NULLIF(left(regexp_replace(btrim(p.description), '\\s+', ' ', 'g'), """ + EXCERPT_CHARS + """
+                   ), '') AS excerpt,
                    ST_Y(el.coordinates::geometry) AS latitude,
                    ST_X(el.coordinates::geometry) AS longitude,
                    cover_m.object_key AS cover_url,
@@ -213,13 +212,7 @@ public class PostReadRepository {
                 ORDER BY pm.position ASC
                 LIMIT 1
             ) cover_m ON true
-            LEFT JOIN LATERAL (
-                -- posts.participant_count adds the two together, and the preview shows them apart.
-                SELECT count(*) FILTER (WHERE pp.type = 'INTERESTED') AS interested,
-                       count(*) FILTER (WHERE pp.type = 'TAKES_PART') AS going
-                FROM post_participations pp
-                WHERE pp.post_id = p.id
-            ) stances ON true
+            """ + StanceCounts.JOIN + """
             LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid
             LEFT JOIN post_participations pp_my ON pp_my.post_id = p.id AND pp_my.user_id = ?::uuid
             WHERE p.deleted_at IS NULL
@@ -274,10 +267,10 @@ public class PostReadRepository {
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
                         MediaUrls.presign(rs.getString("cover_url")),
-                        blankToNull(rs.getString("excerpt")),
+                        rs.getString("excerpt"),
                         rs.getInt("positive_reaction_count"),
-                        rs.getInt("interested"),
-                        rs.getInt("going"),
+                        rs.getInt("interested_count"),
+                        rs.getInt("going_count"),
                         new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
                         rs.getString("venue_name"),
                         rs.getString("city"),
@@ -297,10 +290,5 @@ public class PostReadRepository {
             list.add(mapPostCard(rs));
         }
         return list;
-    }
-
-
-    private static String blankToNull(String text) {
-        return text == null || text.isEmpty() ? null : text;
     }
 }
