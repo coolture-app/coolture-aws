@@ -139,9 +139,10 @@ class ContractTest {
     @Test
     void postMap_matches() throws Exception {
         when(posts.getMapMarks(any(), any(), any(), anyBoolean())).thenReturn(List.of(
-            new PostMarkDto(UUID.randomUUID(), "Koncert", "Opis", "http://localhost/c.png", 3, new GeoPointDto(54.35, 18.65),
-                "Hala", "Gdańsk"),
-            new PostMarkDto(UUID.randomUUID(), "Koncert", null, null, 0, new GeoPointDto(54.35, 18.65), null, null)));
+            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"),
+                Instant.parse("2026-12-01T21:00:00Z"), "http://localhost/c.png", "Koncert w hali.", 3, 7, 5, new GeoPointDto(54.35, 18.65),
+                "Hala", "Gdańsk", ReactionType.LIKE, ParticipationType.INTERESTED),
+            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"), null, null, null, 0, 0, 0, new GeoPointDto(54.35, 18.65), null, null, null, null)));
 
         assertMatches(responseReport("/posts/map", ApiGatewayEvents.get("/posts/map", Map.of(
             "leftUpper.latitude", "54.5", "leftUpper.longitude", "18.0",

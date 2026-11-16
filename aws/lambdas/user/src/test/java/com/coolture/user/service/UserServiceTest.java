@@ -1,11 +1,13 @@
 package com.coolture.user.service;
 
+import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.UserProfileDto;
 import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.storage.S3StorageService;
+import com.coolture.user.dto.HomeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
@@ -36,6 +38,35 @@ class UserServiceTest {
     private static final UUID CALLER_ID = UUID.randomUUID();
     private static final UUID FULL_ID = UUID.randomUUID();
     private static final UUID THUMBNAIL_ID = UUID.randomUUID();
+
+    @Test
+    void setHome_storesTheTrimmedName_andRoundsToAboutAKilometre() throws SQLException {
+        when(repository.setHome(eq(USER_ID), any())).thenReturn(true);
+
+        HomeDto stored = service.setHome(USER_ID, USER_ID, new HomeDto("  Oliwa, Gdańsk ", new GeoPointDto(54.41123, 18.56789)));
+
+        assertEquals(new HomeDto("Oliwa, Gdańsk", new GeoPointDto(54.41, 18.57)), stored);
+        verify(repository).setHome(USER_ID, new UserRepository.HomeRecord("Oliwa, Gdańsk", 54.41, 18.57));
+    }
+
+    @Test
+    void setHome_forSomeoneElse_isRefused_andStoresNothing() throws SQLException {
+        HomeDto home = new HomeDto("Gdynia", new GeoPointDto(54.52, 18.54));
+
+        assertThrows(SecurityException.class, () -> service.setHome(USER_ID, CALLER_ID, home));
+        assertThrows(SecurityException.class, () -> service.clearHome(USER_ID, CALLER_ID));
+        verify(repository, never()).setHome(any(), any());
+        verify(repository, never()).clearHome(any());
+    }
+
+    @Test
+    void setHome_forAUserWithNoRow_isNotFound() throws SQLException {
+        when(repository.setHome(eq(USER_ID), any())).thenReturn(false);
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> service.setHome(USER_ID, USER_ID, new HomeDto("Gdynia", new GeoPointDto(54.52, 18.54))));
+        assertTrue(e.getMessage().contains("not found"));
+    }
 
     @Test
     void setProfileImage_validatesMedia_andInsertsTransactional() throws SQLException {

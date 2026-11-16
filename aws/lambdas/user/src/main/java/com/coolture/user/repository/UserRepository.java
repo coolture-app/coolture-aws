@@ -104,6 +104,59 @@ public class UserRepository {
         return Optional.empty();
     }
 
+    public record HomeRecord(String name, double latitude, double longitude) {}
+
+    public Optional<HomeRecord> findHome(UUID userId) throws SQLException {
+        String sql = """
+            SELECT home_name, ST_Y(home_location::geometry) AS latitude, ST_X(home_location::geometry) AS longitude
+            FROM users
+            WHERE id = ? AND home_name IS NOT NULL
+        """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setObject(1, userId);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(new HomeRecord(rs.getString("home_name"), rs.getDouble("latitude"), rs.getDouble("longitude")));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Returns false when the user doesn't exist. */
+    public boolean setHome(UUID userId, HomeRecord home) throws SQLException {
+        String sql = """
+            UPDATE users
+            SET home_name = ?, home_location = ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography
+            WHERE id = ?
+        """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, home.name());
+            stmt.setDouble(2, home.longitude());
+            stmt.setDouble(3, home.latitude());
+            stmt.setObject(4, userId);
+            return stmt.executeUpdate() > 0;
+        }
+    }
+
+    public void clearHome(UUID userId) throws SQLException {
+        String sql = "UPDATE users SET home_name = NULL, home_location = NULL WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setObject(1, userId);
+            stmt.executeUpdate();
+        }
+    }
+
     public Optional<UserEntity> findByUsername(String username) throws SQLException {
         String sql = "SELECT id, username, first_name, last_name, bio, created_at FROM users WHERE username = ?";
 

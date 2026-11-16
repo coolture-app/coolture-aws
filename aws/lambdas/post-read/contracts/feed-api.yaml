@@ -154,7 +154,8 @@ components:
       in: query
       description: >
         Send together with longitude, rounded to 2 decimals. The centre of radiusKm and of NEAREST. On /feed, the first
-        page's position is also used for proximity, and later pages send it again only with radiusKm.
+        page's position is also used for proximity, and later pages send it again only with radiusKm. Without it, /feed
+        measures proximity from the viewer's home, if they set one.
       schema: {type: number, format: double, minimum: -90, maximum: 90}
     Longitude:
       name: longitude
@@ -303,16 +304,29 @@ components:
     PostMark:
       type: object
       additionalProperties: false
-      required: [id, title, positiveReactionCount, coordinates]
+      description: >
+        What a pin and its preview need. Only the description's start: the map loads every post in view at once, and
+        whole descriptions were over half of the answer. The viewer's own reaction and stance are left out for a guest
+        or when there's none.
+      required: [id, title, startsAt, positiveReactionCount, interestedCount, goingCount, coordinates]
       properties:
         id: {type: string, format: uuid}
         title: {type: string}
-        description: {type: string}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
         coverMediaUrl: {type: string}
+        excerpt:
+          type: string
+          maxLength: 200
+          description: The description's first 200 characters, with runs of whitespace as one space. Left out when empty.
         positiveReactionCount: {type: integer}
+        interestedCount: {type: integer, description: People who marked it Interesuje mnie.}
+        goingCount: {type: integer, description: People who marked it Wezmę udział.}
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
         venueName: {type: string}
         city: {type: string}
+        myReaction: {$ref: '#/components/schemas/ReactionType'}
+        myParticipation: {$ref: '#/components/schemas/ParticipationType'}
     UserSummary:
       type: object
       additionalProperties: false

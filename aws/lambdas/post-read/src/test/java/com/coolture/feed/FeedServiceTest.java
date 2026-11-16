@@ -1,5 +1,6 @@
 package com.coolture.feed;
 
+import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
 import org.junit.jupiter.api.Test;
@@ -10,9 +11,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -40,6 +43,14 @@ class FeedServiceTest {
         final List<UUID> viewers = new ArrayList<>();
         final List<double[]> postAverages = new ArrayList<>();
         double[] postAverage;
+        GeoPointDto home;
+        SQLException homeFailure;
+
+        @Override
+        public Optional<GeoPointDto> findHome(UUID viewer) throws SQLException {
+            if (homeFailure != null) throw homeFailure;
+            return viewer == null ? Optional.empty() : Optional.ofNullable(home);
+        }
 
         @Override
         public UserVector.Parts findVectorParts(UUID viewer, Instant asOf) {
@@ -276,6 +287,49 @@ class FeedServiceTest {
 
         assertEquals(List.of(54.35, 54.35), repository.latitudes);
         assertEquals(18.65, FeedCursor.decode(first.page().nextCursor()).orElseThrow().lon());
+    }
+
+    @Test
+    void withNoPosition_proximityMeasuresFromTheHome_forTheWholeSession() throws SQLException {
+        repository.candidates = posts(5);
+        repository.home = new GeoPointDto(54.52, 18.54);
+
+        FeedPage first = service().getFeed(VIEWER, null, 2, null, null);
+        service().getFeed(VIEWER, first.page().nextCursor(), 2, null, null);
+
+        assertEquals(List.of(54.52, 54.52), repository.latitudes);
+        assertEquals(18.54, FeedCursor.decode(first.page().nextCursor()).orElseThrow().lon());
+    }
+
+    @Test
+    void aPositionInTheRequest_beatsTheHome() throws SQLException {
+        repository.candidates = posts(5);
+        repository.home = new GeoPointDto(54.52, 18.54);
+
+        service().getFeed(VIEWER, null, 2, 54.35, 18.65);
+
+        assertEquals(List.of(54.35), repository.latitudes);
+    }
+
+    @Test
+    void aGuest_orSomeoneWithNoHome_getsNoProximity() throws SQLException {
+        repository.candidates = posts(5);
+
+        service().getFeed(null, null, 2, null, null);
+        service().getFeed(VIEWER, null, 2, null, null);
+
+        assertEquals(Arrays.asList(null, null), repository.latitudes);
+    }
+
+    @Test
+    void whenTheHomeCantBeRead_theFeedIsRankedWithoutProximity() throws SQLException {
+        repository.candidates = posts(5);
+        repository.homeFailure = new SQLException("connection reset");
+
+        FeedPage page = service().getFeed(VIEWER, null, 2, null, null);
+
+        assertEquals(FeedMode.RANKED, page.mode());
+        assertNull(repository.latitudes.getFirst());
     }
 
     @Test

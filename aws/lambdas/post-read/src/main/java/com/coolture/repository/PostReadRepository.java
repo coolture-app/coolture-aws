@@ -30,6 +30,9 @@ import static com.coolture.common.db.ResultSetMappers.*;
 
 public class PostReadRepository {
 
+    /** Enough for three lines of the map's preview, so a pin's preview needs no request of its own. */
+    static final int EXCERPT_CHARS = 200;
+
     public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit) throws SQLException {
         // UPCOMING never shows an ended event. The other sorts hide only long-ended ones, and can show those too.
         boolean upcoming = sort == PostSort.UPCOMING;
@@ -189,11 +192,16 @@ public class PostReadRepository {
     public List<PostMarkDto> findPostMarks(PostFeedFilters f, MapBoundsDto bounds, UUID callerId, boolean excludeMine) throws SQLException {
         boolean hidesMine = excludeMine && callerId != null;
         String sql = """
-            SELECT p.id, p.title, p.description, p.positive_reaction_count,
+            SELECT p.id, p.title, p.starts_at, p.ends_at, p.positive_reaction_count,
+                   stances.interested_count, stances.going_count,
+                   NULLIF(left(regexp_replace(btrim(p.description), '\\s+', ' ', 'g'), """ + EXCERPT_CHARS + """
+                   ), '') AS excerpt,
                    ST_Y(el.coordinates::geometry) AS latitude,
                    ST_X(el.coordinates::geometry) AS longitude,
                    cover_m.object_key AS cover_url,
-                   el.venue_name, el.city
+                   el.venue_name, el.city,
+                   pr_my.type AS my_reaction,
+                   pp_my.type AS my_participation
             FROM posts p
             JOIN event_locations el ON el.id = p.event_location_id
             LEFT JOIN LATERAL (
@@ -204,6 +212,9 @@ public class PostReadRepository {
                 ORDER BY pm.position ASC
                 LIMIT 1
             ) cover_m ON true
+            """ + StanceCounts.JOIN + """
+            LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid
+            LEFT JOIN post_participations pp_my ON pp_my.post_id = p.id AND pp_my.user_id = ?::uuid
             WHERE p.deleted_at IS NULL
               AND el.coordinates IS NOT NULL
             """
@@ -219,6 +230,10 @@ public class PostReadRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn);
+
+            // The viewer's own reaction and stance
+            b.bindNullableUUID(callerId)
+             .bindNullableUUID(callerId);
 
             PostFilterSql.bind(b, f, callerId);
 
@@ -249,12 +264,18 @@ public class PostReadRepository {
                     list.add(new PostMarkDto(
                         (UUID) rs.getObject("id"),
                         rs.getString("title"),
-                        rs.getString("description"),
+                        mapInstant(rs, "starts_at"),
+                        mapInstant(rs, "ends_at"),
                         MediaUrls.presign(rs.getString("cover_url")),
+                        rs.getString("excerpt"),
                         rs.getInt("positive_reaction_count"),
+                        rs.getInt("interested_count"),
+                        rs.getInt("going_count"),
                         new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
                         rs.getString("venue_name"),
-                        rs.getString("city")
+                        rs.getString("city"),
+                        mapMyReaction(rs),
+                        mapMyParticipation(rs)
                     ));
                 }
             }
@@ -270,5 +291,4 @@ public class PostReadRepository {
         }
         return list;
     }
-
 }
