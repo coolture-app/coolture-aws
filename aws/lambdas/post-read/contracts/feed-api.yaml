@@ -132,6 +132,33 @@ paths:
                 items: {$ref: '#/components/schemas/PostMark'}
         '400':
           $ref: '#/components/responses/BadRequest'
+  /posts/{postId}/friends:
+    get:
+      tags: [Lists]
+      operationId: getPostFriends
+      summary: Every friend of the viewer who marked this post, for the list behind a card's friends line
+      description: >
+        The same friends as the post's friendStances, without the limit on names: mutual follows who marked the post
+        Biorę udział (going) or Interesuje mnie (interested) and share their stances. Newest stance first. Empty lists for
+        a guest.
+      parameters:
+        - {name: postId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Both lists, each possibly empty.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PostFriends'}
+              example:
+                going:
+                  - {id: 00000000-0000-0000-0000-000000000002, username: anna_demo, firstName: Anna, lastName: Demo}
+                interested: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
 components:
   securitySchemes:
     bearerAuth:
@@ -218,6 +245,11 @@ components:
   responses:
     BadRequest:
       description: Invalid input, including an unreadable cursor. The frontend restarts the list once.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: No such post, or it was deleted.
       content:
         application/json:
           schema: {$ref: '#/components/schemas/Error'}
@@ -353,6 +385,13 @@ components:
           minItems: 1
           maxItems: 2
           items: {$ref: '#/components/schemas/Friend'}
+    PostFriends:
+      type: object
+      additionalProperties: false
+      required: [going, interested]
+      properties:
+        going: {type: array, items: {$ref: '#/components/schemas/Friend'}}
+        interested: {type: array, items: {$ref: '#/components/schemas/Friend'}}
     Friend:
       type: object
       additionalProperties: false
