@@ -87,6 +87,29 @@ HTTP 200
 [Asserts]
 jsonpath "$.positiveReactionCount" == 1
 
+# Anna and Jan follow each other, so she sees him among her friends who are interested. Iza follows Jan, but he doesn't
+# follow her back, so she sees nobody, and nor does a guest.
+GET {{api}}/posts/{{post}}/friends
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 200
+[Asserts]
+jsonpath "$.interested[0].username" == "jan_demo"
+jsonpath "$.going" count == 0
+
+GET {{api}}/posts/{{post}}/friends
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+HTTP 200
+[Asserts]
+jsonpath "$.interested" count == 0
+
+GET {{api}}/posts/{{post}}/friends
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.interested" count == 0
+
 # Jan comments, edits his comment, and the comment shows on the post.
 POST {{api}}/posts/{{post}}/comments
 X-User-Id: {{jan}}
@@ -213,4 +236,9 @@ HTTP 204
 
 GET {{api}}/posts/{{post}}
 X-Anonymous: true
+HTTP 404
+
+GET {{api}}/posts/{{post}}/friends
+X-User-Id: {{jan}}
+X-User-Name: jan_demo
 HTTP 404
