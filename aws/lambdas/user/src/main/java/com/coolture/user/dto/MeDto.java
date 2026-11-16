@@ -8,5 +8,6 @@ import com.fasterxml.jackson.annotation.JsonUnwrapped;
 public record MeDto(
         @JsonUnwrapped UserProfileDto profile,
         boolean interestsSelected,
+        boolean shareStances,
         @JsonInclude(JsonInclude.Include.NON_NULL) HomeDto home
 ) {}

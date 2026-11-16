@@ -115,7 +115,8 @@ public class UserService {
                 request.username(),
                 request.firstName(),
                 request.lastName(),
-                request.bio()
+                request.bio(),
+                request.shareStances()
         );
 
         return toProfileDto(user, callerId);
@@ -148,6 +149,10 @@ public class UserService {
         String lName = lastName != null ? lastName : "";
         userRepository.createUserIfAbsent(callerId, uname, fName, lName);
         return getByIdForCaller(callerId, callerId);
+    }
+
+    public boolean sharesStances(UUID callerId) throws SQLException {
+        return userRepository.sharesStances(callerId);
     }
 
     public Optional<HomeDto> getHome(UUID callerId) throws SQLException {

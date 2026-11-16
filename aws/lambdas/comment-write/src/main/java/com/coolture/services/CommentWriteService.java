@@ -24,7 +24,7 @@ public class CommentWriteService {
     }
 
     public CommentSummaryDto create(UUID postId, UUID callerId, CommentCreateRequest req) throws SQLException {
-        repository.ensurePostVisible(postId, callerId);
+        repository.ensurePostVisible(postId);
 
         CommentWriteRepository.ExistingComment parent = null;
         if (req.parentCommentId() != null) {

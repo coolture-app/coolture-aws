@@ -104,6 +104,17 @@ public class UserRepository {
         return Optional.empty();
     }
 
+    /** False for a user who doesn't exist yet. */
+    public boolean sharesStances(UUID userId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement("SELECT share_stances FROM users WHERE id = ?")) {
+            stmt.setObject(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() && rs.getBoolean("share_stances");
+            }
+        }
+    }
+
     public record HomeRecord(String name, double latitude, double longitude) {}
 
     public Optional<HomeRecord> findHome(UUID userId) throws SQLException {
@@ -174,7 +185,8 @@ public class UserRepository {
         return Optional.empty();
     }
 
-    public UserEntity updateUser(UUID id, String username, String firstName, String lastName, String bio) throws SQLException {
+    public UserEntity updateUser(UUID id, String username, String firstName, String lastName, String bio,
+                                 Boolean shareStances) throws SQLException {
         List<String> setClauses = new ArrayList<>();
         List<Object> params = new ArrayList<>();
 
@@ -193,6 +205,10 @@ public class UserRepository {
         if (bio != null) {
             setClauses.add("bio = ?");
             params.add(bio);
+        }
+        if (shareStances != null) {
+            setClauses.add("share_stances = ?");
+            params.add(shareStances);
         }
 
         if (setClauses.isEmpty()) {

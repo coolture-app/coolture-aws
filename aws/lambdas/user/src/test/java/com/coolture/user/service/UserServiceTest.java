@@ -199,10 +199,10 @@ class UserServiceTest {
 
     @Test
     void update_updatesFieldsAndReturnsEnrichedProfile() throws SQLException {
-        UserProfileUpdateRequest request = new UserProfileUpdateRequest("updated_name", "Jan", "Nowak", "New bio");
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("updated_name", "Jan", "Nowak", "New bio", false);
         var updated = new UserEntity(USER_ID, "updated_name", "Jan", "Nowak", "New bio", Instant.now());
 
-        when(repository.updateUser(USER_ID, "updated_name", "Jan", "Nowak", "New bio")).thenReturn(updated);
+        when(repository.updateUser(USER_ID, "updated_name", "Jan", "Nowak", "New bio", false)).thenReturn(updated);
         when(repository.findActiveAvatar(USER_ID, false)).thenReturn(Optional.empty());
 
         UserProfileDto profile = service.update(USER_ID, USER_ID, request);
@@ -214,7 +214,7 @@ class UserServiceTest {
 
     @Test
     void update_throwsForbidden_whenNotSelf() {
-        UserProfileUpdateRequest request = new UserProfileUpdateRequest("hacked", null, null, null);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("hacked", null, null, null, null);
 
         assertThrows(SecurityException.class, () -> service.update(USER_ID, CALLER_ID, request));
         verifyNoInteractions(repository);

@@ -10,6 +10,7 @@ import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import com.coolture.common.dto.EventLocationDto;
+import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
@@ -20,7 +21,6 @@ import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
@@ -69,8 +69,8 @@ class ContractTest {
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, Instant.now(), 0, 0),
             null, "Koncert", null, null, Instant.now(), null, List.of(),
-            0, 0, 0, 0, 0, PostType.ONLINE, PostStatus.ACTIVE, PostVisibility.PUBLIC,
-            Instant.now(), null, null, null, null, null, null
+            0, 0, 0, 0, 0, PostType.ONLINE, PostStatus.ACTIVE,
+            Instant.now(), null, null, null, null, null, null, null
         );
     }
 
@@ -86,9 +86,15 @@ class ContractTest {
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", "Anna", "Nowak", avatar, now, 1, 2),
             location, "Koncert", "Opis", "https://example.com", now, now.plusSeconds(60), List.of("jazz"),
-            1, 3, 2, 1, 4, PostType.OFFLINE, PostStatus.EDITED, PostVisibility.FRIENDS,
-            now, now, null, cover, ReactionType.LIKE, ParticipationType.TAKES_PART, List.of(cover)
+            1, 3, 2, 1, 4, PostType.OFFLINE, PostStatus.EDITED,
+            now, now, null, cover, ReactionType.LIKE, ParticipationType.TAKES_PART, List.of(cover), friendStances()
         );
+    }
+
+    private static FriendStancesDto friendStances() {
+        FriendStancesDto.Friend jan = new FriendStancesDto.Friend(UUID.randomUUID(), "jan", "Jan", "Kowalski", "http://localhost/j.png");
+        FriendStancesDto.Friend ola = new FriendStancesDto.Friend(UUID.randomUUID(), "ola", null, null, null);
+        return new FriendStancesDto(new FriendStancesDto.Group(3, List.of(jan, ola)), null);
     }
 
     private ValidationReport responseReport(String path, APIGatewayV2HTTPEvent event) {
@@ -141,8 +147,8 @@ class ContractTest {
         when(posts.getMapMarks(any(), any(), any(), anyBoolean())).thenReturn(List.of(
             new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"),
                 Instant.parse("2026-12-01T21:00:00Z"), "http://localhost/c.png", "Koncert w hali.", 3, 7, 5, new GeoPointDto(54.35, 18.65),
-                "Hala", "Gdańsk", ReactionType.LIKE, ParticipationType.INTERESTED),
-            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"), null, null, null, 0, 0, 0, new GeoPointDto(54.35, 18.65), null, null, null, null)));
+                "Hala", "Gdańsk", ReactionType.LIKE, ParticipationType.INTERESTED, friendStances()),
+            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"), null, null, null, 0, 0, 0, new GeoPointDto(54.35, 18.65), null, null, null, null, null)));
 
         assertMatches(responseReport("/posts/map", ApiGatewayEvents.get("/posts/map", Map.of(
             "leftUpper.latitude", "54.5", "leftUpper.longitude", "18.0",

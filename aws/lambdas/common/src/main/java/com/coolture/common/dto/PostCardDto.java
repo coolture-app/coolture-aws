@@ -3,7 +3,6 @@ package com.coolture.common.dto;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -29,7 +28,6 @@ public record PostCardDto(
     int commentsCount,
     PostType type,
     PostStatus status,
-    PostVisibility visibility,
     Instant createdAt,
     Instant lastModifiedAt,
     Instant deletedAt,
@@ -37,12 +35,19 @@ public record PostCardDto(
     ReactionType myReaction,
     ParticipationType myParticipation,
     /** Every photo, cover first, at most PostLimits.MAX_PHOTOS. Null when the post has none. */
-    List<MediaResourceDto> photos
+    List<MediaResourceDto> photos,
+    FriendStancesDto friendStances
 ) {
     public PostCardDto withPhotos(List<MediaResourceDto> newPhotos) {
         return new PostCardDto(id, author, location, title, description, eventUrl, startsAt, endsAt, tags,
-            positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status, visibility,
+            positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status,
             createdAt, lastModifiedAt, deletedAt, coverMedia, myReaction, myParticipation,
-            newPhotos == null || newPhotos.isEmpty() ? null : newPhotos);
+            newPhotos == null || newPhotos.isEmpty() ? null : newPhotos, friendStances);
+    }
+
+    public PostCardDto withFriendStances(FriendStancesDto stances) {
+        return new PostCardDto(id, author, location, title, description, eventUrl, startsAt, endsAt, tags,
+            positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status,
+            createdAt, lastModifiedAt, deletedAt, coverMedia, myReaction, myParticipation, photos, stances);
     }
 }

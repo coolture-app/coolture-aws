@@ -239,7 +239,8 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         String firstName = SecurityContext.getClaim(event, "given_name").orElse(null);
         String lastName = SecurityContext.getClaim(event, "family_name").orElse(null);
         UserProfileDto profile = service.getMe(callerId, username, firstName, lastName);
-        return ApiResponse.ok(new MeDto(profile, interestService.hasSelection(callerId), service.getHome(callerId).orElse(null)));
+        return ApiResponse.ok(new MeDto(profile, interestService.hasSelection(callerId), service.sharesStances(callerId),
+            service.getHome(callerId).orElse(null)));
     }
 
     private APIGatewayV2HTTPResponse setHome(APIGatewayV2HTTPEvent event) throws Exception {

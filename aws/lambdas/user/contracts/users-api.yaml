@@ -46,6 +46,7 @@ paths:
                     isFollowing: false
                     isBlocked: false
                     interestsSelected: true
+                    shareStances: true
                     home: {name: Gdynia, coordinates: {latitude: 54.52, longitude: 18.54}}
         '401': {$ref: '#/components/responses/Unauthorized'}
   /users:
@@ -402,7 +403,7 @@ components:
       description: UserProfile's fields, plus what only the caller sees.
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, interestsSelected]
+      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, interestsSelected, shareStances]
       properties:
         id: {type: string, format: uuid}
         username: {type: string, maxLength: 32}
@@ -416,6 +417,7 @@ components:
         isFollowing: {type: boolean}
         isBlocked: {type: boolean}
         interestsSelected: {type: boolean, description: False until onboarding's interests are saved.}
+        shareStances: {type: boolean, description: Whether friends (mutual follows) see the caller's Interesuje mnie and Biorę udział. True until turned off.}
         home: {$ref: '#/components/schemas/Home'}
     Home:
       description: Where someone lives, left out when they haven't said.
@@ -433,6 +435,7 @@ components:
         firstName: {type: string, maxLength: 128}
         lastName: {type: string, maxLength: 128}
         bio: {type: string, maxLength: 512, nullable: true}
+        shareStances: {type: boolean}
     UserSummary:
       type: object
       additionalProperties: false

@@ -53,7 +53,7 @@ class CommentReadServiceTest {
         assertEquals(2, page.items().size());
         assertTrue(page.page().hasMore());
         assertEquals(2, page.page().limit());
-        verify(repository).ensurePostVisible(postId, null);
+        verify(repository).ensurePostVisible(postId);
     }
 
     @Test

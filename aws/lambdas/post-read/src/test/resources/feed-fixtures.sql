@@ -4,41 +4,57 @@ INSERT INTO users (id, username) VALUES
   ('a0000000-0000-0000-0000-000000000002', 'stranger'),
   ('a0000000-0000-0000-0000-000000000003', 'followed'),
   ('a0000000-0000-0000-0000-000000000004', 'i_blocked'),
-  ('a0000000-0000-0000-0000-000000000005', 'blocked_me');
+  ('a0000000-0000-0000-0000-000000000005', 'blocked_me'),
+  ('a0000000-0000-0000-0000-000000000006', 'friend'),
+  ('a0000000-0000-0000-0000-000000000007', 'fan'),
+  ('a0000000-0000-0000-0000-000000000008', 'quiet_friend');
+
+UPDATE users SET share_stances = false WHERE id = 'a0000000-0000-0000-0000-000000000008';
+
+-- I follow `followed` one way, `fan` follows me one way, and `friend` and `quiet_friend` are mutual follows.
 
 INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
   ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000003', 'FOLLOW'),
   ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000004', 'BLOCK'),
-  ('a0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000001', 'BLOCK');
+  ('a0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000001', 'BLOCK'),
+  ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000006', 'FOLLOW'),
+  ('a0000000-0000-0000-0000-000000000006', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW'),
+  ('a0000000-0000-0000-0000-000000000007', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW'),
+  ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000008', 'FOLLOW'),
+  ('a0000000-0000-0000-0000-000000000008', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW');
 
-CREATE TEMP TABLE fx (title text, author text, starts interval, ends interval, vis text, deleted boolean);
+CREATE TEMP TABLE fx (title text, author text, starts interval, ends interval, deleted boolean);
 INSERT INTO fx VALUES
-  ('future_public',            '2', '2 days',    NULL,        'PUBLIC',  false),
-  ('no_end_started_2h',        '2', '-2 hours',  NULL,        'PUBLIC',  false),
-  ('no_end_started_4h',        '2', '-4 hours',  NULL,        'PUBLIC',  false),
-  ('no_end_started_14h',       '2', '-14 hours', NULL,        'PUBLIC',  false),
-  ('no_end_started_16h',       '2', '-16 hours', NULL,        'PUBLIC',  false),
-  ('multi_day_running',        '2', '-7 days',   '7 days',    'PUBLIC',  false),
-  ('ended_1h_ago',             '2', '-3 hours',  '-1 hour',   'PUBLIC',  false),
-  ('ended_11h_ago',            '2', '-13 hours', '-11 hours', 'PUBLIC',  false),
-  ('ended_13h_ago',            '2', '-15 hours', '-13 hours', 'PUBLIC',  false),
-  ('ended_last_year',          '2', '-400 days', '-399 days', 'PUBLIC',  false),
-  ('deleted',                  '2', '2 days',    NULL,        'PUBLIC',  true),
-  ('mine',                     '1', '2 days',    NULL,        'PUBLIC',  false),
-  ('mine_private',             '1', '2 days',    NULL,        'PRIVATE', false),
-  ('liked',                    '2', '2 days',    NULL,        'PUBLIC',  false),
-  ('marked',                   '2', '2 days',    NULL,        'PUBLIC',  false),
-  ('interested',               '2', '2 days',    NULL,        'PUBLIC',  false),
-  ('attending',                '2', '2 days',    NULL,        'PUBLIC',  false),
-  ('commented',                '2', '2 days',    NULL,        'PUBLIC',  false),
-  ('by_i_blocked',             '4', '2 days',    NULL,        'PUBLIC',  false),
-  ('by_blocked_me',            '5', '2 days',    NULL,        'PUBLIC',  false),
-  ('friends_by_followed',      '3', '2 days',    NULL,        'FRIENDS', false),
-  ('friends_by_stranger',      '2', '2 days',    NULL,        'FRIENDS', false),
-  ('private_by_stranger',      '2', '2 days',    NULL,        'PRIVATE', false);
+  ('future_public',            '2', '2 days',    NULL,        false),
+  ('no_end_started_2h',        '2', '-2 hours',  NULL,        false),
+  ('no_end_started_4h',        '2', '-4 hours',  NULL,        false),
+  ('no_end_started_14h',       '2', '-14 hours', NULL,        false),
+  ('no_end_started_16h',       '2', '-16 hours', NULL,        false),
+  ('multi_day_running',        '2', '-7 days',   '7 days',    false),
+  ('ended_1h_ago',             '2', '-3 hours',  '-1 hour',   false),
+  ('ended_11h_ago',            '2', '-13 hours', '-11 hours', false),
+  ('ended_13h_ago',            '2', '-15 hours', '-13 hours', false),
+  ('ended_last_year',          '2', '-400 days', '-399 days', false),
+  ('deleted',                  '2', '2 days',    NULL,        true),
+  ('mine',                     '1', '2 days',    NULL,        false),
+  ('liked',                    '2', '2 days',    NULL,        false),
+  ('marked',                   '2', '2 days',    NULL,        false),
+  ('interested',               '2', '2 days',    NULL,        false),
+  ('attending',                '2', '2 days',    NULL,        false),
+  ('commented',                '2', '2 days',    NULL,        false),
+  ('by_i_blocked',             '4', '2 days',    NULL,        false),
+  ('by_blocked_me',            '5', '2 days',    NULL,        false),
+  ('by_followed',              '3', '2 days',    NULL,        false),
+  ('by_fan',                   '7', '2 days',    NULL,        false),
+  ('friend_going',             '2', '2 days',    NULL,        false),
+  ('friend_interested',        '2', '2 days',    NULL,        false),
+  ('friend_not_for_me',        '2', '2 days',    NULL,        false),
+  ('followed_going',           '2', '2 days',    NULL,        false),
+  ('fan_going',                '2', '2 days',    NULL,        false),
+  ('quiet_friend_going',       '2', '2 days',    NULL,        false);
 
-INSERT INTO posts (author_id, title, starts_at, ends_at, type, visibility, deleted_at)
-SELECT ('a0000000-0000-0000-0000-00000000000' || author)::uuid, title, now() + starts, now() + ends, 'ONLINE', vis,
+INSERT INTO posts (author_id, title, starts_at, ends_at, type, deleted_at)
+SELECT ('a0000000-0000-0000-0000-00000000000' || author)::uuid, title, now() + starts, now() + ends, 'ONLINE',
        CASE WHEN deleted THEN now() END
 FROM fx;
 
@@ -56,6 +72,15 @@ SELECT id, 'a0000000-0000-0000-0000-000000000001',
        CASE title WHEN 'interested' THEN 'INTERESTED' WHEN 'attending' THEN 'TAKES_PART' ELSE 'NOT_INTERESTED' END,
        now() - interval '1 minute'
 FROM posts WHERE title IN ('interested', 'attending', 'marked');
+
+-- Other people's stances, for "Od obserwowanych i znajomych" and the friends line.
+INSERT INTO post_participations (post_id, user_id, type)
+SELECT p.id, ('a0000000-0000-0000-0000-00000000000' || s.who)::uuid, s.type
+FROM posts p
+JOIN (VALUES ('friend_going', '6', 'TAKES_PART'), ('friend_interested', '6', 'INTERESTED'),
+             ('friend_not_for_me', '6', 'NOT_INTERESTED'), ('followed_going', '3', 'TAKES_PART'),
+             ('fan_going', '7', 'TAKES_PART'), ('quiet_friend_going', '8', 'TAKES_PART')) AS s (title, who, type)
+  ON s.title = p.title;
 
 INSERT INTO comments (post_id, author_id, content)
 SELECT id, 'a0000000-0000-0000-0000-000000000001', 'x' FROM posts WHERE title = 'commented';

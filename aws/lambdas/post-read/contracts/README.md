@@ -20,7 +20,7 @@ This folder is inside `post-read` because that Lambda serves everything describe
 | **Contains** | Posts new to this viewer, ranked, narrowed by the filters | Everything visible, minus old events by default |
 | **Order** | Score, or upcoming if ranking fails | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST` |
 
-**The filters mean the same everywhere:** `q`, `tags`, `authorId`, `status`, `visibility`, `type`, `startsFrom`, `startsTo`,
+**The filters mean the same everywhere:** `q`, `tags`, `authorId`, `status`, `followed`, `type`, `startsFrom`, `startsTo`,
 `includePast`, and `radiusKm` around `latitude`/`longitude`. One piece of SQL applies them to `/feed`, `/posts` and `/posts/map`.
 
 `GET /posts/map` takes the same filters as `/posts`, plus the map bounds (`leftUpper.latitude`, `leftUpper.longitude`,

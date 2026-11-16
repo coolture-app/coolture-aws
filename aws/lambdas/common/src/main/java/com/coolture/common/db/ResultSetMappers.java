@@ -13,7 +13,6 @@ import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
 import com.coolture.common.storage.MediaUrls;
 
@@ -245,13 +244,13 @@ public final class ResultSetMappers {
             rs.getInt("comments_count"),
             mapEnum(rs, "type", PostType.class),
             mapEnum(rs, "status", PostStatus.class),
-            mapEnum(rs, "visibility", PostVisibility.class),
             mapInstant(rs, "created_at"),
             mapInstant(rs, "last_modified_at"),
             mapInstant(rs, "deleted_at"),
             mapCoverMedia(rs),
             mapMyReaction(rs),
             mapMyParticipation(rs),
+            null,
             null
         );
     }
