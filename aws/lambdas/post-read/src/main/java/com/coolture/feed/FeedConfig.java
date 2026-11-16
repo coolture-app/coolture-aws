@@ -55,6 +55,11 @@ public record FeedConfig(double affinity, double proximity, double time, double 
      * database, and the commit after a run is stamped finished.
      */
     public static final int PPR_RUN_MARGIN_SECONDS = 60;
+    /**
+     * An older run counts as none, and every post gets NEUTRAL for PageRank: its scores may still carry friendships,
+     * blocks and sharing people have changed since. A day spans three missed runs of the schedule.
+     */
+    public static final int PPR_RUN_MAX_AGE_HOURS = 24;
 
     /** An event with no end time has ended this long after it starts. */
     public static final int DEFAULT_EVENT_HOURS = 3;

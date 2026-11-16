@@ -105,6 +105,15 @@ def _stance_weight(kind: str, age_days: int) -> float:
     return STANCE_WEIGHTS[kind] * 0.5 ** (age_days / STANCE_HALF_LIFE_DAYS)
 
 
+def _blocked(user_index: dict[UUID, int], blocks: list[tuple[UUID, UUID]]) -> dict[int, set[int]]:
+    blocked = defaultdict(set)
+    for a, b in blocks:
+        if a in user_index and b in user_index:
+            blocked[user_index[a]].add(user_index[b])
+            blocked[user_index[b]].add(user_index[a])
+    return dict(blocked)
+
+
 def _hidden(user_index: dict[UUID, int], event_index: dict[UUID, int], authors: Sequence[UUID],
             reacted: list[tuple[UUID, UUID]], blocks: list[tuple[UUID, UUID]]) -> dict[int, set[int]]:
     """What the feed never shows a user as new: PostSql's NOT_MINE and NOT_BLOCKED."""
@@ -177,6 +186,8 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
                  for u, p, kind, age_days in stances if p in event_index],
         follows=[(user_index[a], user_index[b]) for a, b in follows],
         hidden=_hidden(user_index, event_index, authors, reacted, blocks),
+        private={user_index[u] for u in user_ids if u not in sharing},
+        blocked=_blocked(user_index, blocks),
     )
 
 

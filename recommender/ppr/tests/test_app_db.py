@@ -43,11 +43,15 @@ def test_a_run_leaves_out_what_the_feed_wont_show(conn):
     conn.execute("""INSERT INTO post_participations (post_id, user_id, type) VALUES (%s, %s, 'NOT_INTERESTED')
                     ON CONFLICT DO NOTHING""", (reacted, user))
 
-    run, _ = app.write(conn, app.load(conn))
+    inputs = app.load(conn)
+    run, _ = app.write(conn, inputs)
 
     scored = {p for (p,) in conn.execute("SELECT post_id FROM rec_ppr_scores WHERE run_number = %s AND user_id = %s",
                                          (run, user))}
     assert scored and not scored & {deleted, ended, own, by_blocked, by_blocker, reacted}
+    index = inputs.user_ids.index
+    assert inputs.blocked[index(user)] == {index(blocked), index(blocker)}
+    assert inputs.blocked[index(blocked)] == {index(user)}
 
 
 def test_the_rows_written_are_the_walks_scores(conn):
@@ -96,6 +100,8 @@ def test_follows_count_only_between_friends_who_share_their_stances(conn):
     assert edge(a, b) and edge(b, a)
     conn.execute("UPDATE users SET share_stances = false WHERE id = %s", (b,))
     assert not edge(a, b) and edge(b, a)
+    inputs = app.load(conn)
+    assert inputs.user_ids.index(b) in inputs.private and inputs.user_ids.index(a) not in inputs.private
 
 
 def test_a_run_keeps_the_newest_run_finished_over_a_day_ago_and_deletes_older_ones(conn):

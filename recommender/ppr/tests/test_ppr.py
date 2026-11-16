@@ -36,6 +36,8 @@ def inputs(**kw):
         stances=[],
         follows=[],
         hidden={},
+        private=set(),
+        blocked={},
     )
     base.update(kw)
     return Inputs(**base)
@@ -180,7 +182,7 @@ def test_matches_a_walk_over_edges_written_by_hand():
                    not_ended=np.array([True, True, True, False]), venues=["hall", None, None, "hall"],
                    post_average=np.zeros(5), interest_vectors=np.array([unit(v) for v in rng.normal(size=(2, 5))]),
                    user_ids=["u0", "u1"], picks=[(0, 0)], stances=[(0, 3, 2.0), (1, 1, 1.0)],
-                   follows=[(0, 1), (1, 0)], hidden={})
+                   follows=[(0, 1), (1, 0)], hidden={}, private=set(), blocked={})
     both_ways = [("e0", "hall", 1), ("e3", "hall", 1), ("e0", "e1", 1), ("e0", "e2", 1), ("e1", "e2", 1),
                  ("u0", "i0", 1), ("u0", "e3", 2), ("u1", "e1", 1)]
     both_ways += [(e, i, 1) for e in ("e0", "e1", "e2", "e3") for i in ("i0", "i1")]
@@ -210,3 +212,24 @@ def test_all_of_a_users_friends_weigh_like_one_edge():
     first_user = a.shape[0] - 4
     assert a[first_user, first_user + 1:].sum() == pytest.approx(1)
     assert a[first_user + 1, first_user] == 1
+
+
+# u0 and u2 like event 0; u2 also likes event 12, of another kind, so u0's walk reaches it through u2.
+SHARED = dict(user_ids=["u0", "u1", "u2"], picks=[(0, 0), (1, 2)], stances=[(0, 0, 1.0), (2, 0, 1.0), (2, 12, 1.0)],
+              hidden={0: {0}})
+
+
+def test_a_user_who_doesnt_share_their_stances_moves_no_one_elses_scores():
+    private = by_event(scores(inputs(**SHARED, private={2})))
+    without_them = by_event(scores(inputs(**{**SHARED, "stances": [(0, 0, 1.0)]})))
+    assert private == without_them
+    assert by_event(scores(inputs(**SHARED, private={2})), user=2)
+
+
+@pytest.mark.parametrize("viewer, other", [(0, 2), (2, 0)])
+def test_people_on_either_side_of_a_block_dont_reach_each_other(viewer, other):
+    blocked = inputs(**SHARED, blocked={viewer: {other}, other: {viewer}})
+    alone = [(u, e, w) for u, e, w in SHARED["stances"] if u != other]
+    without_them = inputs(**{**SHARED, "stances": alone, "picks": [p for p in SHARED["picks"] if p[0] != other]})
+    assert by_event(scores(blocked), user=viewer) == by_event(scores(without_them), user=viewer)
+    assert by_event(scores(blocked), user=1) == by_event(scores(inputs(**SHARED)), user=1)

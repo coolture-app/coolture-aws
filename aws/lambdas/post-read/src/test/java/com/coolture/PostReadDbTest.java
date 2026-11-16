@@ -342,7 +342,7 @@ class PostReadDbTest {
     }
 
     @Test
-    void feed_readsTheLatestPprRunFinishedAMinuteBeforeAsOf() throws SQLException {
+    void feed_readsTheLatestPprRunFinishedAMinuteBeforeAsOf_andNoneOverADayOld() throws SQLException {
         // A day ahead, so a run made just now, as make seed's last step does, is never the latest.
         Instant base = Instant.now().plus(Duration.ofDays(1));
         UUID post = postTitled("future_public");
@@ -360,6 +360,7 @@ class PostReadDbTest {
             assertEquals(0.25, pprOf(post, base.plus(Duration.ofHours(1)).plusSeconds(30)), 1e-6);
             assertEquals(0.75, pprOf(post, base.plus(Duration.ofHours(2))), 1e-6);
             assertNull(pprOf(commented, base), "another user's score");
+            assertNull(pprOf(post, base.plus(Duration.ofHours(1 + FeedConfig.PPR_RUN_MAX_AGE_HOURS + 1))), "a stale run");
         } finally {
             writeAsTheApp("DELETE FROM rec_ppr_scores WHERE run_number IN (?, ?)", earlier, later);
             writeAsTheApp("DELETE FROM rec_ppr_runs WHERE run_number IN (?, ?)", earlier, later);
