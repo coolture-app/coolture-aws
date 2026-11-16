@@ -216,8 +216,8 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
     }
 
     private APIGatewayV2HTTPResponse getInterests(APIGatewayV2HTTPEvent event) throws Exception {
-        UUID callerId = SecurityContext.getUserId(event);
-        return ApiResponse.ok(interestService.getSelection(extractUserId(event), callerId));
+        SecurityContext.getUserId(event);
+        return ApiResponse.ok(interestService.getSelection(extractUserId(event)));
     }
 
     private APIGatewayV2HTTPResponse replaceInterests(APIGatewayV2HTTPEvent event) throws Exception {

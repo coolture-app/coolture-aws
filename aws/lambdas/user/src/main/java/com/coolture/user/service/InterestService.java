@@ -55,9 +55,13 @@ public class InterestService {
         return new InterestCatalogDto(minSelections, maxSelections, categories);
     }
 
-    public UserInterestsDto getSelection(UUID targetId, UUID callerId) throws SQLException {
-        requireOwner(targetId, callerId);
-        return new UserInterestsDto(repository.findSelectedKeys(targetId));
+    public UserInterestsDto getSelection(UUID targetId) throws SQLException {
+        List<String> keys = repository.findSelectedKeys(targetId);
+        // Someone who picked nothing has no rows either, so only then is the user looked up.
+        if (keys.isEmpty() && !repository.userExists(targetId)) {
+            throw new IllegalArgumentException("User " + targetId + " not found");
+        }
+        return new UserInterestsDto(keys);
     }
 
     public boolean hasSelection(UUID userId) throws SQLException {

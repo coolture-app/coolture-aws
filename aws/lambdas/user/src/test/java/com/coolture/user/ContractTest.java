@@ -197,12 +197,18 @@ class ContractTest {
     void interests_match() throws Exception {
         when(interests.getCatalog()).thenReturn(new InterestCatalogDto(3, 6, List.of(new InterestCatalogDto.Category(
             "culture", "Kultura", "Culture", List.of(new InterestCatalogDto.Interest("theatre", "Teatr", "Theatre"))))));
-        when(interests.getSelection(CALLER, CALLER)).thenReturn(new UserInterestsDto(List.of("theatre")));
+        UUID nobody = UUID.randomUUID();
+        when(interests.getSelection(OTHER)).thenReturn(new UserInterestsDto(List.of("theatre")));
+        when(interests.getSelection(nobody)).thenThrow(new IllegalArgumentException("User " + nobody + " not found"));
         when(interests.replaceSelection(eq(CALLER), eq(CALLER), any())).thenReturn(new UserInterestsDto(List.of("theatre", "cinema", "jazz")));
         String path = "/users/" + CALLER + "/interests";
 
+        String others = "/users/" + OTHER + "/interests";
+        String nobodys = "/users/" + nobody + "/interests";
+
         assertMatches(report("/dicts/interests", Request.Method.GET, signedIn("GET", "/dicts/interests", null, null)));
-        assertMatches(report(path, Request.Method.GET, signedIn("GET", path, null, CALLER)));
+        assertMatches(report(others, Request.Method.GET, signedIn("GET", others, null, OTHER)));
+        assertMatches(report(nobodys, Request.Method.GET, signedIn("GET", nobodys, null, nobody)));
         assertMatches(report(path, Request.Method.PUT, signedIn("PUT", path, "{\"interests\":[\"theatre\",\"cinema\",\"jazz\"]}", CALLER)));
     }
 

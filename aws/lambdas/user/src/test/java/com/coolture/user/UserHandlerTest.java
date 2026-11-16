@@ -63,7 +63,7 @@ class UserHandlerTest {
     }
 
     @Test
-    void getInterests_passesTargetAndCaller() throws Exception {
+    void getInterests_ofSomeoneElse_passesTheTarget() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
                 "GET", "/users/" + USER_ID + "/interests", null, Map.of("userId", USER_ID.toString()));
 
@@ -73,7 +73,21 @@ class UserHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            verify(interestService).getSelection(USER_ID, CALLER_ID);
+            verify(interestService).getSelection(USER_ID);
+        }
+    }
+
+    @Test
+    void getInterests_asAGuest_returns401() {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "GET", "/users/" + USER_ID + "/interests", null, Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event))
+                    .thenThrow(new SecurityException("User not authenticated: missing 'sub' claim"));
+
+            assertEquals(401, handler.handleRequest(event, lambdaContext).getStatusCode());
+            verifyNoInteractions(interestService);
         }
     }
 

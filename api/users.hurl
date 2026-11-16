@@ -70,12 +70,17 @@ HTTP 200
 [Asserts]
 jsonpath "$.categories" count > 0
 
+# Anyone signed in can read someone's picks, for their profile. A guest can't.
 GET {{api}}/users/{{anna}}/interests
-X-User-Id: {{anna}}
-X-User-Name: anna_demo
+X-User-Id: {{jan}}
+X-User-Name: jan_demo
 HTTP 200
 [Asserts]
 jsonpath "$.interests" contains "concerts"
+
+GET {{api}}/users/{{anna}}/interests
+X-Anonymous: true
+HTTP 401
 
 # Ola says where she lives. Only she sees it: in /auth/me, never on her profile, and nobody else can change it.
 PUT {{api}}/users/{{ola}}/home

@@ -70,6 +70,16 @@ public class InterestRepository {
         }
     }
 
+    public boolean userExists(UUID userId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM users WHERE id = ?")) {
+            stmt.setObject(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
     public boolean hasSelection(UUID userId) throws SQLException {
         String sql = "SELECT 1 FROM user_interests WHERE user_id = ? LIMIT 1";
 
