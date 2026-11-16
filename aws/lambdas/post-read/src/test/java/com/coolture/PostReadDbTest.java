@@ -297,8 +297,10 @@ class PostReadDbTest {
 
             assertEquals(1, page.interestedCount());
             assertEquals(0, page.goingCount());
+            assertEquals(1, page.participantCount());
             assertEquals(1, card.interestedCount());
             assertEquals(0, card.goingCount());
+            assertEquals(1, card.participantCount());
         } finally {
             unmark(post);
         }
