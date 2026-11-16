@@ -12,6 +12,8 @@ GET {{api}}/users/by-username/ola_demo
 HTTP 200
 [Captures]
 ola_bio: jsonpath "$.bio"
+[Asserts]
+jsonpath "$.interests" exists
 
 GET {{api}}/users/{{ola}}
 X-User-Id: {{jan}}
@@ -82,6 +84,14 @@ GET {{api}}/users/{{anna}}/interests
 X-Anonymous: true
 HTTP 401
 
+# Her profile carries the same picks, so the profile page needs no second request.
+GET {{api}}/users/by-username/anna_demo
+X-User-Id: {{jan}}
+X-User-Name: jan_demo
+HTTP 200
+[Asserts]
+jsonpath "$.interests" contains "concerts"
+
 # Ola says where she lives. Only she sees it: in /auth/me, never on her profile, and nobody else can change it.
 PUT {{api}}/users/{{ola}}/home
 X-User-Id: {{ola}}
@@ -98,6 +108,7 @@ X-User-Name: ola_demo
 HTTP 200
 [Asserts]
 jsonpath "$.home.name" == "Oliwa, Gdańsk"
+jsonpath "$.interests" contains "galleries"
 jsonpath "$.home.coordinates.longitude" == 18.56
 
 GET {{api}}/users/{{ola}}
