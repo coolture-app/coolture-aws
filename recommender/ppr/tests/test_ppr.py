@@ -203,3 +203,10 @@ def test_matches_a_walk_over_edges_written_by_hand():
     got = {small.event_ids[e]: s for e, s in by_event(scores(small)).items()}
     assert sorted(got, key=got.get) == sorted(["e0", "e1", "e2"], key=mass.get)
     assert len({round(mass[e], 9) for e in ("e0", "e1", "e2")}) == 3
+
+
+def test_all_of_a_users_friends_weigh_like_one_edge():
+    a = adjacency(inputs(user_ids=["u0", "u1", "u2", "u3"], follows=[(0, 1), (0, 2), (0, 3), (1, 0)])).toarray()
+    first_user = a.shape[0] - 4
+    assert a[first_user, first_user + 1:].sum() == pytest.approx(1)
+    assert a[first_user + 1, first_user] == 1

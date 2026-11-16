@@ -105,8 +105,11 @@ def adjacency(inputs: Inputs) -> sparse.csr_matrix:
         add_both_ways(first_user + u, first_interest + i)
     for u, e, weight in inputs.stances:
         add_both_ways(first_user + u, e, weight)
+    # All of a user's friends together weigh like one interest pick. Each its own weight made friends half of the
+    # walk's first step and put the same few friend-marked events on top for everyone.
+    friends = np.bincount([follower for follower, _ in inputs.follows], minlength=len(inputs.user_ids))
     for follower, followed in inputs.follows:
-        add_one_way(first_user + follower, first_user + followed)
+        add_one_way(first_user + follower, first_user + followed, 1 / friends[follower])
     return sparse.csr_matrix((weights, (sources, targets)), shape=(size, size))
 
 
