@@ -12,8 +12,7 @@ X-User-Name: anna_demo
   "startsAt": "2030-01-15T18:00:00Z",
   "endsAt": "2030-01-15T21:00:00Z",
   "tags": ["planszówki", "online"],
-  "type": "ONLINE",
-  "visibility": "PUBLIC"
+  "type": "ONLINE"
 }
 HTTP 201
 [Captures]
