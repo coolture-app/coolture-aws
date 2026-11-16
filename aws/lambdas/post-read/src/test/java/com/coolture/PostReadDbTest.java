@@ -7,6 +7,7 @@ import com.coolture.common.dto.MapBoundsDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
+import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.ReactionType;
@@ -74,7 +75,7 @@ class PostReadDbTest {
 
     private static final Set<String> PUBLIC_LIVE = Set.of("future_public", "no_end_started_2h", "multi_day_running", "commented",
         "by_followed", "by_fan", "friend_going", "friend_interested", "friend_not_for_me", "followed_going", "fan_going",
-        "quiet_friend_going");
+        "quiet_friend_going", "friends_crowd");
     private static final Set<String> INTERACTED = Set.of("liked", "marked", "interested", "attending");
     private static final Set<String> ENDED_RECENTLY = Set.of("no_end_started_4h", "no_end_started_14h", "ended_1h_ago", "ended_11h_ago");
     private static final Set<String> ENDED_LONG_AGO = Set.of("no_end_started_16h", "ended_13h_ago", "ended_last_year");
@@ -575,7 +576,7 @@ class PostReadDbTest {
     // ===== People I follow and friends =====
 
     /** Mine is left out: the feed never shows it, and the others show it only by author. */
-    private static final Set<String> FOLLOWED_AND_FRIENDS = Set.of("by_followed", "friend_going", "friend_interested");
+    private static final Set<String> FOLLOWED_AND_FRIENDS = Set.of("by_followed", "friend_going", "friend_interested", "friends_crowd");
 
     private static PostFeedFilters followed() {
         return new PostFeedFilters(null, null, null, null, true, null, null, null, null, null, null,
@@ -614,6 +615,41 @@ class PostReadDbTest {
         assertNotNull(card(walkFeed(feedService, ME, 100, null, null, FeedMode.RANKED), "friend_going").friendStances());
         assertNotNull(postRepository.findById(post, ME).orElseThrow().friendStances());
         assertNull(postRepository.findById(post, null).orElseThrow().friendStances());
+    }
+
+    private static List<String> usernames(List<FriendStancesDto.Friend> friends) {
+        return friends.stream().map(FriendStancesDto.Friend::username).toList();
+    }
+
+    @Test
+    void aCard_namesTheNewestTwoFriends_andThePostsFriendsList_namesThemAll() throws SQLException {
+        UUID crowd = postTitled("friends_crowd");
+
+        FriendStancesDto card = card(walkPosts(ME, filters("RECENT", false, null, null), 100), "friends_crowd").friendStances();
+        assertEquals(3, card.going().count());
+        assertEquals(List.of("friend_3", "friend_2"), usernames(card.going().people()));
+        assertNull(card.interested());
+
+        PostFriendsDto all = postService.getFriends(crowd, ME);
+        assertEquals(List.of("friend_3", "friend_2", "friend"), usernames(all.going()));
+        assertEquals(List.of(), all.interested());
+    }
+
+    @Test
+    void thePostsFriendsList_leavesOutOneWayFollows_quietFriends_andNieDlaMnie() throws SQLException {
+        assertEquals(List.of("friend"), usernames(postService.getFriends(postTitled("friend_going"), ME).going()));
+        assertEquals(List.of("friend"), usernames(postService.getFriends(postTitled("friend_interested"), ME).interested()));
+        for (String title : List.of("followed_going", "fan_going", "quiet_friend_going", "friend_not_for_me")) {
+            PostFriendsDto friends = postService.getFriends(postTitled(title), ME);
+            assertEquals(new PostFriendsDto(List.of(), List.of()), friends, title);
+        }
+    }
+
+    @Test
+    void thePostsFriendsList_isEmptyForAGuest_andNotFoundForADeletedOrMissingPost() throws SQLException {
+        assertEquals(new PostFriendsDto(List.of(), List.of()), postService.getFriends(postTitled("friends_crowd"), null));
+        assertTrue(postRepository.findFriends(postTitled("deleted"), ME).isEmpty());
+        assertTrue(postRepository.findFriends(UUID.randomUUID(), ME).isEmpty());
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.coolture.common.db;
 
 import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.storage.MediaUrls;
 
 import java.sql.Connection;
@@ -40,6 +41,39 @@ public final class Friends {
         if (viewer == null || postIds.isEmpty()) {
             return Map.of();
         }
+        Map<UUID, Map<String, List<FriendStancesDto.Friend>>> people = new HashMap<>();
+        Map<UUID, Map<String, Integer>> totals = new HashMap<>();
+        stances(conn, viewer, postIds, NAMES_PER_STANCE, (postId, type, total, friend) -> {
+            totals.computeIfAbsent(postId, id -> new HashMap<>()).put(type, total);
+            people.computeIfAbsent(postId, id -> new HashMap<>())
+                .computeIfAbsent(type, t -> new ArrayList<>())
+                .add(friend);
+        });
+
+        Map<UUID, FriendStancesDto> byPost = new HashMap<>();
+        people.forEach((postId, byType) -> byPost.put(postId, new FriendStancesDto(
+            group(byType, totals.get(postId), "TAKES_PART"),
+            group(byType, totals.get(postId), "INTERESTED"))));
+        return byPost;
+    }
+
+    /** Every friend with a stance on one post, not only the names a card shows. Empty lists for a guest. */
+    public static PostFriendsDto forPost(Connection conn, UUID viewer, UUID postId) throws SQLException {
+        List<FriendStancesDto.Friend> going = new ArrayList<>();
+        List<FriendStancesDto.Friend> interested = new ArrayList<>();
+        if (viewer != null) {
+            stances(conn, viewer, List.of(postId), Integer.MAX_VALUE,
+                (id, type, total, friend) -> ("TAKES_PART".equals(type) ? going : interested).add(friend));
+        }
+        return new PostFriendsDto(going, interested);
+    }
+
+    private interface StanceRow {
+        void accept(UUID postId, String type, int total, FriendStancesDto.Friend friend);
+    }
+
+    /** The newest {@code perStance} friends of each post and stance, newest first, each with the stance's total. */
+    private static void stances(Connection conn, UUID viewer, Collection<UUID> postIds, int perStance, StanceRow row) throws SQLException {
         String sql = """
             SELECT post_id, type, total, user_id, username, first_name, last_name, avatar_key
             FROM (
@@ -60,22 +94,19 @@ public final class Friends {
             ORDER BY post_id, type, n
             """;
 
-        Map<UUID, Map<String, List<FriendStancesDto.Friend>>> people = new HashMap<>();
-        Map<UUID, Map<String, Integer>> totals = new HashMap<>();
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             new ParamBinder(stmt, conn)
                 .bindUUIDArray(postIds.toArray(new UUID[0]))
                 .bindUUID(viewer)
                 .bindUUID(viewer)
-                .bindInt(NAMES_PER_STANCE);
+                .bindInt(perStance);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    UUID postId = (UUID) rs.getObject("post_id");
-                    String type = rs.getString("type");
-                    totals.computeIfAbsent(postId, id -> new HashMap<>()).put(type, rs.getInt("total"));
-                    people.computeIfAbsent(postId, id -> new HashMap<>())
-                        .computeIfAbsent(type, t -> new ArrayList<>())
-                        .add(new FriendStancesDto.Friend(
+                    row.accept(
+                        (UUID) rs.getObject("post_id"),
+                        rs.getString("type"),
+                        rs.getInt("total"),
+                        new FriendStancesDto.Friend(
                             (UUID) rs.getObject("user_id"),
                             rs.getString("username"),
                             rs.getString("first_name"),
@@ -84,12 +115,6 @@ public final class Friends {
                 }
             }
         }
-
-        Map<UUID, FriendStancesDto> byPost = new HashMap<>();
-        people.forEach((postId, byType) -> byPost.put(postId, new FriendStancesDto(
-            group(byType, totals.get(postId), "TAKES_PART"),
-            group(byType, totals.get(postId), "INTERESTED"))));
-        return byPost;
     }
 
     public static List<PostCardDto> withFriendStances(Connection conn, UUID viewer, List<PostCardDto> cards) throws SQLException {

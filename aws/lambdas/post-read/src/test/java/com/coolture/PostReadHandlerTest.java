@@ -6,6 +6,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
+import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.common.security.SecurityContext;
@@ -402,6 +403,33 @@ class PostReadHandlerTest {
             assertEquals(200, response.getStatusCode());
             verify(postReadService).getById(eq(postId), any());
         }
+    }
+
+    @Test
+    void handleRequest_whenPostFriends_callsGetFriendsWithTheCaller_andNotTheDetail() throws Exception {
+        UUID postId = UUID.randomUUID();
+        UUID caller = UUID.randomUUID();
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/" + postId + "/friends", null, Map.of("postId", postId.toString()));
+        when(postReadService.getFriends(postId, caller)).thenReturn(new PostFriendsDto(List.of(), List.of()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.of(caller));
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            assertEquals("{\"going\":[],\"interested\":[]}", response.getBody());
+            verify(postReadService, never()).getById(any(), any());
+        }
+    }
+
+    @Test
+    void handleRequest_whenPostFriendsOfAMissingPost_returns404() throws Exception {
+        UUID postId = UUID.randomUUID();
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/" + postId + "/friends", null, Map.of("postId", postId.toString()));
+        when(postReadService.getFriends(eq(postId), any())).thenThrow(new IllegalArgumentException("Post not found: " + postId));
+
+        assertEquals(404, handler.handleRequest(event, lambdaContext).getStatusCode());
     }
 
     @Test

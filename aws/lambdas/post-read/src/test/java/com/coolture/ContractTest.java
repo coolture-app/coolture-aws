@@ -14,6 +14,7 @@ import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.dto.enums.MediaPurpose;
@@ -153,6 +154,23 @@ class ContractTest {
         assertMatches(responseReport("/posts/map", ApiGatewayEvents.get("/posts/map", Map.of(
             "leftUpper.latitude", "54.5", "leftUpper.longitude", "18.0",
             "rightBottom.latitude", "54.0", "rightBottom.longitude", "19.0"))));
+    }
+
+    @Test
+    void postFriends_matches() throws Exception {
+        UUID postId = UUID.randomUUID();
+        String path = "/posts/" + postId + "/friends";
+        FriendStancesDto stances = friendStances();
+        when(posts.getFriends(any(), any()))
+            .thenReturn(new PostFriendsDto(stances.going().people(), List.of()))
+            .thenThrow(new IllegalArgumentException("Post not found: " + postId));
+
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(path, null, Map.of("postId", postId.toString()));
+
+        assertMatches(responseReport(path, event));
+        assertEquals(404, handler.handleRequest(event, context).getStatusCode());
+        assertMatches(responseReport(path, event));
+        assertTrue(bodyReport(path, "{\"going\":[]}").hasErrors());
     }
 
     @Test

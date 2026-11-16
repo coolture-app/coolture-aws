@@ -27,6 +27,9 @@ This folder is inside `post-read` because that Lambda serves everything describe
 `rightBottom.latitude`, `rightBottom.longitude`), and `excludeMine=true` to leave out what the feed leaves out. `GET /posts/{id}`
 doesn't change.
 
+**Friends:** a card's `friendStances` names at most 2 friends per stance and counts the rest. `GET /posts/{postId}/friends`
+lists them all, for the list behind the card's friends line.
+
 **Photos:** every `PostCard` has `photos`, all of the post's photos with the cover first, at most 8. A post can't have more than 8
 (`PostLimits.MAX_PHOTOS` in `common`; `POST` and `PUT /posts` return `400` above it).
 `GET /posts/recommendations` no longer exists.

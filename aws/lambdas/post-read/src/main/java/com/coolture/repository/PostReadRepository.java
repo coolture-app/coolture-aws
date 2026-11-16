@@ -12,6 +12,7 @@ import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
+import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.enums.PostStatus;
@@ -180,6 +181,20 @@ public class PostReadRepository {
             }
         }
         return Optional.empty();
+    }
+
+    /** Empty when the post is missing or deleted, as on the post's page. */
+    public Optional<PostFriendsDto> findFriends(UUID postId, UUID callerId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM posts WHERE id = ? AND deleted_at IS NULL")) {
+            new ParamBinder(stmt, conn).bindUUID(postId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+            }
+            return Optional.of(Friends.forPost(conn, callerId, postId));
+        }
     }
 
     /** With excludeMine, the same posts the feed would show this viewer: none of their own, reacted to or attended. */

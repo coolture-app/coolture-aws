@@ -54,6 +54,8 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
                 return ApiResponse.ok(Map.of("status", "UP"));
             } else if (path.endsWith("/posts/map") || path.endsWith("/map")) {
                 return getMapMarks(event, callerId);
+            } else if (path.endsWith("/friends") && isPostDetailRequest(event)) {
+                return ApiResponse.ok(service.getFriends(extractPostId(event), callerId));
             } else if (isPostDetailRequest(event)) {
                 return getPostById(event, callerId);
             } else if (path.endsWith("/feed")) {

@@ -7,11 +7,14 @@ INSERT INTO users (id, username) VALUES
   ('a0000000-0000-0000-0000-000000000005', 'blocked_me'),
   ('a0000000-0000-0000-0000-000000000006', 'friend'),
   ('a0000000-0000-0000-0000-000000000007', 'fan'),
-  ('a0000000-0000-0000-0000-000000000008', 'quiet_friend');
+  ('a0000000-0000-0000-0000-000000000008', 'quiet_friend'),
+  ('a0000000-0000-0000-0000-000000000009', 'friend_2'),
+  ('a0000000-0000-0000-0000-000000000010', 'friend_3');
 
 UPDATE users SET share_stances = false WHERE id = 'a0000000-0000-0000-0000-000000000008';
 
--- I follow `followed` one way, `fan` follows me one way, and `friend` and `quiet_friend` are mutual follows.
+-- I follow `followed` one way, `fan` follows me one way, and `friend`, `quiet_friend`, `friend_2` and `friend_3` are
+-- mutual follows.
 
 INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
   ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000003', 'FOLLOW'),
@@ -21,7 +24,11 @@ INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
   ('a0000000-0000-0000-0000-000000000006', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW'),
   ('a0000000-0000-0000-0000-000000000007', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW'),
   ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000008', 'FOLLOW'),
-  ('a0000000-0000-0000-0000-000000000008', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW');
+  ('a0000000-0000-0000-0000-000000000008', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW'),
+  ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000009', 'FOLLOW'),
+  ('a0000000-0000-0000-0000-000000000009', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW'),
+  ('a0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000010', 'FOLLOW'),
+  ('a0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000001', 'FOLLOW');
 
 CREATE TEMP TABLE fx (title text, author text, starts interval, ends interval, deleted boolean);
 INSERT INTO fx VALUES
@@ -51,7 +58,8 @@ INSERT INTO fx VALUES
   ('friend_not_for_me',        '2', '2 days',    NULL,        false),
   ('followed_going',           '2', '2 days',    NULL,        false),
   ('fan_going',                '2', '2 days',    NULL,        false),
-  ('quiet_friend_going',       '2', '2 days',    NULL,        false);
+  ('quiet_friend_going',       '2', '2 days',    NULL,        false),
+  ('friends_crowd',            '2', '2 days',    NULL,        false);
 
 INSERT INTO posts (author_id, title, starts_at, ends_at, type, deleted_at)
 SELECT ('a0000000-0000-0000-0000-00000000000' || author)::uuid, title, now() + starts, now() + ends, 'ONLINE',
@@ -81,6 +89,18 @@ JOIN (VALUES ('friend_going', '6', 'TAKES_PART'), ('friend_interested', '6', 'IN
              ('friend_not_for_me', '6', 'NOT_INTERESTED'), ('followed_going', '3', 'TAKES_PART'),
              ('fan_going', '7', 'TAKES_PART'), ('quiet_friend_going', '8', 'TAKES_PART')) AS s (title, who, type)
   ON s.title = p.title;
+
+-- More friends than a card names, a minute apart, with the people who aren't friends mixed in.
+INSERT INTO post_participations (post_id, user_id, type, created_at)
+SELECT p.id, s.who::uuid, s.type, now() - s.ago::interval
+FROM posts p
+CROSS JOIN (VALUES ('a0000000-0000-0000-0000-000000000006', 'TAKES_PART', '3 minutes'),
+                   ('a0000000-0000-0000-0000-000000000009', 'TAKES_PART', '2 minutes'),
+                   ('a0000000-0000-0000-0000-000000000010', 'TAKES_PART', '1 minute'),
+                   ('a0000000-0000-0000-0000-000000000003', 'INTERESTED', '1 minute'),
+                   ('a0000000-0000-0000-0000-000000000007', 'INTERESTED', '1 minute'),
+                   ('a0000000-0000-0000-0000-000000000008', 'INTERESTED', '1 minute')) AS s (who, type, ago)
+WHERE p.title = 'friends_crowd';
 
 INSERT INTO comments (post_id, author_id, content)
 SELECT id, 'a0000000-0000-0000-0000-000000000001', 'x' FROM posts WHERE title = 'commented';
