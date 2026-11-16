@@ -43,8 +43,10 @@ FROM (VALUES
 ) AS picks (user_id, interest_key)
 WHERE NOT EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = picks.user_id::uuid);
 
+-- Anna and Jan follow each other, so they're friends and see each other's stances. Ola and Jan follow one way.
 INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
     ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003', 'FOLLOW'),
+    ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000002', 'FOLLOW'),
     ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000004', 'FOLLOW'),
     ('00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000002', 'FOLLOW')
 ON CONFLICT DO NOTHING;
