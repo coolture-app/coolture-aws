@@ -318,17 +318,23 @@ def test_a_failed_upload_deletes_its_media_and_the_post_goes_on_without_it(api_r
     assert session.calls[-1][2]['json'] == {'eventUrl': 'a'}
 
 
-def test_a_storage_that_cannot_be_reached_is_tried_once_more_and_both_medias_are_deleted():
-    class Down(FakeSession):
+@pytest.mark.parametrize('failure, tries', [
+    # The session already tried the connection again.
+    (requests.ConnectionError('down'), 1),
+    (requests.ReadTimeout('slow'), 2),
+])
+def test_a_failed_storage_deletes_each_media_and_only_a_slow_one_is_tried_again(failure, tries):
+    class Failing(FakeSession):
         def put(self, url, timeout, **kwargs):
-            raise requests.ConnectionError('down')
+            raise failure
 
-    session = FakeSession([init('m1'), GONE, init('m2'), GONE, CREATED])
-    client = CooltureApi(session, Down([]), 'http://api.test', token='t')
+    medias = [f'm{n}' for n in range(1, tries + 1)]
+    session = FakeSession([*(r for media in medias for r in (init(media), GONE)), CREATED])
+    client = CooltureApi(session, Failing([]), 'http://api.test', token='t')
 
     assert client.create_post({'eventUrl': 'a'}, [IMAGE]) == Outcome()
-    assert ('DELETE', 'http://api.test/media/m1') in requests_made(session)
-    assert ('DELETE', 'http://api.test/media/m2') in requests_made(session)
+    assert [r for r in requests_made(session) if r[0] == 'DELETE'] == [
+        ('DELETE', f'http://api.test/media/{media}') for media in medias]
 
 
 @pytest.mark.parametrize('first_try, storage', [
