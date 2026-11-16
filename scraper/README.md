@@ -104,8 +104,8 @@ Run totals are logged at the end. `exact_location` and `city_location` show how 
 how many were left out. `with_image` counts the posts created with at least one photo, and `photos` the photos they got.
 
 Each photo is downloaded, its width and height read from its header, and uploaded through `/media/uploads` in that order.
-A post's first photo is its cover. A photo that can't be downloaded or uploaded
-is left out and the rest go on, up to the API's 8 photos a post. An upload that fails after `/media/uploads/init` deletes its
+A post's first photo is its cover. An upload that times out or gets a 5xx is tried once more after 5 s. A photo that can't be
+downloaded or uploaded is left out and the rest go on, up to the API's 8 photos a post. An upload that fails after `/media/uploads/init` deletes its
 media, and so does a post the API refuses with a 4xx. A timeout or a 5xx keeps them, because the post may have been saved.
 A 401 or 403 stops the run. `--dry-run` prints each photo it would upload under `images`, as `fileName`, `mimeType`,
 `sizeBytes`, `width` and `height`.

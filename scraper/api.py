@@ -21,6 +21,10 @@ LEDGER_LOCK = threading.Lock()
 PAGE_LIMIT = 100
 TIMEOUT_S = 40
 WRITE_PAUSE_S = 0.1
+# A failed image upload is tried once more after this, because `sam local` starts the media Lambdas on a seed's first
+# uploads, and those time out or get a 5xx.
+UPLOAD_TRIES = 2
+RETRY_PAUSE_S = 5
 # PostLimits.MAX_PHOTOS: POST /posts refuses more.
 MAX_PHOTOS = 8
 # The local API names a new X-User-Id user after it. The API would turn a hyphen into this underscore.
@@ -65,6 +69,14 @@ class FileLedger:
 class Outcome:
     failure: str | None = None
     photos: int = 0
+
+
+def _transient(error: Exception) -> bool:
+    """A slow answer or a 5xx may pass a moment later. A 4xx or a wrong body won't, and a connection that failed was
+    already tried again by the session's own retries."""
+    if isinstance(error, requests.Timeout) and not isinstance(error, requests.ConnectionError):
+        return True
+    return isinstance(error, requests.HTTPError) and error.response is not None and error.response.status_code >= 500
 
 
 def _answer(response: requests.Response) -> str:
@@ -161,31 +173,36 @@ class CooltureApi:
 
     def _upload(self, image: Image) -> str | None:
         """Gives the new media's id, or None when this image is left out."""
+        for attempt in range(UPLOAD_TRIES):
+            if attempt:
+                time.sleep(RETRY_PAUSE_S)
+            try:
+                return self._upload_once(image)
+            except (requests.RequestException, *WRONG_SHAPE) as error:
+                log.warning('Image upload failed file=%s reason=%s', image.file_name, error)
+                if not _transient(error):
+                    break
+        return None
+
+    def _upload_once(self, image: Image) -> str:
+        """The new media's id. A failure after the media was made deletes it before raising."""
         fields = {'purpose': 'EVENT_MEDIA', 'mimeType': image.mime_type, 'sizeBytes': len(image.content),
                   'fileName': image.file_name}
         if image.width and image.height:
             fields |= {'width': image.width, 'height': image.height}
-        try:
-            response = self._session.post(f'{self._base_url}/media/uploads/init', json=fields, timeout=TIMEOUT_S)
-            _stop_if_refused(response, 'POST /media/uploads/init')
-            response.raise_for_status()
-            upload = response.json()
-            media_id = upload['mediaId']
-        except (requests.RequestException, *WRONG_SHAPE) as error:
-            log.warning('Image left out file=%s reason=%s', image.file_name, error)
-            return None
+        response = self._session.post(f'{self._base_url}/media/uploads/init', json=fields, timeout=TIMEOUT_S)
+        _stop_if_refused(response, 'POST /media/uploads/init')
+        response.raise_for_status()
+        upload = response.json()
+        media_id = upload['mediaId']
         try:
             self._storage.put(upload['uploadUrl'], data=image.content, headers=upload['requiredHeaders'],
                               timeout=TIMEOUT_S).raise_for_status()
             response = self._session.post(f'{self._base_url}/media/uploads/{media_id}/complete', timeout=TIMEOUT_S)
             _stop_if_refused(response, f'POST /media/uploads/{media_id}/complete')
             response.raise_for_status()
-        except (requests.RequestException, *WRONG_SHAPE) as error:
-            # Otherwise the media would stay PENDING for good.
-            self._delete_media([media_id])
-            log.warning('Image left out file=%s reason=%s', image.file_name, error)
-            return None
         except BaseException:
+            # Otherwise the media would stay PENDING for good.
             self._delete_media([media_id])
             raise
         return media_id
