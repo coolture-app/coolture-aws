@@ -195,7 +195,9 @@ public class PostReadRepository {
                    ST_Y(el.coordinates::geometry) AS latitude,
                    ST_X(el.coordinates::geometry) AS longitude,
                    cover_m.object_key AS cover_url,
-                   el.venue_name, el.city
+                   el.venue_name, el.city,
+                   pr_my.type AS my_reaction,
+                   pp_my.type AS my_participation
             FROM posts p
             JOIN event_locations el ON el.id = p.event_location_id
             LEFT JOIN LATERAL (
@@ -213,6 +215,8 @@ public class PostReadRepository {
                 FROM post_participations pp
                 WHERE pp.post_id = p.id
             ) stances ON true
+            LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid
+            LEFT JOIN post_participations pp_my ON pp_my.post_id = p.id AND pp_my.user_id = ?::uuid
             WHERE p.deleted_at IS NULL
               AND el.coordinates IS NOT NULL
             """
@@ -228,6 +232,10 @@ public class PostReadRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn);
+
+            // The viewer's own reaction and stance
+            b.bindNullableUUID(callerId)
+             .bindNullableUUID(callerId);
 
             PostFilterSql.bind(b, f, callerId);
 
@@ -267,7 +275,9 @@ public class PostReadRepository {
                         rs.getInt("going"),
                         new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
                         rs.getString("venue_name"),
-                        rs.getString("city")
+                        rs.getString("city"),
+                        mapMyReaction(rs),
+                        mapMyParticipation(rs)
                     ));
                 }
             }

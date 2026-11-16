@@ -1,5 +1,7 @@
 package com.coolture.common.dto;
 
+import com.coolture.common.dto.enums.ParticipationType;
+import com.coolture.common.dto.enums.ReactionType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
@@ -19,5 +21,8 @@ public record PostMarkDto(
     int goingCount,
     GeoPointDto coordinates,
     String venueName,
-    String city
+    String city,
+    /** The viewer's own, so the preview's buttons show it with no request. Null for a guest. */
+    ReactionType myReaction,
+    ParticipationType myParticipation
 ) {}

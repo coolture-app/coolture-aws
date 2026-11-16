@@ -633,6 +633,25 @@ class PostReadDbTest {
     }
 
     @Test
+    void mapMarks_carryTheViewersOwnReactionAndStance_andNoneForAGuest() throws SQLException {
+        PostMarkDto before = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, ME, false).get(0);
+        try {
+            like(before.id());
+            mark(before.id(), "now()");
+            PostMarkDto mine = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, ME, false).get(0);
+            PostMarkDto guest = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, null, false).get(0);
+
+            assertEquals(ReactionType.LIKE, mine.myReaction());
+            assertEquals(ParticipationType.NOT_INTERESTED, mine.myParticipation());
+            assertNull(guest.myReaction());
+            assertNull(guest.myParticipation());
+        } finally {
+            unlike(before.id());
+            unmark(before.id());
+        }
+    }
+
+    @Test
     void feed_includePast_letsEndedEventsIn_andKeepsHidingWhatIsMine() throws SQLException {
         assertEquals(union(PUBLIC_LIVE, Set.of("friends_by_followed"), ENDED_RECENTLY, ENDED_LONG_AGO),
             ruleTitles(walkFeed(feedService, ME, 100, null, null, filters(null, true, null, null), FeedMode.RANKED)));

@@ -302,7 +302,8 @@ components:
       additionalProperties: false
       description: >
         What a pin and its preview need. Only the description's start: the map loads every post in view at once, and
-        whole descriptions were over half of the answer.
+        whole descriptions were over half of the answer. The viewer's own reaction and stance are left out for a guest
+        or when there's none.
       required: [id, title, startsAt, positiveReactionCount, interestedCount, goingCount, coordinates]
       properties:
         id: {type: string, format: uuid}
@@ -320,6 +321,8 @@ components:
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
         venueName: {type: string}
         city: {type: string}
+        myReaction: {$ref: '#/components/schemas/ReactionType'}
+        myParticipation: {$ref: '#/components/schemas/ParticipationType'}
     UserSummary:
       type: object
       additionalProperties: false
