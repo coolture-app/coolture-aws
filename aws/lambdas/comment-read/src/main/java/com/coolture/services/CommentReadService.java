@@ -26,7 +26,7 @@ public class CommentReadService {
 
     public CursorPage<CommentSummaryDto> list(
             UUID postId, UUID callerId, UUID parentCommentId, String cursor, int limit) throws SQLException {
-        repository.ensurePostVisible(postId, callerId);
+        repository.ensurePostVisible(postId);
 
         Optional<CursorPayload> payload = CursorCodec.decode(cursor);
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);

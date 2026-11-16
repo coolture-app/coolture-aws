@@ -104,6 +104,17 @@ public class UserRepository {
         return Optional.empty();
     }
 
+    /** False for a user who doesn't exist yet. */
+    public boolean sharesStances(UUID userId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement("SELECT share_stances FROM users WHERE id = ?")) {
+            stmt.setObject(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() && rs.getBoolean("share_stances");
+            }
+        }
+    }
+
     public record HomeRecord(String name, double latitude, double longitude) {}
 
     public Optional<HomeRecord> findHome(UUID userId) throws SQLException {
@@ -174,7 +185,8 @@ public class UserRepository {
         return Optional.empty();
     }
 
-    public UserEntity updateUser(UUID id, String username, String firstName, String lastName, String bio) throws SQLException {
+    public UserEntity updateUser(UUID id, String username, String firstName, String lastName, String bio,
+                                 Boolean shareStances) throws SQLException {
         List<String> setClauses = new ArrayList<>();
         List<Object> params = new ArrayList<>();
 
@@ -193,6 +205,10 @@ public class UserRepository {
         if (bio != null) {
             setClauses.add("bio = ?");
             params.add(bio);
+        }
+        if (shareStances != null) {
+            setClauses.add("share_stances = ?");
+            params.add(shareStances);
         }
 
         if (setClauses.isEmpty()) {
@@ -220,15 +236,26 @@ public class UserRepository {
         throw new IllegalArgumentException("User " + id + " not found");
     }
 
-    public List<UserEntity> search(String q, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    /**
+     * Whether user u follows the caller, whose id is bound as parameter 1, so it goes in the SELECT list. A guest's
+     * null matches no row, and a block deletes the follow.
+     */
+    private static final String FOLLOWS_CALLER = """
+        EXISTS (SELECT 1 FROM user_relations f
+                WHERE f.source_user_id = u.id AND f.target_user_id = ?::uuid AND f.type = 'FOLLOW')""";
+
+    public record ListedUser(UserEntity user, boolean followsYou) {}
+
+    public List<ListedUser> search(UUID callerId, String q, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
         String sql = """
-            SELECT id, username, first_name, last_name, bio, created_at
-            FROM users
+            SELECT id, username, first_name, last_name, bio, created_at,
+                   %s AS follows_you
+            FROM users u
             WHERE (? IS NULL OR username ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?)
               AND (?::timestamptz IS NULL OR (created_at < ?::timestamptz OR (created_at = ?::timestamptz AND id < ?::uuid)))
             ORDER BY created_at DESC, id DESC
             LIMIT ?
-        """;
+        """.formatted(FOLLOWS_CALLER);
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -236,22 +263,24 @@ public class UserRepository {
             String pattern = (q != null && !q.isBlank()) ? "%" + q + "%" : null;
             Timestamp cursorTs = cursorCreatedAt != null ? Timestamp.from(cursorCreatedAt) : null;
 
-            stmt.setString(1, pattern);
+            stmt.setObject(1, callerId);
+
             stmt.setString(2, pattern);
             stmt.setString(3, pattern);
             stmt.setString(4, pattern);
+            stmt.setString(5, pattern);
 
-            stmt.setTimestamp(5, cursorTs);
             stmt.setTimestamp(6, cursorTs);
             stmt.setTimestamp(7, cursorTs);
-            stmt.setObject(8, cursorId);
+            stmt.setTimestamp(8, cursorTs);
+            stmt.setObject(9, cursorId);
 
-            stmt.setInt(9, limit);
+            stmt.setInt(10, limit);
 
-            List<UserEntity> users = new ArrayList<>();
+            List<ListedUser> users = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    users.add(mapUser(rs));
+                    users.add(new ListedUser(mapUser(rs), rs.getBoolean("follows_you")));
                 }
             }
             return users;
@@ -268,6 +297,29 @@ public class UserRepository {
             }
         }
         return 0;
+    }
+
+    /** In the order /dicts/interests lists them. */
+    public List<String> findInterestKeys(UUID userId) throws SQLException {
+        String sql = """
+            SELECT ui.interest_key
+            FROM user_interests ui
+            JOIN interests i ON i.key = ui.interest_key
+            JOIN interest_categories c ON c.key = i.category_key
+            WHERE ui.user_id = ?
+            ORDER BY c.position, c.key, i.position, i.key
+            """;
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                List<String> keys = new ArrayList<>();
+                while (rs.next()) {
+                    keys.add(rs.getString(1));
+                }
+                return keys;
+            }
+        }
     }
 
     public int countFollowing(UUID userId) throws SQLException {
@@ -320,11 +372,12 @@ public class UserRepository {
         }
     }
 
-    public record UserRelationRow(UserEntity user, Instant relationCreatedAt) {}
+    public record UserRelationRow(UserEntity user, Instant relationCreatedAt, boolean followsYou) {}
 
-    public List<UserRelationRow> findFollowers(UUID userId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    public List<UserRelationRow> findFollowers(UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
         String sql = """
-            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at
+            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at,
+                   %s AS follows_you
             FROM user_relations ur
             JOIN users u ON u.id = ur.source_user_id
             WHERE ur.target_user_id = ?
@@ -332,13 +385,14 @@ public class UserRepository {
               AND (?::timestamptz IS NULL OR (ur.created_at < ?::timestamptz OR (ur.created_at = ?::timestamptz AND ur.source_user_id < ?::uuid)))
             ORDER BY ur.created_at DESC, ur.source_user_id DESC
             LIMIT ?
-        """;
-        return queryUserRelations(sql, userId, cursorCreatedAt, cursorId, limit);
+        """.formatted(FOLLOWS_CALLER);
+        return queryUserRelations(sql, userId, callerId, cursorCreatedAt, cursorId, limit);
     }
 
-    public List<UserRelationRow> findFollowing(UUID userId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    public List<UserRelationRow> findFollowing(UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
         String sql = """
-            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at
+            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at,
+                   %s AS follows_you
             FROM user_relations ur
             JOIN users u ON u.id = ur.target_user_id
             WHERE ur.source_user_id = ?
@@ -346,13 +400,14 @@ public class UserRepository {
               AND (?::timestamptz IS NULL OR (ur.created_at < ?::timestamptz OR (ur.created_at = ?::timestamptz AND ur.target_user_id < ?::uuid)))
             ORDER BY ur.created_at DESC, ur.target_user_id DESC
             LIMIT ?
-        """;
-        return queryUserRelations(sql, userId, cursorCreatedAt, cursorId, limit);
+        """.formatted(FOLLOWS_CALLER);
+        return queryUserRelations(sql, userId, callerId, cursorCreatedAt, cursorId, limit);
     }
 
-    public List<UserRelationRow> findBlocking(UUID userId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    public List<UserRelationRow> findBlocking(UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
         String sql = """
-            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at
+            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at,
+                   %s AS follows_you
             FROM user_relations ur
             JOIN users u ON u.id = ur.target_user_id
             WHERE ur.source_user_id = ?
@@ -360,27 +415,28 @@ public class UserRepository {
               AND (?::timestamptz IS NULL OR (ur.created_at < ?::timestamptz OR (ur.created_at = ?::timestamptz AND ur.target_user_id < ?::uuid)))
             ORDER BY ur.created_at DESC, ur.target_user_id DESC
             LIMIT ?
-        """;
-        return queryUserRelations(sql, userId, cursorCreatedAt, cursorId, limit);
+        """.formatted(FOLLOWS_CALLER);
+        return queryUserRelations(sql, userId, callerId, cursorCreatedAt, cursorId, limit);
     }
 
-    private List<UserRelationRow> queryUserRelations(String sql, UUID userId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    private List<UserRelationRow> queryUserRelations(String sql, UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             Timestamp cursorTs = cursorCreatedAt != null ? Timestamp.from(cursorCreatedAt) : null;
-            stmt.setObject(1, userId);
-            stmt.setTimestamp(2, cursorTs);
+            stmt.setObject(1, callerId);
+            stmt.setObject(2, userId);
             stmt.setTimestamp(3, cursorTs);
             stmt.setTimestamp(4, cursorTs);
-            stmt.setObject(5, cursorId);
-            stmt.setInt(6, limit);
+            stmt.setTimestamp(5, cursorTs);
+            stmt.setObject(6, cursorId);
+            stmt.setInt(7, limit);
 
             List<UserRelationRow> list = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     UserEntity user = mapUser(rs);
                     Instant relCreatedAt = mapInstant(rs, "relation_created_at");
-                    list.add(new UserRelationRow(user, relCreatedAt));
+                    list.add(new UserRelationRow(user, relCreatedAt, rs.getBoolean("follows_you")));
                 }
             }
             return list;

@@ -1,4 +1,5 @@
 import struct
+import zlib
 from dataclasses import dataclass
 
 
@@ -30,6 +31,17 @@ def image_size(data: bytes) -> tuple[int, int] | None:
                 return width, height
             i += 2 + length
     return None
+
+
+def solid_png(size: int, rgb: tuple[int, int, int]) -> bytes:
+    """A square PNG of one colour, made without an image library."""
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+
+    # Each row starts with its filter type, 0 for none. 8-bit RGB, no interlacing.
+    rows = (b'\x00' + bytes(rgb) * size) * size
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
 
 
 @dataclass(frozen=True)

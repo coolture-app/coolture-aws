@@ -1,6 +1,7 @@
 package com.coolture.feed;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.ResultSetMappers;
@@ -32,7 +33,6 @@ public class FeedRepository {
         return "p.deleted_at IS NULL\n"
             + (showsEnded ? "" : "  AND " + PostSql.NOT_ENDED + "\n")
             + "  AND p.created_at <= ?::timestamptz\n"
-            + "  AND " + PostSql.VISIBLE + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + PostSql.NOT_MINE + "\n"
             + "  AND " + PostFilterSql.MATCHES + "\n";
@@ -292,7 +292,7 @@ public class FeedRepository {
             }
             b.bindInt(limit);
 
-            return readCards(stmt);
+            return readCards(stmt, viewer);
         }
     }
 
@@ -308,28 +308,27 @@ public class FeedRepository {
                 .bindNullableUUID(viewer)
                 .bindUUIDArray(ids.toArray(new UUID[0]));
 
-            return readCards(stmt);
+            return readCards(stmt, viewer);
         }
     }
 
     private static void bindRules(ParamBinder b, UUID viewer, Instant asOf, PostFeedFilters filters) throws SQLException {
         b.bindTimestamp(asOf);
-        // Visible, then not blocked
+        // Not blocked
         b.bindNullableUUID(viewer)
-         .bindNullableUUID(viewer)
-         .bindNullableUUID(viewer)
          .bindNullableUUID(viewer);
         PostSql.bindNotMine(b, viewer);
         PostFilterSql.bind(b, filters, viewer);
     }
 
-    private static List<PostCardDto> readCards(PreparedStatement stmt) throws SQLException {
+    private static List<PostCardDto> readCards(PreparedStatement stmt, UUID viewer) throws SQLException {
         List<PostCardDto> cards = new ArrayList<>();
         try (ResultSet rs = stmt.executeQuery()) {
             while (rs.next()) {
                 cards.add(ResultSetMappers.mapPostCard(rs));
             }
         }
-        return MediaQueries.withPhotos(stmt.getConnection(), cards);
+        Connection conn = stmt.getConnection();
+        return Friends.withFriendStances(conn, viewer, MediaQueries.withPhotos(conn, cards));
     }
 }

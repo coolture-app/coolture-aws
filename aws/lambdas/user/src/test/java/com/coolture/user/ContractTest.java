@@ -21,6 +21,7 @@ import com.coolture.user.dto.HomeDto;
 import com.coolture.user.dto.InterestCatalogDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.UserInterestsDto;
+import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.service.InterestService;
 import com.coolture.user.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,17 +71,18 @@ class ContractTest {
     }
 
     private static UserProfileDto minimalProfile(UUID id) {
-        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false);
+        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false, false, List.of());
     }
 
     private static UserProfileDto fullProfile(UUID id) {
-        return new UserProfileDto(id, "jan", "Jan", "Demo", avatar(), 1, 2, "Teatr", Instant.now(), true, false);
+        return new UserProfileDto(id, "jan", "Jan", "Demo", avatar(), 1, 2, "Teatr", Instant.now(), true, false, true,
+            List.of("theatre", "cinema"));
     }
 
-    private static CursorPage<UserSummaryDto> page() {
+    private static CursorPage<UserListItemDto> page() {
         return new CursorPage<>(List.of(
-            new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, null, 0, 0),
-            new UserSummaryDto(UUID.randomUUID(), "ola", "Ola", "Demo", avatar(), Instant.now(), 3, 4)),
+            new UserListItemDto(new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, null, 0, 0), false),
+            new UserListItemDto(new UserSummaryDto(UUID.randomUUID(), "ola", "Ola", "Demo", avatar(), Instant.now(), 3, 4), true)),
             new PaginationMeta(2, true, "abc"));
     }
 
@@ -116,7 +118,6 @@ class ContractTest {
     @Test
     void me_withAndWithoutAHome_matches() throws Exception {
         when(users.getMe(any(), any(), any(), any())).thenReturn(fullProfile(CALLER));
-        when(interests.hasSelection(CALLER)).thenReturn(true);
         when(users.getHome(CALLER)).thenReturn(Optional.of(new HomeDto("Gdynia", new GeoPointDto(54.52, 18.54))));
         assertMatches(report("/auth/me", Request.Method.GET, signedIn("GET", "/auth/me", null, null)));
 
@@ -142,8 +143,8 @@ class ContractTest {
     @Test
     void pagesOfPeople_match() throws Exception {
         when(users.search(any(), any(), any(), anyInt())).thenReturn(page());
-        when(users.getFollowers(any(), any(), anyInt())).thenReturn(page());
-        when(users.getFollowing(any(), any(), anyInt())).thenReturn(page());
+        when(users.getFollowers(any(), any(), any(), anyInt())).thenReturn(page());
+        when(users.getFollowing(any(), any(), any(), anyInt())).thenReturn(page());
         when(users.getBlocking(any(), any(), any(), anyInt())).thenReturn(page());
 
         assertMatches(report("/users", Request.Method.GET,
@@ -197,12 +198,18 @@ class ContractTest {
     void interests_match() throws Exception {
         when(interests.getCatalog()).thenReturn(new InterestCatalogDto(3, 6, List.of(new InterestCatalogDto.Category(
             "culture", "Kultura", "Culture", List.of(new InterestCatalogDto.Interest("theatre", "Teatr", "Theatre"))))));
-        when(interests.getSelection(CALLER, CALLER)).thenReturn(new UserInterestsDto(List.of("theatre")));
+        UUID nobody = UUID.randomUUID();
+        when(interests.getSelection(OTHER)).thenReturn(new UserInterestsDto(List.of("theatre")));
+        when(interests.getSelection(nobody)).thenThrow(new IllegalArgumentException("User " + nobody + " not found"));
         when(interests.replaceSelection(eq(CALLER), eq(CALLER), any())).thenReturn(new UserInterestsDto(List.of("theatre", "cinema", "jazz")));
         String path = "/users/" + CALLER + "/interests";
 
+        String others = "/users/" + OTHER + "/interests";
+        String nobodys = "/users/" + nobody + "/interests";
+
         assertMatches(report("/dicts/interests", Request.Method.GET, signedIn("GET", "/dicts/interests", null, null)));
-        assertMatches(report(path, Request.Method.GET, signedIn("GET", path, null, CALLER)));
+        assertMatches(report(others, Request.Method.GET, signedIn("GET", others, null, OTHER)));
+        assertMatches(report(nobodys, Request.Method.GET, signedIn("GET", nobodys, null, nobody)));
         assertMatches(report(path, Request.Method.PUT, signedIn("PUT", path, "{\"interests\":[\"theatre\",\"cinema\",\"jazz\"]}", CALLER)));
     }
 
@@ -236,13 +243,39 @@ class ContractTest {
     @Test
     void anUndocumentedField_failsTheCheck() {
         String extraOnMe = "{\"id\":\"" + CALLER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"interestsSelected\":true,\"email\":\"jan@example.com\"}";
+            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interests\":[],\"interestsSelected\":true,\"email\":\"jan@example.com\"}";
         String homeOnAPublicProfile = "{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"home\":{\"name\":\"Gdynia\",\"coordinates\":{\"latitude\":54.5,\"longitude\":18.5}}}";
+            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interests\":[],\"home\":{\"name\":\"Gdynia\",\"coordinates\":{\"latitude\":54.5,\"longitude\":18.5}}}";
 
         assertTrue(VALIDATOR.validateResponse("/auth/me", Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(extraOnMe).build()).hasErrors());
         assertTrue(VALIDATOR.validateResponse("/users/" + OTHER, Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(homeOnAPublicProfile).build()).hasErrors());
+    }
+
+    @Test
+    void aProfileWithoutInterests_failsTheCheck() {
+        String withoutInterests = "{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
+            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false}";
+
+        assertTrue(VALIDATOR.validateResponse("/users/" + OTHER, Request.Method.GET,
+            SimpleResponse.Builder.ok().withContentType("application/json").withBody(withoutInterests).build()).hasErrors());
+    }
+
+    @Test
+    void aProfileOrAPersonInAListWithoutFollowsYou_failsTheCheck() {
+        String profile = "{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
+            + "\"isFollowing\":false,\"isBlocked\":false,\"interests\":[]}";
+        String list = "{\"items\":[{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0}],"
+            + "\"page\":{\"limit\":20,\"hasMore\":false}}";
+        String path = "/users/" + OTHER + "/followers";
+
+        assertTrue(VALIDATOR.validateResponse("/users/" + OTHER, Request.Method.GET,
+            SimpleResponse.Builder.ok().withContentType("application/json").withBody(profile).build()).hasErrors());
+        assertTrue(VALIDATOR.validateResponse(path, Request.Method.GET,
+            SimpleResponse.Builder.ok().withContentType("application/json").withBody(list).build()).hasErrors());
+        assertFalse(VALIDATOR.validateResponse(path, Request.Method.GET, SimpleResponse.Builder.ok()
+            .withContentType("application/json").withBody(list.replace("\"followingCount\":0}", "\"followingCount\":0,\"followsYou\":true}"))
+            .build()).hasErrors());
     }
 }

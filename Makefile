@@ -163,7 +163,10 @@ seed-events: $(VENV_PY) $(SNAPSHOT_DIR)/complete ## Load the snapshot through th
 seed-reactions: $(VENV_PY) ## Demo users react to posts close to their interests (after embed-interests and embed-posts)
 	@$(VENV_PY) scraper/seed.py reactions
 
-seed: seed-events embed-interests embed-posts seed-reactions ## All realistic data: events, embeddings, reactions. Waits for the API
+seed-friends: $(VENV_PY) ## Friends of the demo users mark the soonest posts, one shape of the cards' friends line each (after seed-events)
+	@$(VENV_PY) scraper/seed.py friends
+
+seed: seed-events embed-interests embed-posts seed-reactions seed-friends ## All realistic data: events, embeddings, reactions, friends. Waits for the API
 	@echo "Seeded. Run npm start in ../coolture-frontend and open http://localhost:4200"
 
 .NOTPARALLEL: seed

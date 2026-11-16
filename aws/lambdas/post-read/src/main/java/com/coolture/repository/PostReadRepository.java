@@ -1,20 +1,22 @@
 package com.coolture.repository;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.StanceCounts;
+import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
+import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.storage.MediaUrls;
 
 import java.sql.Connection;
@@ -23,6 +25,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,7 +42,6 @@ public class PostReadRepository {
         String sql = PostSql.CARD_SELECT
             + "WHERE p.deleted_at IS NULL\n"
             + "  AND " + PostFilterSql.MATCHES + "\n"
-            + "  AND " + PostSql.VISIBLE + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + (upcoming ? PostSql.NOT_ENDED : PostSql.NOT_LONG_ENDED) + "\n"
             + (sort.needsPosition() ? "  AND el.coordinates IS NOT NULL\n" : "")
@@ -59,10 +61,8 @@ public class PostReadRepository {
 
             PostFilterSql.bind(b, f, callerId);
 
-            // Visible, then blocks
+            // Blocks
             b.bindNullableUUID(callerId)
-             .bindNullableUUID(callerId)
-             .bindNullableUUID(callerId)
              .bindNullableUUID(callerId);
 
             // Past events
@@ -83,7 +83,7 @@ public class PostReadRepository {
             b.bindInt(limit);
 
             try (ResultSet rs = stmt.executeQuery()) {
-                return MediaQueries.withPhotos(conn, mapPostCardList(rs));
+                return Friends.withFriendStances(conn, callerId, MediaQueries.withPhotos(conn, mapPostCardList(rs)));
             }
         }
     }
@@ -110,7 +110,7 @@ public class PostReadRepository {
 
     public Optional<PostDetailDto> findById(UUID postId, UUID callerId) throws SQLException {
         String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
+            SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status,
                    p.positive_reaction_count, p.comments_count,
                    stances.participant_count, stances.interested_count, stances.going_count,
                    p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
@@ -133,9 +133,6 @@ public class PostReadRepository {
             LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid
             LEFT JOIN post_participations pp_my ON pp_my.post_id = p.id AND pp_my.user_id = ?::uuid
             WHERE p.id = ? AND p.deleted_at IS NULL
-              AND (p.visibility = 'PUBLIC'
-                   OR p.author_id = ?::uuid
-                   OR (p.visibility = 'FRIENDS' AND EXISTS (SELECT 1 FROM user_relations ur WHERE ur.source_user_id = ?::uuid AND ur.target_user_id = p.author_id AND ur.type = 'FOLLOW')))
         """;
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -144,9 +141,7 @@ public class PostReadRepository {
             new ParamBinder(stmt, conn)
                 .bindUUID(callerId)
                 .bindUUID(callerId)
-                .bindUUID(postId)
-                .bindNullableUUID(callerId)
-                .bindNullableUUID(callerId);
+                .bindUUID(postId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -173,19 +168,33 @@ public class PostReadRepository {
                         rs.getInt("comments_count"),
                         mapEnum(rs, "type", PostType.class),
                         mapEnum(rs, "status", PostStatus.class),
-                        mapEnum(rs, "visibility", PostVisibility.class),
                         mapInstant(rs, "created_at"),
                         mapInstant(rs, "last_modified_at"),
                         mapInstant(rs, "deleted_at"),
                         coverMedia,
                         mediaList,
                         mapMyReaction(rs),
-                        mapMyParticipation(rs)
+                        mapMyParticipation(rs),
+                        Friends.forPosts(conn, callerId, List.of(postId)).get(postId)
                     ));
                 }
             }
         }
         return Optional.empty();
+    }
+
+    /** Empty when the post is missing or deleted, as on the post's page. */
+    public Optional<PostFriendsDto> findFriends(UUID postId, UUID callerId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM posts WHERE id = ? AND deleted_at IS NULL")) {
+            new ParamBinder(stmt, conn).bindUUID(postId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+            }
+            return Optional.of(Friends.forPost(conn, callerId, postId));
+        }
     }
 
     /** With excludeMine, the same posts the feed would show this viewer: none of their own, reacted to or attended. */
@@ -219,7 +228,6 @@ public class PostReadRepository {
               AND el.coordinates IS NOT NULL
             """
             + "  AND " + PostFilterSql.MATCHES + "\n"
-            + "  AND " + PostSql.VISIBLE + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + PostSql.NOT_LONG_ENDED + "\n"
             + (hidesMine ? "  AND " + PostSql.NOT_MINE + "\n" : "")
@@ -237,10 +245,8 @@ public class PostReadRepository {
 
             PostFilterSql.bind(b, f, callerId);
 
-            // Visible, then blocks
+            // Blocks
             b.bindNullableUUID(callerId)
-             .bindNullableUUID(callerId)
-             .bindNullableUUID(callerId)
              .bindNullableUUID(callerId);
 
             // Past events
@@ -275,12 +281,14 @@ public class PostReadRepository {
                         rs.getString("venue_name"),
                         rs.getString("city"),
                         mapMyReaction(rs),
-                        mapMyParticipation(rs)
+                        mapMyParticipation(rs),
+                        null
                     ));
                 }
             }
 
-            return list;
+            Map<UUID, FriendStancesDto> friends = Friends.forPosts(conn, callerId, list.stream().map(PostMarkDto::id).toList());
+            return friends.isEmpty() ? list : list.stream().map(mark -> mark.withFriendStances(friends.get(mark.id()))).toList();
         }
     }
 

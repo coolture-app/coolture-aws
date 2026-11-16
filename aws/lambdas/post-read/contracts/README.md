@@ -20,12 +20,15 @@ This folder is inside `post-read` because that Lambda serves everything describe
 | **Contains** | Posts new to this viewer, ranked, narrowed by the filters | Everything visible, minus old events by default |
 | **Order** | Score, or upcoming if ranking fails | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST` |
 
-**The filters mean the same everywhere:** `q`, `tags`, `authorId`, `status`, `visibility`, `type`, `startsFrom`, `startsTo`,
+**The filters mean the same everywhere:** `q`, `tags`, `authorId`, `status`, `followed`, `type`, `startsFrom`, `startsTo`,
 `includePast`, and `radiusKm` around `latitude`/`longitude`. One piece of SQL applies them to `/feed`, `/posts` and `/posts/map`.
 
 `GET /posts/map` takes the same filters as `/posts`, plus the map bounds (`leftUpper.latitude`, `leftUpper.longitude`,
 `rightBottom.latitude`, `rightBottom.longitude`), and `excludeMine=true` to leave out what the feed leaves out. `GET /posts/{id}`
 doesn't change.
+
+**Friends:** a card's `friendStances` names at most 2 friends per stance and counts the rest. `GET /posts/{postId}/friends`
+lists them all, for the list behind the card's friends line.
 
 **Photos:** every `PostCard` has `photos`, all of the post's photos with the cover first, at most 8. A post can't have more than 8
 (`PostLimits.MAX_PHOTOS` in `common`; `POST` and `PUT /posts` return `400` above it).

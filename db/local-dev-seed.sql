@@ -43,10 +43,43 @@ FROM (VALUES
 ) AS picks (user_id, interest_key)
 WHERE NOT EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = picks.user_id::uuid);
 
+-- Anna and Jan follow each other, so they're friends and see each other's stances. Ola and Jan follow one way.
 INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
     ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003', 'FOLLOW'),
+    ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000002', 'FOLLOW'),
     ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000004', 'FOLLOW'),
     ('00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000002', 'FOLLOW')
+ON CONFLICT DO NOTHING;
+
+-- Friends for Anna, Jan and Ola, so a card's friends line can be seen in every shape. `make seed-friends` gives them
+-- stances and a few of them photos. Bartek is a friend who doesn't share his stances, and Iza follows the three without
+-- being followed back, so neither shows on a card.
+INSERT INTO users (id, username, first_name, last_name, share_stances) VALUES
+    ('00000000-0000-0000-0000-000000000005', 'kasia_demo', 'Kasia', 'Kowalska', true),
+    ('00000000-0000-0000-0000-000000000006', 'piotr_demo', 'Piotr', 'Nowak', true),
+    ('00000000-0000-0000-0000-000000000007', 'ewa_demo', 'Ewa', 'Wiśniewska', true),
+    ('00000000-0000-0000-0000-000000000008', 'tomek_demo', 'Tomek', 'Wójcik', true),
+    ('00000000-0000-0000-0000-000000000009', 'zofia_demo', 'Zofia', 'Kamińska', true),
+    ('00000000-0000-0000-0000-000000000010', 'marek_demo', 'Marek', 'Lewandowski', true),
+    ('00000000-0000-0000-0000-000000000011', 'magda_demo', 'Magda', 'Zielińska', true),
+    ('00000000-0000-0000-0000-000000000012', 'bartek_demo', 'Bartek', 'Mazur', false),
+    ('00000000-0000-0000-0000-000000000013', 'iza_demo', 'Iza', 'Krawczyk', true)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO user_relations (source_user_id, target_user_id, type)
+SELECT pair.source_user_id::uuid, pair.target_user_id::uuid, 'FOLLOW'
+FROM (VALUES ('00000000-0000-0000-0000-000000000002'), ('00000000-0000-0000-0000-000000000003'),
+             ('00000000-0000-0000-0000-000000000004')) AS viewer (id)
+CROSS JOIN (VALUES ('00000000-0000-0000-0000-000000000005'), ('00000000-0000-0000-0000-000000000006'),
+                   ('00000000-0000-0000-0000-000000000007'), ('00000000-0000-0000-0000-000000000008'),
+                   ('00000000-0000-0000-0000-000000000009'), ('00000000-0000-0000-0000-000000000010'),
+                   ('00000000-0000-0000-0000-000000000011'), ('00000000-0000-0000-0000-000000000012'))
+    AS friend (id)
+CROSS JOIN LATERAL (VALUES (viewer.id, friend.id), (friend.id, viewer.id)) AS pair (source_user_id, target_user_id)
+UNION ALL
+SELECT '00000000-0000-0000-0000-000000000013'::uuid, viewer.id::uuid, 'FOLLOW'
+FROM (VALUES ('00000000-0000-0000-0000-000000000002'), ('00000000-0000-0000-0000-000000000003'),
+             ('00000000-0000-0000-0000-000000000004')) AS viewer (id)
 ON CONFLICT DO NOTHING;
 
 -- Jan lives in Gdynia, so his feed shows the home fallback when the browser gives no position. Only while he has none:

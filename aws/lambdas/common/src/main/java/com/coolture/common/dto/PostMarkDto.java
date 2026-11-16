@@ -24,5 +24,11 @@ public record PostMarkDto(
     String city,
     /** The viewer's own, so the preview's buttons show it with no request. Null for a guest. */
     ReactionType myReaction,
-    ParticipationType myParticipation
-) {}
+    ParticipationType myParticipation,
+    FriendStancesDto friendStances
+) {
+    public PostMarkDto withFriendStances(FriendStancesDto stances) {
+        return new PostMarkDto(id, title, startsAt, endsAt, coverMediaUrl, excerpt, positiveReactionCount, interestedCount,
+            goingCount, coordinates, venueName, city, myReaction, myParticipation, stances);
+    }
+}

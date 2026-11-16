@@ -43,6 +43,8 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 2. Loads it through the API as `coolture_bot`, with every date moved forward so all events are ahead. About 5 minutes.
 3. Embeds interests and posts. The first run builds the embedding image (3.5 GB, about 10 minutes).
 4. Lets the demo users react to posts close to their interests, so their feeds are personal.
+5. Has Anna's, Jan's and Ola's friends mark the soonest posts, so the top of Wszystkie, sorted Nadchodzące, shows every
+   shape of a card's friends line. This step puts its cases back on every run, on the posts soonest then.
 
 The first run takes about 30 minutes. Later runs take a minute and add nothing. How the snapshot is picked and loaded
 is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
@@ -60,6 +62,7 @@ The frontend's development build has a **DEV** pill at the bottom left:
 |---|---|
 | Gość (default) | A visitor with no account |
 | Anna, Jan, Ola | Regular users with different interests: concerts and clubs; theatre and film; art, running and food |
+| Kasia, Piotr, Ewa, Tomek, Zofia, Marek, Magda | Friends of all three, whose stances fill the cards' friends line. Bartek is a friend who doesn't share his stances, and Iza follows them without being followed back |
 | Bot | The author of the imported events |
 | local_dev | The admin |
 

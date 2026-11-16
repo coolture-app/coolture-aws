@@ -73,7 +73,6 @@ def to_post(event: Event, place: Place | None) -> dict:
         'startsAt': _iso(event.start),
         'tags': [cut(tag, TAG_MAX) for tag in event.category.split(', ')] if event.category else [],
         'type': 'ONLINE' if event.online else 'OFFLINE',
-        'visibility': 'PUBLIC',
     }
     if event.end is not None:
         post['endsAt'] = _iso(event.end)

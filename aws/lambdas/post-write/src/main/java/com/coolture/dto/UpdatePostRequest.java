@@ -2,7 +2,6 @@ package com.coolture.dto;
 
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 
@@ -29,8 +28,6 @@ public record UpdatePostRequest(
 
     PostType type,
 
-    PostVisibility visibility,
-
     @Valid
     EventLocationDto location,
 
@@ -39,7 +36,7 @@ public record UpdatePostRequest(
     UUID coverMediaId
 ) {
     public UpdatePostRequest withMediaIds(List<UUID> ordered) {
-        return new UpdatePostRequest(title, description, eventUrl, startsAt, endsAt, tags, type, visibility, location,
+        return new UpdatePostRequest(title, description, eventUrl, startsAt, endsAt, tags, type, location,
             ordered, coverMediaId);
     }
 }

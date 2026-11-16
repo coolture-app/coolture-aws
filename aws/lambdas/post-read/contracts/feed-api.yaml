@@ -32,7 +32,7 @@ paths:
         - $ref: '#/components/parameters/Tags'
         - $ref: '#/components/parameters/AuthorId'
         - $ref: '#/components/parameters/Status'
-        - $ref: '#/components/parameters/Visibility'
+        - $ref: '#/components/parameters/Followed'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/StartsFrom'
         - $ref: '#/components/parameters/StartsTo'
@@ -83,7 +83,7 @@ paths:
         - $ref: '#/components/parameters/Tags'
         - $ref: '#/components/parameters/AuthorId'
         - $ref: '#/components/parameters/Status'
-        - $ref: '#/components/parameters/Visibility'
+        - $ref: '#/components/parameters/Followed'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/StartsFrom'
         - $ref: '#/components/parameters/StartsTo'
@@ -115,6 +115,7 @@ paths:
         - {name: rightBottom.longitude, in: query, required: true, description: The view's east edge., schema: {type: number, format: double, minimum: -180, maximum: 180}}
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/RadiusKm'
+        - $ref: '#/components/parameters/Followed'
         - name: excludeMine
           in: query
           description: >
@@ -131,6 +132,33 @@ paths:
                 items: {$ref: '#/components/schemas/PostMark'}
         '400':
           $ref: '#/components/responses/BadRequest'
+  /posts/{postId}/friends:
+    get:
+      tags: [Lists]
+      operationId: getPostFriends
+      summary: Every friend of the viewer who marked this post, for the list behind a card's friends line
+      description: >
+        The same friends as the post's friendStances, without the limit on names: mutual follows who marked the post
+        Biorę udział (going) or Interesuje mnie (interested) and share their stances. Newest stance first. Empty lists for
+        a guest.
+      parameters:
+        - {name: postId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Both lists, each possibly empty.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PostFriends'}
+              example:
+                going:
+                  - {id: 00000000-0000-0000-0000-000000000002, username: anna_demo, firstName: Anna, lastName: Demo}
+                interested: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
 components:
   securitySchemes:
     bearerAuth:
@@ -187,10 +215,14 @@ components:
       name: status
       in: query
       schema: {$ref: '#/components/schemas/PostStatus'}
-    Visibility:
-      name: visibility
+    Followed:
+      name: followed
       in: query
-      schema: {$ref: '#/components/schemas/PostVisibility'}
+      description: >
+        Only posts by people the viewer follows, and posts a friend (a mutual follow) marked Interesuje mnie or Biorę
+        udział, unless that friend stopped sharing their stances. Nothing for a guest. Every post is public, so there's no
+        visibility filter; an older client's visibility parameter is ignored.
+      schema: {type: boolean, default: false}
     Type:
       name: type
       in: query
@@ -213,6 +245,11 @@ components:
   responses:
     BadRequest:
       description: Invalid input, including an unreadable cursor. The frontend restarts the list once.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: No such post, or it was deleted.
       content:
         application/json:
           schema: {$ref: '#/components/schemas/Error'}
@@ -268,7 +305,6 @@ components:
         - commentsCount
         - type
         - status
-        - visibility
         - createdAt
       properties:
         id: {type: string, format: uuid}
@@ -287,7 +323,6 @@ components:
         commentsCount: {type: integer}
         type: {$ref: '#/components/schemas/PostType'}
         status: {$ref: '#/components/schemas/PostStatus'}
-        visibility: {$ref: '#/components/schemas/PostVisibility'}
         createdAt: {type: string, format: date-time}
         lastModifiedAt: {type: string, format: date-time}
         deletedAt: {type: string, format: date-time}
@@ -301,6 +336,7 @@ components:
             (PostLimits.MAX_PHOTOS). Left out when the post has none.
           maxItems: 8
           items: {$ref: '#/components/schemas/MediaResource'}
+        friendStances: {$ref: '#/components/schemas/FriendStances'}
     PostMark:
       type: object
       additionalProperties: false
@@ -327,6 +363,45 @@ components:
         city: {type: string}
         myReaction: {$ref: '#/components/schemas/ReactionType'}
         myParticipation: {$ref: '#/components/schemas/ParticipationType'}
+        friendStances: {$ref: '#/components/schemas/FriendStances'}
+    FriendStances:
+      type: object
+      additionalProperties: false
+      description: >
+        The viewer's friends (mutual follows) who marked the post Biorę udział (going) or Interesuje mnie (interested)
+        and share their stances. Left out for a guest or when there are none; a stance nobody took is left out too.
+      properties:
+        going: {$ref: '#/components/schemas/FriendGroup'}
+        interested: {$ref: '#/components/schemas/FriendGroup'}
+    FriendGroup:
+      type: object
+      additionalProperties: false
+      required: [count, people]
+      properties:
+        count: {type: integer, minimum: 1, description: All friends with this stance.}
+        people:
+          type: array
+          description: The newest of them, at most 2 (Friends.NAMES_PER_STANCE).
+          minItems: 1
+          maxItems: 2
+          items: {$ref: '#/components/schemas/Friend'}
+    PostFriends:
+      type: object
+      additionalProperties: false
+      required: [going, interested]
+      properties:
+        going: {type: array, items: {$ref: '#/components/schemas/Friend'}}
+        interested: {type: array, items: {$ref: '#/components/schemas/Friend'}}
+    Friend:
+      type: object
+      additionalProperties: false
+      required: [id, username]
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        avatarUrl: {type: string}
     UserSummary:
       type: object
       additionalProperties: false
@@ -376,7 +451,6 @@ components:
         height: {type: integer, minimum: 1, description: 'Pixels. Sent together with width.'}
     PostType: {type: string, enum: [ONLINE, OFFLINE]}
     PostStatus: {type: string, enum: [ACTIVE, EDITED, DELETED]}
-    PostVisibility: {type: string, enum: [PUBLIC, PRIVATE, FRIENDS]}
     ReactionType: {type: string, enum: [LIKE]}
     ParticipationType:
       type: string

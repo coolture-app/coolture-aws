@@ -2,7 +2,6 @@ package com.coolture.dto;
 
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.NotBlank;
@@ -37,8 +36,6 @@ public record CreatePostRequest(
     @NotNull(message = "type is required")
     PostType type,
 
-    PostVisibility visibility,
-
     @Valid
     EventLocationDto location,
 
@@ -47,7 +44,7 @@ public record CreatePostRequest(
     UUID coverMediaId
 ) {
     public CreatePostRequest withMediaIds(List<UUID> ordered) {
-        return new CreatePostRequest(title, description, eventUrl, startsAt, endsAt, tags, type, visibility, location,
+        return new CreatePostRequest(title, description, eventUrl, startsAt, endsAt, tags, type, location,
             ordered, coverMediaId);
     }
 }

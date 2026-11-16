@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -109,8 +110,22 @@ class InterestServiceTest {
     }
 
     @Test
-    void getSelection_rejectsOtherUser() {
-        assertThrows(SecurityException.class, () -> service.getSelection(USER_ID, UUID.randomUUID()));
+    void getSelection_readsAnyonesInterests() throws SQLException {
+        when(repository.findSelectedKeys(USER_ID)).thenReturn(List.of("jazz", "opera"));
+
+        assertEquals(new UserInterestsDto(List.of("jazz", "opera")), service.getSelection(USER_ID));
+        verify(repository, never()).userExists(any());
+    }
+
+    @Test
+    void getSelection_isEmptyForSomeoneWhoPickedNothing_andNotFoundForNobody() throws SQLException {
+        UUID nobody = UUID.randomUUID();
+        when(repository.findSelectedKeys(any())).thenReturn(List.of());
+        when(repository.userExists(USER_ID)).thenReturn(true);
+
+        assertEquals(new UserInterestsDto(List.of()), service.getSelection(USER_ID));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> service.getSelection(nobody));
+        assertTrue(e.getMessage().contains("not found"));
     }
 
     private static UserInterestsDto request(String... keys) {

@@ -58,9 +58,9 @@ public class CommentWriteRepository {
         return Optional.empty();
     }
 
-    public void ensurePostVisible(UUID postId, UUID callerId) throws SQLException {
+    public void ensurePostVisible(UUID postId) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {
-            PostQueries.ensurePostVisible(conn, postId, callerId);
+            PostQueries.ensurePostVisible(conn, postId);
         }
     }
 
@@ -73,7 +73,7 @@ public class CommentWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                PostQueries.ensurePostVisible(conn, postId, authorId);
+                PostQueries.ensurePostVisible(conn, postId);
 
                 String insertSql = """
                     INSERT INTO comments (

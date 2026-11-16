@@ -45,7 +45,10 @@ paths:
                     createdAt: '2026-11-15T17:00:00Z'
                     isFollowing: false
                     isBlocked: false
+                    followsYou: false
+                    interests: [theatre, stand_up, cinema]
                     interestsSelected: true
+                    shareStances: true
                     home: {name: Gdynia, coordinates: {latitude: 54.52, longitude: 18.54}}
         '401': {$ref: '#/components/responses/Unauthorized'}
   /users:
@@ -78,10 +81,23 @@ paths:
       security: [{}, {bearerAuth: []}]
       responses:
         '200':
-          description: The profile. isFollowing and isBlocked are the caller's relation to it, false for a guest.
+          description: The profile. isFollowing, isBlocked and followsYou are the relation between it and the caller, false for a guest.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UserProfile'}
+              example:
+                id: 00000000-0000-0000-0000-000000000003
+                username: jan_demo
+                firstName: Jan
+                lastName: Demo
+                followersCount: 1
+                followingCount: 1
+                bio: Teatr, stand-up i kino autorskie
+                createdAt: '2026-11-15T17:00:00Z'
+                isFollowing: true
+                isBlocked: false
+                followsYou: true
+                interests: [theatre, stand_up, cinema]
         '404': {$ref: '#/components/responses/NotFound'}
     patch:
       tags: [Profiles]
@@ -203,7 +219,9 @@ paths:
     get:
       tags: [Interests]
       operationId: getUserInterests
-      summary: The caller's own picked interests
+      summary: Someone's picked interests
+      description: >
+        Any signed-in user can read anyone's, for their profile. A block doesn't hide them, as it doesn't hide the profile.
       responses:
         '200':
           description: Interest keys
@@ -211,7 +229,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/UserInterests'}
         '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
     put:
       tags: [Interests]
       operationId: replaceUserInterests
@@ -385,7 +403,7 @@ components:
     UserProfile:
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount, isFollowing, isBlocked]
+      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests]
       properties:
         id: {type: string, format: uuid}
         username: {type: string, maxLength: 32}
@@ -398,11 +416,18 @@ components:
         createdAt: {type: string, format: date-time}
         isFollowing: {type: boolean}
         isBlocked: {type: boolean}
+        followsYou: {type: boolean, description: "Whether this user follows you. With isFollowing, both true means you're friends."}
+        interests:
+          type: array
+          items: {type: string}
+          description: >
+            The keys picked, in the catalogue's order, empty if none. In the profile so the page needs no second request.
+            A guest gets them too: they're no more private than the rest of the profile.
     Me:
       description: UserProfile's fields, plus what only the caller sees.
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, interestsSelected]
+      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests, interestsSelected, shareStances]
       properties:
         id: {type: string, format: uuid}
         username: {type: string, maxLength: 32}
@@ -415,7 +440,10 @@ components:
         createdAt: {type: string, format: date-time}
         isFollowing: {type: boolean}
         isBlocked: {type: boolean}
+        followsYou: {type: boolean, description: "Always false, as you can't follow yourself."}
+        interests: {type: array, items: {type: string}}
         interestsSelected: {type: boolean, description: False until onboarding's interests are saved.}
+        shareStances: {type: boolean, description: Whether friends (mutual follows) see the caller's Interesuje mnie and Biorę udział. True until turned off.}
         home: {$ref: '#/components/schemas/Home'}
     Home:
       description: Where someone lives, left out when they haven't said.
@@ -433,10 +461,11 @@ components:
         firstName: {type: string, maxLength: 128}
         lastName: {type: string, maxLength: 128}
         bio: {type: string, maxLength: 512, nullable: true}
+        shareStances: {type: boolean}
     UserSummary:
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount]
+      required: [id, username, followersCount, followingCount, followsYou]
       properties:
         id: {type: string, format: uuid}
         username: {type: string}
@@ -446,6 +475,7 @@ components:
         createdAt: {type: string, format: date-time}
         followersCount: {type: integer}
         followingCount: {type: integer}
+        followsYou: {type: boolean, description: Whether this user follows you. False for a guest.}
     UserPage:
       type: object
       additionalProperties: false

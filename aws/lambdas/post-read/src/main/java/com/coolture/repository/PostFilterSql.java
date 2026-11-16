@@ -1,14 +1,14 @@
 package com.coolture.repository;
 
+import com.coolture.common.db.Friends;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.dto.PostFeedFilters;
-import com.coolture.common.dto.enums.PostVisibility;
 
 import java.sql.SQLException;
 import java.util.UUID;
 
 /**
- * The filters a person sets: search, tags, author, status, visibility, type, dates and a radius. /posts, /posts/map
+ * The filters a person sets: search, tags, author, status, people I follow, type, dates and a radius. /posts, /posts/map
  * and /feed all narrow their posts with exactly this, so a filter means the same everywhere. Needs `p` and `el`
  * (posts and event_locations) in the query.
  */
@@ -28,7 +28,11 @@ public final class PostFilterSql {
           AND (?::varchar[] IS NULL OR p.tags && ?::varchar[])
           AND (?::uuid IS NULL OR p.author_id = ?::uuid)
           AND (?::varchar IS NULL OR p.status = ?::varchar)
-          AND (?::varchar IS NULL OR p.visibility = ?::varchar)
+          AND (?::boolean IS NOT TRUE
+               OR EXISTS (SELECT 1 FROM user_relations fw WHERE fw.source_user_id = ?::uuid AND fw.target_user_id = p.author_id AND fw.type = 'FOLLOW')
+               OR EXISTS (SELECT 1 FROM post_participations fs WHERE fs.post_id = p.id AND fs.type IN ('INTERESTED', 'TAKES_PART')
+                          AND """ + Friends.sharingFriend("fs.user_id") + """
+        ))
           AND (?::varchar IS NULL OR p.type = ?::varchar)
           AND (?::timestamptz IS NULL OR p.starts_at >= ?::timestamptz)
           AND (?::timestamptz IS NULL OR p.starts_at <= ?::timestamptz)
@@ -45,9 +49,11 @@ public final class PostFilterSql {
         b.bindUUIDFilterPair(f.authorId());
         b.bindStringFilterPair(f.status() != null ? f.status().name() : null);
 
-        // A guest sees public posts only. VISIBLE says so too; this keeps the plan simple for guests.
-        String visibility = f.visibility() != null ? f.visibility().name() : (viewer == null ? PostVisibility.PUBLIC.name() : null);
-        b.bindStringFilterPair(visibility);
+        // A guest follows nobody, so with followed on they get nothing.
+        b.bindBoolean(Boolean.TRUE.equals(f.followed()))
+         .bindNullableUUID(viewer)
+         .bindNullableUUID(viewer)
+         .bindNullableUUID(viewer);
 
         b.bindStringFilterPair(f.type() != null ? f.type().name() : null);
         b.bindTimestampFilterPair(f.startsFrom());

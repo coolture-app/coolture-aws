@@ -4,6 +4,7 @@ import com.coolture.common.dto.MapBoundsDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
+import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.pagination.CursorCodec;
 import com.coolture.common.pagination.CursorPage;
@@ -54,6 +55,11 @@ public class PostReadService {
 
     public PostDetailDto getById(UUID postId, UUID callerId) throws SQLException {
         return repository.findById(postId, callerId)
+            .orElseThrow(() -> new IllegalArgumentException("Post not found: " + postId));
+    }
+
+    public PostFriendsDto getFriends(UUID postId, UUID callerId) throws SQLException {
+        return repository.findFriends(postId, callerId)
             .orElseThrow(() -> new IllegalArgumentException("Post not found: " + postId));
     }
 

@@ -25,12 +25,6 @@ public final class PostSql {
     public static final String NOT_LONG_ENDED =
         "(?::boolean OR " + EVENT_END + " >= now() - interval '" + FeedConfig.PAST_WINDOW_HOURS + " hours')";
 
-    /** Binds the viewer twice. */
-    public static final String VISIBLE = """
-        (p.visibility = 'PUBLIC'
-             OR p.author_id = ?::uuid
-             OR (p.visibility = 'FRIENDS' AND EXISTS (SELECT 1 FROM user_relations ur WHERE ur.source_user_id = ?::uuid AND ur.target_user_id = p.author_id AND ur.type = 'FOLLOW')))""";
-
     /** Binds the viewer twice. Holds for a guest, who has no blocks. */
     public static final String NOT_BLOCKED = """
         NOT EXISTS (SELECT 1 FROM user_relations b
@@ -52,7 +46,7 @@ public final class PostSql {
 
     /** Everything ResultSetMappers.mapPostCard reads, up to the WHERE. Binds the viewer twice. */
     public static final String CARD_SELECT = """
-        SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
+        SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status,
                p.positive_reaction_count, p.comments_count,
                stances.participant_count, stances.interested_count, stances.going_count,
                p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
