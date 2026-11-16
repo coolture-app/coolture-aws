@@ -204,7 +204,9 @@ paths:
     get:
       tags: [Interests]
       operationId: getUserInterests
-      summary: The caller's own picked interests
+      summary: Someone's picked interests
+      description: >
+        Any signed-in user can read anyone's, for their profile. A block doesn't hide them, as it doesn't hide the profile.
       responses:
         '200':
           description: Interest keys
@@ -212,7 +214,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/UserInterests'}
         '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
     put:
       tags: [Interests]
       operationId: replaceUserInterests
