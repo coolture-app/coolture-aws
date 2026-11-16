@@ -2,7 +2,6 @@ package com.coolture.common.dto;
 
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 
 import java.time.Instant;
 import java.util.List;
@@ -13,7 +12,8 @@ public record PostFeedFilters(
     List<String> tags,
     UUID authorId,
     PostStatus status,
-    PostVisibility visibility,
+    /** Only posts by people the viewer follows, or that a friend is interested in or goes to. Null means off. */
+    Boolean followed,
     PostType type,
     Instant startsFrom,
     Instant startsTo,
@@ -29,11 +29,11 @@ public record PostFeedFilters(
 ) {
 
     public PostFeedFilters(
-        String q, List<String> tags, UUID authorId, PostStatus status, PostVisibility visibility, PostType type,
+        String q, List<String> tags, UUID authorId, PostStatus status, Boolean followed, PostType type,
         Instant startsFrom, Instant startsTo, Double latitude, Double longitude, Double radiusKm,
         List<String> participationTypes, String reactionType, String cursor, int limit, String sortBy
     ) {
-        this(q, tags, authorId, status, visibility, type, startsFrom, startsTo, latitude, longitude, radiusKm,
+        this(q, tags, authorId, status, followed, type, startsFrom, startsTo, latitude, longitude, radiusKm,
             participationTypes, reactionType, cursor, limit, sortBy, false);
     }
 

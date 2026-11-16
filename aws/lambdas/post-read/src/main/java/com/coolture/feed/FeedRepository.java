@@ -1,9 +1,11 @@
 package com.coolture.feed;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.ResultSetMappers;
+import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.repository.PostFilterSql;
@@ -17,6 +19,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public class FeedRepository {
@@ -30,7 +33,6 @@ public class FeedRepository {
         return "p.deleted_at IS NULL\n"
             + (showsEnded ? "" : "  AND " + PostSql.NOT_ENDED + "\n")
             + "  AND p.created_at <= ?::timestamptz\n"
-            + "  AND " + PostSql.VISIBLE + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + PostSql.NOT_MINE + "\n"
             + "  AND " + PostFilterSql.MATCHES + "\n";
@@ -136,6 +138,27 @@ public class FeedRepository {
 
     public FeedRepository(String model) {
         this.model = model;
+    }
+
+    /** Where the viewer lives, if they said. Empty for a guest, with no query. */
+    public Optional<GeoPointDto> findHome(UUID viewer) throws SQLException {
+        if (viewer == null) {
+            return Optional.empty();
+        }
+        String sql = """
+            SELECT ST_Y(home_location::geometry) AS latitude, ST_X(home_location::geometry) AS longitude
+            FROM users
+            WHERE id = ? AND home_location IS NOT NULL
+            """;
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, viewer);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next()
+                    ? Optional.of(new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")))
+                    : Optional.empty();
+            }
+        }
     }
 
     /** Empty for a guest, with no query. */
@@ -277,7 +300,7 @@ public class FeedRepository {
             }
             b.bindInt(limit);
 
-            return readCards(stmt);
+            return readCards(stmt, viewer);
         }
     }
 
@@ -293,28 +316,27 @@ public class FeedRepository {
                 .bindNullableUUID(viewer)
                 .bindUUIDArray(ids.toArray(new UUID[0]));
 
-            return readCards(stmt);
+            return readCards(stmt, viewer);
         }
     }
 
     private static void bindRules(ParamBinder b, UUID viewer, Instant asOf, PostFeedFilters filters) throws SQLException {
         b.bindTimestamp(asOf);
-        // Visible, then not blocked
+        // Not blocked
         b.bindNullableUUID(viewer)
-         .bindNullableUUID(viewer)
-         .bindNullableUUID(viewer)
          .bindNullableUUID(viewer);
         PostSql.bindNotMine(b, viewer);
         PostFilterSql.bind(b, filters, viewer);
     }
 
-    private static List<PostCardDto> readCards(PreparedStatement stmt) throws SQLException {
+    private static List<PostCardDto> readCards(PreparedStatement stmt, UUID viewer) throws SQLException {
         List<PostCardDto> cards = new ArrayList<>();
         try (ResultSet rs = stmt.executeQuery()) {
             while (rs.next()) {
                 cards.add(ResultSetMappers.mapPostCard(rs));
             }
         }
-        return MediaQueries.withPhotos(stmt.getConnection(), cards);
+        Connection conn = stmt.getConnection();
+        return Friends.withFriendStances(conn, viewer, MediaQueries.withPhotos(conn, cards));
     }
 }

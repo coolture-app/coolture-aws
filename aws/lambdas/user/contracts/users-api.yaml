@@ -1,0 +1,567 @@
+openapi: 3.0.3
+info:
+  title: Coolture users
+  version: 1.0.0
+  description: >
+    Accounts, profiles, the home area, interests, follows and blocks: everything the user Lambda serves. A route under
+    /users/{userId} that changes or reads private data works only on the caller's own id and answers 403 for anyone
+    else's. Change this file first, in its own pull request or commit, then the code; ContractTest checks the handler's
+    responses against it.
+servers:
+  - url: http://localhost:3000
+    description: Local stack. On AWS, the same paths are behind /api.
+security:
+  - bearerAuth: []
+tags:
+  - name: Account
+  - name: Profiles
+  - name: Interests
+  - name: Relations
+paths:
+  /auth/me:
+    get:
+      tags: [Account]
+      operationId: getMe
+      summary: The caller's own profile and account state
+      description: >
+        Creates the user row on the first call after sign-up, from the token's claims. The only response with the home
+        area, which nobody else can read.
+      responses:
+        '200':
+          description: The caller
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+              examples:
+                withHome:
+                  value:
+                    id: 00000000-0000-0000-0000-000000000003
+                    username: jan_demo
+                    firstName: Jan
+                    lastName: Demo
+                    followersCount: 1
+                    followingCount: 1
+                    bio: Teatr, stand-up i kino autorskie
+                    createdAt: '2026-11-15T17:00:00Z'
+                    isFollowing: false
+                    isBlocked: false
+                    followsYou: false
+                    interests: [theatre, stand_up, cinema]
+                    interestsSelected: true
+                    shareStances: true
+                    home: {name: Gdynia, coordinates: {latitude: 54.52, longitude: 18.54}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /users:
+    get:
+      tags: [Profiles]
+      operationId: searchUsers
+      summary: People, newest accounts first
+      parameters:
+        - name: q
+          in: query
+          description: Matches the username, first and last name. Without it, everyone.
+          schema: {type: string}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of people
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [Profiles]
+      operationId: getUser
+      summary: A public profile
+      security: [{}, {bearerAuth: []}]
+      responses:
+        '200':
+          description: The profile. isFollowing, isBlocked and followsYou are the relation between it and the caller, false for a guest.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserProfile'}
+              example:
+                id: 00000000-0000-0000-0000-000000000003
+                username: jan_demo
+                firstName: Jan
+                lastName: Demo
+                followersCount: 1
+                followingCount: 1
+                bio: Teatr, stand-up i kino autorskie
+                createdAt: '2026-11-15T17:00:00Z'
+                isFollowing: true
+                isBlocked: false
+                followsYou: true
+                interests: [theatre, stand_up, cinema]
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Profiles]
+      operationId: updateUser
+      summary: Changes the caller's own profile
+      description: A field that is left out or null stays as it is, so a field can't be cleared here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UserProfileUpdate'}
+      responses:
+        '200':
+          description: The profile after the change
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserProfile'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /users/by-username/{username}:
+    get:
+      tags: [Profiles]
+      operationId: getUserByUsername
+      summary: A public profile, by its handle
+      security: [{}, {bearerAuth: []}]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: The profile
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserProfile'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /users/{userId}/home:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    put:
+      tags: [Account]
+      operationId: setHome
+      summary: Sets where the caller lives
+      description: >
+        A city, town, village or district, as the client picked it from the geocoder; the server can't check it. The
+        coordinates are rounded to 2 decimals (about 1.1 km). /feed measures proximity from it when the request has no
+        position. Only /auth/me returns it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Home'}
+            example: {name: 'Oliwa, Gdańsk', coordinates: {latitude: 54.4112, longitude: 18.5601}}
+      responses:
+        '200':
+          description: The home as stored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Home'}
+              example: {name: 'Oliwa, Gdańsk', coordinates: {latitude: 54.41, longitude: 18.56}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    delete:
+      tags: [Account]
+      operationId: clearHome
+      summary: Forgets where the caller lives
+      responses:
+        '204': {description: 'Removed, or there was none'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /users/{userId}/profile-image:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    put:
+      tags: [Account]
+      operationId: setProfileImage
+      summary: Sets the caller's photo from two uploaded media
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SetProfileImage'}
+      responses:
+        '200':
+          description: The photo in use
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProfileImage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    delete:
+      tags: [Account]
+      operationId: removeProfileImage
+      summary: Removes the caller's photo
+      responses:
+        '204': {description: Removed}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /dicts/interests:
+    get:
+      tags: [Interests]
+      operationId: getInterestCatalog
+      summary: Every interest a person can pick, by category, with how many they must pick
+      responses:
+        '200':
+          description: The catalogue
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InterestCatalog'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /users/{userId}/interests:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [Interests]
+      operationId: getUserInterests
+      summary: Someone's picked interests
+      description: >
+        Any signed-in user can read anyone's, for their profile. A block doesn't hide them, as it doesn't hide the profile.
+      responses:
+        '200':
+          description: Interest keys
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserInterests'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [Interests]
+      operationId: replaceUserInterests
+      summary: Replaces the caller's interests
+      description: Between the catalogue's minSelections and maxSelections keys, all from the catalogue, or 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UserInterests'}
+            example: {interests: [theatre, stand_up, cinema]}
+      responses:
+        '200':
+          description: The interests as stored, without repeats
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserInterests'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /users/{userId}/followers:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [Relations]
+      operationId: getFollowers
+      summary: Who follows this user, most recent follow first
+      security: [{}, {bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of people
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /users/{userId}/following:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [Relations]
+      operationId: getFollowing
+      summary: Who this user follows, most recent follow first
+      security: [{}, {bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of people
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /users/{userId}/follow:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [Relations]
+      operationId: follow
+      summary: The caller follows this user
+      responses:
+        '204': {description: Following}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Relations]
+      operationId: unfollow
+      summary: The caller stops following this user
+      responses:
+        '204': {description: No longer following}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /users/{userId}/blocking:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [Relations]
+      operationId: getBlocking
+      summary: Whom the caller blocks, most recent first
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of people
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /users/{userId}/block:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [Relations]
+      operationId: block
+      summary: The caller blocks this user, which ends follows both ways
+      responses:
+        '204': {description: Blocked}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Relations]
+      operationId: unblock
+      summary: The caller unblocks this user
+      responses:
+        '204': {description: Unblocked}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        The Cognito id token. Where a guest is allowed, no token means guest; a rejected token gets 401 or 403 from the
+        gateway, never the guest view.
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    Cursor:
+      name: cursor
+      in: query
+      description: The nextCursor of the previous page, unchanged. Opaque, don't parse it.
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      description: Page size. Outside 1 to 100, or not a number, returns 400.
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+  responses:
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: No valid token
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Forbidden:
+      description: Someone else's private data, or a block between the two users
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: No such user, or no such relation to remove
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: Already following or blocking, or the caller's own id
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    UserProfile:
+      type: object
+      additionalProperties: false
+      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests]
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string, maxLength: 32}
+        firstName: {type: string}
+        lastName: {type: string}
+        avatar: {$ref: '#/components/schemas/MediaResource'}
+        followersCount: {type: integer}
+        followingCount: {type: integer}
+        bio: {type: string, maxLength: 512}
+        createdAt: {type: string, format: date-time}
+        isFollowing: {type: boolean}
+        isBlocked: {type: boolean}
+        followsYou: {type: boolean, description: "Whether this user follows you. With isFollowing, both true means you're friends."}
+        interests:
+          type: array
+          items: {type: string}
+          description: >
+            The keys picked, in the catalogue's order, empty if none. In the profile so the page needs no second request.
+            A guest gets them too: they're no more private than the rest of the profile.
+    Me:
+      description: UserProfile's fields, plus what only the caller sees.
+      type: object
+      additionalProperties: false
+      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests, interestsSelected, shareStances]
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string, maxLength: 32}
+        firstName: {type: string}
+        lastName: {type: string}
+        avatar: {$ref: '#/components/schemas/MediaResource'}
+        followersCount: {type: integer}
+        followingCount: {type: integer}
+        bio: {type: string, maxLength: 512}
+        createdAt: {type: string, format: date-time}
+        isFollowing: {type: boolean}
+        isBlocked: {type: boolean}
+        followsYou: {type: boolean, description: "Always false, as you can't follow yourself."}
+        interests: {type: array, items: {type: string}}
+        interestsSelected: {type: boolean, description: False until onboarding's interests are saved.}
+        shareStances: {type: boolean, description: Whether friends (mutual follows) see the caller's Interesuje mnie and Biorę udział. True until turned off.}
+        home: {$ref: '#/components/schemas/Home'}
+    Home:
+      description: Where someone lives, left out when they haven't said.
+      type: object
+      additionalProperties: false
+      required: [name, coordinates]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 128, description: 'For display, such as "Oliwa, Gdańsk" or "Banino".'}
+        coordinates: {$ref: '#/components/schemas/GeoPoint'}
+    UserProfileUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        username: {type: string, maxLength: 32}
+        firstName: {type: string, maxLength: 128}
+        lastName: {type: string, maxLength: 128}
+        bio: {type: string, maxLength: 512, nullable: true}
+        shareStances: {type: boolean}
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required: [id, username, followersCount, followingCount, followsYou]
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        avatar: {$ref: '#/components/schemas/MediaResource'}
+        createdAt: {type: string, format: date-time}
+        followersCount: {type: integer}
+        followingCount: {type: integer}
+        followsYou: {type: boolean, description: Whether this user follows you. False for a guest.}
+    UserPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/UserSummary'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    PageInfo:
+      type: object
+      additionalProperties: false
+      required: [limit, hasMore]
+      properties:
+        limit: {type: integer}
+        hasMore: {type: boolean, description: The only signal for the end of a list.}
+        nextCursor: {type: string, description: Present only when hasMore is true.}
+    SetProfileImage:
+      type: object
+      additionalProperties: false
+      required: [fullMediaId, thumbnailMediaId]
+      properties:
+        fullMediaId: {type: string, format: uuid}
+        thumbnailMediaId: {type: string, format: uuid}
+    ProfileImage:
+      type: object
+      additionalProperties: false
+      required: [fullMediaId, thumbnailMediaId, setAt]
+      properties:
+        fullMediaId: {type: string, format: uuid}
+        thumbnailMediaId: {type: string, format: uuid}
+        setAt: {type: string, format: date-time}
+    InterestCatalog:
+      type: object
+      additionalProperties: false
+      required: [minSelections, maxSelections, categories]
+      properties:
+        minSelections: {type: integer}
+        maxSelections: {type: integer}
+        categories: {type: array, items: {$ref: '#/components/schemas/InterestCategory'}}
+    InterestCategory:
+      type: object
+      additionalProperties: false
+      required: [key, labelPl, labelEn, interests]
+      properties:
+        key: {type: string}
+        labelPl: {type: string}
+        labelEn: {type: string}
+        interests: {type: array, items: {$ref: '#/components/schemas/Interest'}}
+    Interest:
+      type: object
+      additionalProperties: false
+      required: [key, labelPl, labelEn]
+      properties:
+        key: {type: string}
+        labelPl: {type: string}
+        labelEn: {type: string}
+    UserInterests:
+      type: object
+      additionalProperties: false
+      required: [interests]
+      properties:
+        interests: {type: array, items: {type: string}}
+    GeoPoint:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude: {type: number, format: double, minimum: -90, maximum: 90}
+        longitude: {type: number, format: double, minimum: -180, maximum: 180}
+    MediaResource:
+      description: The same shape as in post-read's feed-api.yaml. Each contract is read alone, so it can't refer to the other.
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: {type: string, format: uuid}
+        purpose: {type: string, enum: [PROFILE_IMAGE, PROFILE_IMAGE_THUMBNAIL, EVENT_MEDIA]}
+        mimeType: {type: string}
+        sizeBytes: {type: integer, format: int64}
+        status: {type: string, enum: [PENDING, UPLOADED, ATTACHED, DELETED]}
+        url: {type: string}
+        createdAt: {type: string, format: date-time}
+        deletedAt: {type: string, format: date-time}
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}

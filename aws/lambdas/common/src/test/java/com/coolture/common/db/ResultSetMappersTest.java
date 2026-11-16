@@ -10,7 +10,6 @@ import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
 import com.coolture.common.storage.MediaUrls;
 import com.coolture.common.storage.S3StorageService;
@@ -305,7 +304,6 @@ class ResultSetMappersTest {
         when(rs.getInt("comments_count")).thenReturn(5);
         when(rs.getString("type")).thenReturn("ONLINE");
         when(rs.getString("status")).thenReturn("ACTIVE");
-        when(rs.getString("visibility")).thenReturn("PUBLIC");
         when(rs.getTimestamp("created_at")).thenReturn(Timestamp.from(now));
         when(rs.getObject("cover_id")).thenReturn(null);
         when(rs.getString("my_reaction")).thenReturn("LIKE");
@@ -319,7 +317,6 @@ class ResultSetMappersTest {
         assertEquals(42, card.positiveReactionCount());
         assertEquals(PostType.ONLINE, card.type());
         assertEquals(PostStatus.ACTIVE, card.status());
-        assertEquals(PostVisibility.PUBLIC, card.visibility());
         assertEquals(ReactionType.LIKE, card.myReaction());
         assertEquals(ParticipationType.TAKES_PART, card.myParticipation());
     }

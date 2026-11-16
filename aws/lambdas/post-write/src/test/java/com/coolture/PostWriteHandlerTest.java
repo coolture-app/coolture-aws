@@ -7,7 +7,6 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.security.SecurityContext;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.services.PostWriteService;
@@ -83,9 +82,9 @@ class PostWriteHandlerTest {
 
         PostDetailDto createdPost = new PostDetailDto(
             postId, null, null, "Cool Event", "A very cool event", null,
-            Instant.parse("2026-09-01T12:00:00Z"), null, List.of(), 0, 0, 0,
-            PostType.ONLINE, PostStatus.ACTIVE, PostVisibility.PUBLIC,
-            Instant.now(), null, null, null, List.of(), null, null
+            Instant.parse("2026-09-01T12:00:00Z"), null, List.of(), 0, 0, 0, 0, 0,
+            PostType.ONLINE, PostStatus.ACTIVE,
+            Instant.now(), null, null, null, List.of(), null, null, null
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
@@ -215,9 +214,9 @@ class PostWriteHandlerTest {
 
         PostDetailDto updatedPost = new PostDetailDto(
             postId, null, null, "Updated Title", "Desc", null,
-            Instant.parse("2026-09-01T12:00:00Z"), null, List.of(), 0, 0, 0,
-            PostType.ONLINE, PostStatus.EDITED, PostVisibility.PUBLIC,
-            Instant.now(), Instant.now(), null, null, List.of(), null, null
+            Instant.parse("2026-09-01T12:00:00Z"), null, List.of(), 0, 0, 0, 0, 0,
+            PostType.ONLINE, PostStatus.EDITED,
+            Instant.now(), Instant.now(), null, null, List.of(), null, null, null
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {

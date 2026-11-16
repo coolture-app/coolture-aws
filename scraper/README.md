@@ -43,6 +43,11 @@ A local stack gets its events from a snapshot, so nobody waits for a live scrape
   embedding and the mean of a demo user's interest embeddings. The user likes the posts ranked 4, 7, 10, 13 and 16,
   marks 5 and 11 as interesting, and the two farthest as "Nie dla mnie". The closest three stay unreacted, because reacted posts
   leave the feed. A user who has any reaction or participation already is skipped, so a second run adds nothing.
+- **`seed.py friends`** (`make seed-friends`) takes the soonest posts of the Upcoming sort that nobody else marked, and
+  has the demo users' friends from `db/local-dev-seed.sql` mark them, one shape of a card's friends line per post: one
+  going, one interested, one of each, two going, five going, three going and four interested, and one marked only by
+  Bartek and Iza, which shows no line. Kasia, Tomek and Magda get a plain coloured photo, so faces show both photos and
+  initials. Any other stance of these friends is taken back, so each run puts the cases on the posts soonest then.
 
 The snapshot is gitignored, like the ledger, because scraped text and photos stay out of the public repository.
 
@@ -104,8 +109,8 @@ Run totals are logged at the end. `exact_location` and `city_location` show how 
 how many were left out. `with_image` counts the posts created with at least one photo, and `photos` the photos they got.
 
 Each photo is downloaded, its width and height read from its header, and uploaded through `/media/uploads` in that order.
-A post's first photo is its cover. A photo that can't be downloaded or uploaded
-is left out and the rest go on, up to the API's 8 photos a post. An upload that fails after `/media/uploads/init` deletes its
+A post's first photo is its cover. An upload that times out or gets a 5xx is tried once more after 5 s. A photo that can't be
+downloaded or uploaded is left out and the rest go on, up to the API's 8 photos a post. An upload that fails after `/media/uploads/init` deletes its
 media, and so does a post the API refuses with a 4xx. A timeout or a 5xx keeps them, because the post may have been saved.
 A 401 or 403 stops the run. `--dry-run` prints each photo it would upload under `images`, as `fileName`, `mimeType`,
 `sizeBytes`, `width` and `height`.

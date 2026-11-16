@@ -3,7 +3,6 @@ package com.coolture.common.dto;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -24,15 +23,17 @@ public record PostDetailDto(
     List<String> tags,
     int positiveReactionCount,
     int participantCount,
+    int interestedCount,
+    int goingCount,
     int commentsCount,
     PostType type,
     PostStatus status,
-    PostVisibility visibility,
     Instant createdAt,
     Instant lastModifiedAt,
     Instant deletedAt,
     MediaResourceDto coverMedia,
     List<PostMediaDto> media,
     ReactionType myReaction,
-    ParticipationType myParticipation
+    ParticipationType myParticipation,
+    FriendStancesDto friendStances
 ) {}

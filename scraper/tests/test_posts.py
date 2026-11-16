@@ -24,7 +24,6 @@ def test_offline_post_matches_create_post_request():
         'startsAt': '2026-11-05T18:00:00Z',
         'tags': ['koncerty'],
         'type': 'OFFLINE',
-        'visibility': 'PUBLIC',
         'location': {
             'countryCode': 'PL',
             'city': 'Gdańsk',

@@ -9,7 +9,7 @@ Shapes and parameters are in the contracts (`aws/lambdas/<area>/contracts/`, bro
 | `identity.hurl` | Who the local API thinks you are, from the headers: `local_dev`, a seed user, a guest |
 | `posts.hurl` | A post's life: create, read, edit (only the author), react, "Nie dla mnie", comment, delete |
 | `media.hurl` | Uploading a photo to storage and making it an avatar |
-| `users.hurl` | Searching people, profiles, following, interests |
+| `users.hurl` | Searching people, profiles, following, interests, the home area |
 | `feed.hurl` | The ranked feed and its paging, the full list with filters, the map |
 
 ## Running them

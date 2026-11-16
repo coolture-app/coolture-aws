@@ -4,6 +4,7 @@ import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.StanceCounts;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
@@ -11,7 +12,6 @@ import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
 
@@ -47,7 +47,6 @@ public class PostWriteRepository {
         List<String> tags,
         PostType type,
         PostStatus status,
-        PostVisibility visibility,
         Instant createdAt,
         Instant lastModifiedAt,
         Instant deletedAt,
@@ -57,7 +56,7 @@ public class PostWriteRepository {
     public Optional<ExistingPost> findById(UUID postId) throws SQLException {
         String sql = """
             SELECT p.id, p.author_id, p.event_location_id, p.title, p.description, p.event_url,
-                   p.starts_at, p.ends_at, p.tags, p.type, p.status, p.visibility,
+                   p.starts_at, p.ends_at, p.tags, p.type, p.status,
                    p.created_at, p.last_modified_at, p.deleted_at,
                    el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
                    el.street, el.postal_code, el.city,
@@ -85,7 +84,6 @@ public class PostWriteRepository {
                         mapTags(rs),
                         mapEnum(rs, "type", PostType.class),
                         mapEnum(rs, "status", PostStatus.class),
-                        mapEnum(rs, "visibility", PostVisibility.class),
                         mapInstant(rs, "created_at"),
                         mapInstant(rs, "last_modified_at"),
                         mapInstant(rs, "deleted_at"),
@@ -151,12 +149,12 @@ public class PostWriteRepository {
                 String postSql = """
                     INSERT INTO posts (
                         id, author_id, event_location_id, title, description, event_url,
-                        tags, type, status, visibility,
+                        tags, type, status,
                         positive_reaction_count, participant_count, comments_count,
                         starts_at, ends_at, created_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?,
+                        ?, ?, ?,
                         0, 0, 0,
                         ?, ?, ?
                     )
@@ -178,7 +176,6 @@ public class PostWriteRepository {
 
                     b.bindString(req.type().name())
                      .bindString(PostStatus.ACTIVE.name())
-                     .bindString((req.visibility() != null ? req.visibility() : PostVisibility.PUBLIC).name())
                      .bindTimestamp(req.startsAt())
                      .bindTimestamp(req.endsAt())
                      .bindTimestamp(now);
@@ -236,7 +233,6 @@ public class PostWriteRepository {
                         event_url = ?,
                         tags = ?,
                         type = ?,
-                        visibility = ?,
                         event_location_id = ?,
                         starts_at = ?,
                         ends_at = ?,
@@ -258,7 +254,6 @@ public class PostWriteRepository {
                     }
 
                     b.bindString(newType.name())
-                     .bindString((req.visibility() != null ? req.visibility() : existing.visibility()).name())
                      .bindObject(effectiveLocationId)
                      .bindTimestamp(req.startsAt() != null ? req.startsAt() : existing.startsAt())
                      .bindTimestamp(req.endsAt() != null ? req.endsAt() : existing.endsAt())
@@ -318,8 +313,9 @@ public class PostWriteRepository {
 
     private PostDetailDto getPostDetail(Connection conn, UUID postId) throws SQLException {
         String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
-                   p.positive_reaction_count, p.participant_count, p.comments_count,
+            SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status,
+                   p.positive_reaction_count, p.comments_count,
+                   stances.participant_count, stances.interested_count, stances.going_count,
                    p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
                    u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
                    avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
@@ -331,6 +327,7 @@ public class PostWriteRepository {
                    ST_X(el.coordinates::geometry) AS longitude
             FROM posts p
             JOIN users u ON u.id = p.author_id
+            """ + StanceCounts.JOIN + """
             LEFT JOIN profile_images pi ON pi.user_id = u.id AND pi.is_active = true
             LEFT JOIN media avatar_m ON avatar_m.id = pi.thumbnail_media_id
             LEFT JOIN event_locations el ON el.id = p.event_location_id
@@ -362,15 +359,17 @@ public class PostWriteRepository {
                     mapTags(rs),
                     rs.getInt("positive_reaction_count"),
                     rs.getInt("participant_count"),
+                    rs.getInt("interested_count"),
+                    rs.getInt("going_count"),
                     rs.getInt("comments_count"),
                     mapEnum(rs, "type", PostType.class),
                     mapEnum(rs, "status", PostStatus.class),
-                    mapEnum(rs, "visibility", PostVisibility.class),
                     mapInstant(rs, "created_at"),
                     mapInstant(rs, "last_modified_at"),
                     mapInstant(rs, "deleted_at"),
                     coverMedia,
                     mediaList,
+                    null,
                     null,
                     null
                 );
@@ -481,7 +480,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!PostQueries.isPostVisible(conn, postId, userId)) {
+                if (!PostQueries.isPostVisible(conn, postId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 if (findReaction(conn, postId, userId).isEmpty()) {
@@ -503,7 +502,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!PostQueries.isPostVisible(conn, postId, userId)) {
+                if (!PostQueries.isPostVisible(conn, postId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 if (findReaction(conn, postId, userId).isPresent()) {
@@ -527,7 +526,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!PostQueries.isPostVisible(conn, postId, userId)) {
+                if (!PostQueries.isPostVisible(conn, postId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
@@ -554,7 +553,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!PostQueries.isPostVisible(conn, postId, userId)) {
+                if (!PostQueries.isPostVisible(conn, postId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);

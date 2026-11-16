@@ -1,10 +1,13 @@
 package com.coolture;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
+import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.ReactionType;
@@ -56,6 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -69,12 +73,14 @@ class PostReadDbTest {
     private static final UUID ME = UUID.fromString("a0000000-0000-0000-0000-000000000001");
     private static final UUID OTHER_MODEL_POST = UUID.fromString("a0000000-0000-0000-0000-000000000200");
 
-    private static final Set<String> PUBLIC_LIVE = Set.of("future_public", "no_end_started_2h", "multi_day_running", "commented");
+    private static final Set<String> PUBLIC_LIVE = Set.of("future_public", "no_end_started_2h", "multi_day_running", "commented",
+        "by_followed", "by_fan", "friend_going", "friend_interested", "friend_not_for_me", "followed_going", "fan_going",
+        "quiet_friend_going", "friends_crowd");
     private static final Set<String> INTERACTED = Set.of("liked", "marked", "interested", "attending");
     private static final Set<String> ENDED_RECENTLY = Set.of("no_end_started_4h", "no_end_started_14h", "ended_1h_ago", "ended_11h_ago");
     private static final Set<String> ENDED_LONG_AGO = Set.of("no_end_started_16h", "ended_13h_ago", "ended_last_year");
-    private static final Set<String> HIDDEN_FROM_ME = Set.of("deleted", "by_i_blocked", "by_blocked_me", "friends_by_stranger", "private_by_stranger");
-    private static final Set<String> MY_VIEW_ONLY = Set.of("friends_by_followed", "mine", "mine_private", "created_after_as_of");
+    private static final Set<String> HIDDEN_FROM_ME = Set.of("deleted", "by_i_blocked", "by_blocked_me");
+    private static final Set<String> MY_VIEW_ONLY = Set.of("mine", "created_after_as_of");
 
     private static final Set<String> BROWSE_DEFAULT = union(PUBLIC_LIVE, INTERACTED, ENDED_RECENTLY, MY_VIEW_ONLY);
     private static final Set<String> NOT_ENDED_FOR_ME = union(PUBLIC_LIVE, INTERACTED, MY_VIEW_ONLY);
@@ -192,7 +198,7 @@ class PostReadDbTest {
 
     @Test
     void feed_signedIn_followsEveryRule() throws SQLException {
-        assertEquals(union(PUBLIC_LIVE, Set.of("friends_by_followed")), ruleTitles(walkFeed(feedService, ME, 100, null, null, FeedMode.RANKED)));
+        assertEquals(PUBLIC_LIVE, ruleTitles(walkFeed(feedService, ME, 100, null, null, FeedMode.RANKED)));
     }
 
     @Test
@@ -284,6 +290,26 @@ class PostReadDbTest {
     }
 
     // ===== The viewer's vector =====
+
+    @Test
+    void aPostCountsInterestedAndGoingApart_onItsPageAndItsCard() throws SQLException {
+        UUID post = postTitled("walk_3");
+        try {
+            writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'INTERESTED', now())", post);
+            PostDetailDto page = postRepository.findById(post, ME).orElseThrow();
+            PostCardDto card = postRepository.findFeed(searching("walk_3"), PostSort.RECENT, ME, null, 10).stream()
+                .filter(c -> c.id().equals(post)).findFirst().orElseThrow();
+
+            assertEquals(1, page.interestedCount());
+            assertEquals(0, page.goingCount());
+            assertEquals(1, page.participantCount());
+            assertEquals(1, card.interestedCount());
+            assertEquals(0, card.goingCount());
+            assertEquals(1, card.participantCount());
+        } finally {
+            unmark(post);
+        }
+    }
 
     private static UUID postTitled(String title) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement();
@@ -592,6 +618,94 @@ class PostReadDbTest {
         return cards.stream().filter(c -> title.equals(c.title())).findFirst().orElseThrow();
     }
 
+    // ===== People I follow and friends =====
+
+    /** Mine is left out: the feed never shows it, and the others show it only by author. */
+    private static final Set<String> FOLLOWED_AND_FRIENDS = Set.of("by_followed", "friend_going", "friend_interested", "friends_crowd");
+
+    private static PostFeedFilters followed() {
+        return new PostFeedFilters(null, null, null, null, true, null, null, null, null, null, null,
+            null, null, null, 20, "RECENT", false);
+    }
+
+    @Test
+    void followed_keepsPostsByPeopleIFollow_andWhatFriendsAreInterestedInOrGoTo() throws SQLException {
+        assertEquals(FOLLOWED_AND_FRIENDS, ruleTitles(walkPosts(ME, followed(), 100)));
+        assertEquals(FOLLOWED_AND_FRIENDS, ruleTitles(walkFeed(feedService, ME, 100, null, null, followed(), FeedMode.RANKED)));
+    }
+
+    @Test
+    void followed_isEmptyForAGuest() throws SQLException {
+        assertTrue(ruleTitles(walkPosts(null, followed(), 100)).isEmpty());
+    }
+
+    @Test
+    void cards_showFriendsStances_butNotOneWayFollows_quietFriends_orNieDlaMnie() throws SQLException {
+        List<PostCardDto> cards = walkPosts(ME, filters("RECENT", false, null, null), 100);
+
+        FriendStancesDto going = card(cards, "friend_going").friendStances();
+        assertEquals(1, going.going().count());
+        assertEquals("friend", going.going().people().get(0).username());
+        assertNull(going.interested());
+        assertEquals("friend", card(cards, "friend_interested").friendStances().interested().people().get(0).username());
+        for (String title : List.of("friend_not_for_me", "followed_going", "fan_going", "quiet_friend_going", "future_public")) {
+            assertNull(card(cards, title).friendStances(), title);
+        }
+    }
+
+    @Test
+    void friendsStances_reachTheFeed_andThePostPage_butNotAGuest() throws SQLException {
+        UUID post = postTitled("friend_going");
+
+        assertNotNull(card(walkFeed(feedService, ME, 100, null, null, FeedMode.RANKED), "friend_going").friendStances());
+        assertNotNull(postRepository.findById(post, ME).orElseThrow().friendStances());
+        assertNull(postRepository.findById(post, null).orElseThrow().friendStances());
+    }
+
+    private static List<String> usernames(List<FriendStancesDto.Friend> friends) {
+        return friends.stream().map(FriendStancesDto.Friend::username).toList();
+    }
+
+    @Test
+    void aCard_namesTheNewestTwoFriends_andThePostsFriendsList_namesThemAll() throws SQLException {
+        UUID crowd = postTitled("friends_crowd");
+
+        FriendStancesDto card = card(walkPosts(ME, filters("RECENT", false, null, null), 100), "friends_crowd").friendStances();
+        assertEquals(3, card.going().count());
+        assertEquals(List.of("friend_3", "friend_2"), usernames(card.going().people()));
+        assertNull(card.interested());
+
+        PostFriendsDto all = postService.getFriends(crowd, ME);
+        assertEquals(List.of("friend_3", "friend_2", "friend"), usernames(all.going()));
+        assertEquals(List.of(), all.interested());
+    }
+
+    @Test
+    void thePostsFriendsList_leavesOutOneWayFollows_quietFriends_andNieDlaMnie() throws SQLException {
+        assertEquals(List.of("friend"), usernames(postService.getFriends(postTitled("friend_going"), ME).going()));
+        assertEquals(List.of("friend"), usernames(postService.getFriends(postTitled("friend_interested"), ME).interested()));
+        for (String title : List.of("followed_going", "fan_going", "quiet_friend_going", "friend_not_for_me")) {
+            PostFriendsDto friends = postService.getFriends(postTitled(title), ME);
+            assertEquals(new PostFriendsDto(List.of(), List.of()), friends, title);
+        }
+    }
+
+    @Test
+    void thePostsFriendsList_isEmptyForAGuest_andNotFoundForADeletedOrMissingPost() throws SQLException {
+        assertEquals(new PostFriendsDto(List.of(), List.of()), postService.getFriends(postTitled("friends_crowd"), null));
+        assertTrue(postRepository.findFriends(postTitled("deleted"), ME).isEmpty());
+        assertTrue(postRepository.findFriends(UUID.randomUUID(), ME).isEmpty());
+    }
+
+    @Test
+    void aStance_isntShownToTheOneWhoTookIt_orToAStranger() throws SQLException {
+        UUID friend = UUID.fromString("a0000000-0000-0000-0000-000000000006");
+        UUID stranger = UUID.fromString("a0000000-0000-0000-0000-000000000002");
+
+        assertNull(card(walkPosts(friend, filters("RECENT", false, null, null), 100), "friend_going").friendStances());
+        assertNull(card(walkPosts(stranger, filters("RECENT", false, null, null), 100), "friend_going").friendStances());
+    }
+
     // ===== Map rules =====
 
     @Test
@@ -667,16 +781,37 @@ class PostReadDbTest {
     }
 
     @Test
-    void mapMarks_carryThePlace() throws SQLException {
+    void mapMarks_carryThePlaceAndTheStart() throws SQLException {
         PostMarkDto far = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, ME, false).get(0);
 
         assertEquals("Hala Fixturowa", far.venueName());
         assertEquals("Fixturowo", far.city());
+        assertNotNull(far.startsAt());
+        assertTrue(far.excerpt() == null || far.excerpt().length() <= 200);
+    }
+
+    @Test
+    void mapMarks_carryTheViewersOwnReactionAndStance_andNoneForAGuest() throws SQLException {
+        PostMarkDto before = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, ME, false).get(0);
+        try {
+            like(before.id());
+            mark(before.id(), "now()");
+            PostMarkDto mine = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, ME, false).get(0);
+            PostMarkDto guest = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, null, false).get(0);
+
+            assertEquals(ReactionType.LIKE, mine.myReaction());
+            assertEquals(ParticipationType.NOT_INTERESTED, mine.myParticipation());
+            assertNull(guest.myReaction());
+            assertNull(guest.myParticipation());
+        } finally {
+            unlike(before.id());
+            unmark(before.id());
+        }
     }
 
     @Test
     void feed_includePast_letsEndedEventsIn_andKeepsHidingWhatIsMine() throws SQLException {
-        assertEquals(union(PUBLIC_LIVE, Set.of("friends_by_followed"), ENDED_RECENTLY, ENDED_LONG_AGO),
+        assertEquals(union(PUBLIC_LIVE, ENDED_RECENTLY, ENDED_LONG_AGO),
             ruleTitles(walkFeed(feedService, ME, 100, null, null, filters(null, true, null, null), FeedMode.RANKED)));
     }
 

@@ -1,6 +1,7 @@
 package com.coolture.repository;
 
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.StanceCounts;
 import com.coolture.feed.FeedConfig;
 
 import java.sql.SQLException;
@@ -24,12 +25,6 @@ public final class PostSql {
     public static final String NOT_LONG_ENDED =
         "(?::boolean OR " + EVENT_END + " >= now() - interval '" + FeedConfig.PAST_WINDOW_HOURS + " hours')";
 
-    /** Binds the viewer twice. */
-    public static final String VISIBLE = """
-        (p.visibility = 'PUBLIC'
-             OR p.author_id = ?::uuid
-             OR (p.visibility = 'FRIENDS' AND EXISTS (SELECT 1 FROM user_relations ur WHERE ur.source_user_id = ?::uuid AND ur.target_user_id = p.author_id AND ur.type = 'FOLLOW')))""";
-
     /** Binds the viewer twice. Holds for a guest, who has no blocks. */
     public static final String NOT_BLOCKED = """
         NOT EXISTS (SELECT 1 FROM user_relations b
@@ -51,8 +46,9 @@ public final class PostSql {
 
     /** Everything ResultSetMappers.mapPostCard reads, up to the WHERE. Binds the viewer twice. */
     public static final String CARD_SELECT = """
-        SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
-               p.positive_reaction_count, p.participant_count, p.comments_count,
+        SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status,
+               p.positive_reaction_count, p.comments_count,
+               stances.participant_count, stances.interested_count, stances.going_count,
                p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
                u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
                avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
@@ -70,6 +66,7 @@ public final class PostSql {
                pp_my.type AS my_participation
         FROM posts p
         JOIN users u ON u.id = p.author_id
+        """ + StanceCounts.JOIN + """
         LEFT JOIN profile_images pi ON pi.user_id = u.id AND pi.is_active = true
         LEFT JOIN media avatar_m ON avatar_m.id = pi.thumbnail_media_id
         LEFT JOIN event_locations el ON el.id = p.event_location_id

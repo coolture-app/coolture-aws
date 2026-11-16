@@ -12,7 +12,6 @@ import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
@@ -55,6 +54,8 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
                 return ApiResponse.ok(Map.of("status", "UP"));
             } else if (path.endsWith("/posts/map") || path.endsWith("/map")) {
                 return getMapMarks(event, callerId);
+            } else if (path.endsWith("/friends") && isPostDetailRequest(event)) {
+                return ApiResponse.ok(service.getFriends(extractPostId(event), callerId));
             } else if (isPostDetailRequest(event)) {
                 return getPostById(event, callerId);
             } else if (path.endsWith("/feed")) {
@@ -140,7 +141,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         List<String> tags = parseList(qp.get("tags"));
         UUID authorId = qp.get("authorId") != null ? UUID.fromString(qp.get("authorId")) : null;
         PostStatus status = qp.get("status") != null ? PostStatus.valueOf(qp.get("status").toUpperCase()) : null;
-        PostVisibility visibility = qp.get("visibility") != null ? PostVisibility.valueOf(qp.get("visibility").toUpperCase()) : null;
+        Boolean followed = parseBoolean(qp.get("followed"), "followed") ? true : null;
         PostType type = qp.get("type") != null ? PostType.valueOf(qp.get("type").toUpperCase()) : null;
 
         Instant startsFrom = qp.get("startsFrom") != null ? Instant.parse(qp.get("startsFrom")) : null;
@@ -159,7 +160,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         boolean includePast = parseIncludePast(qp.get("includePast"));
 
         return new PostFeedFilters(
-            q, tags, authorId, status, visibility, type,
+            q, tags, authorId, status, followed, type,
             startsFrom, startsTo, lat, lng, radiusKm,
             partTypes, reactionType, cursor, limit, sortBy, includePast
         );

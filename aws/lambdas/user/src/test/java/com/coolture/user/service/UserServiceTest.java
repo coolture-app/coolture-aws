@@ -1,13 +1,16 @@
 package com.coolture.user.service;
 
+import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.UserProfileDto;
 import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.storage.S3StorageService;
+import com.coolture.user.dto.HomeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
+import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.repository.UserRepository.AvatarRecord;
@@ -36,6 +39,35 @@ class UserServiceTest {
     private static final UUID CALLER_ID = UUID.randomUUID();
     private static final UUID FULL_ID = UUID.randomUUID();
     private static final UUID THUMBNAIL_ID = UUID.randomUUID();
+
+    @Test
+    void setHome_storesTheTrimmedName_andRoundsToAboutAKilometre() throws SQLException {
+        when(repository.setHome(eq(USER_ID), any())).thenReturn(true);
+
+        HomeDto stored = service.setHome(USER_ID, USER_ID, new HomeDto("  Oliwa, Gdańsk ", new GeoPointDto(54.41123, 18.56789)));
+
+        assertEquals(new HomeDto("Oliwa, Gdańsk", new GeoPointDto(54.41, 18.57)), stored);
+        verify(repository).setHome(USER_ID, new UserRepository.HomeRecord("Oliwa, Gdańsk", 54.41, 18.57));
+    }
+
+    @Test
+    void setHome_forSomeoneElse_isRefused_andStoresNothing() throws SQLException {
+        HomeDto home = new HomeDto("Gdynia", new GeoPointDto(54.52, 18.54));
+
+        assertThrows(SecurityException.class, () -> service.setHome(USER_ID, CALLER_ID, home));
+        assertThrows(SecurityException.class, () -> service.clearHome(USER_ID, CALLER_ID));
+        verify(repository, never()).setHome(any(), any());
+        verify(repository, never()).clearHome(any());
+    }
+
+    @Test
+    void setHome_forAUserWithNoRow_isNotFound() throws SQLException {
+        when(repository.setHome(eq(USER_ID), any())).thenReturn(false);
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> service.setHome(USER_ID, USER_ID, new HomeDto("Gdynia", new GeoPointDto(54.52, 18.54))));
+        assertTrue(e.getMessage().contains("not found"));
+    }
 
     @Test
     void setProfileImage_validatesMedia_andInsertsTransactional() throws SQLException {
@@ -77,7 +109,8 @@ class UserServiceTest {
     @Test
     void search_enrichesWithAvatarsAndFollowerCounts() throws SQLException {
         var user = new UserEntity(USER_ID, "testuser", "Jan", "Kowalski", "Bio", Instant.now());
-        when(repository.search(eq(null), any(), any(), eq(21))).thenReturn(List.of(user));
+        when(repository.search(eq(CALLER_ID), eq(null), any(), any(), eq(21)))
+                .thenReturn(List.of(new UserRepository.ListedUser(user, true)));
 
         var avatarRecord = new AvatarRecord(
                 THUMBNAIL_ID,
@@ -94,11 +127,12 @@ class UserServiceTest {
         when(repository.countFollowers(USER_ID)).thenReturn(5);
         when(repository.countFollowing(USER_ID)).thenReturn(10);
 
-        CursorPage<UserSummaryDto> page = service.search(CALLER_ID, null, null, 20);
+        CursorPage<UserListItemDto> page = service.search(CALLER_ID, null, null, 20);
 
         assertNotNull(page);
         assertEquals(1, page.items().size());
-        UserSummaryDto item = page.items().get(0);
+        assertTrue(page.items().get(0).followsYou());
+        UserSummaryDto item = page.items().get(0).summary();
         assertEquals("testuser", item.username());
         assertEquals(5, item.followersCount());
         assertEquals(10, item.followingCount());
@@ -132,7 +166,9 @@ class UserServiceTest {
         when(repository.countFollowers(USER_ID)).thenReturn(15);
         when(repository.countFollowing(USER_ID)).thenReturn(3);
         when(repository.isFollowing(CALLER_ID, USER_ID)).thenReturn(true);
+        when(repository.isFollowing(USER_ID, CALLER_ID)).thenReturn(true);
         when(repository.isBlocked(CALLER_ID, USER_ID)).thenReturn(false);
+        when(repository.findInterestKeys(USER_ID)).thenReturn(List.of("theatre", "cinema"));
 
         UserProfileDto profile = service.getByIdForCaller(USER_ID, CALLER_ID);
 
@@ -142,8 +178,10 @@ class UserServiceTest {
         assertEquals(3, profile.followingCount());
         assertTrue(profile.isFollowing());
         assertFalse(profile.isBlocked());
+        assertTrue(profile.followsYou());
         assertNotNull(profile.avatar());
         assertEquals("http://localhost:3900/full.jpg", profile.avatar().url());
+        assertEquals(List.of("theatre", "cinema"), profile.interests());
     }
 
     @Test
@@ -164,14 +202,15 @@ class UserServiceTest {
         assertNotNull(profile);
         assertEquals("testuser", profile.username());
         assertNull(profile.avatar());
+        assertEquals(List.of(), profile.interests());
     }
 
     @Test
     void update_updatesFieldsAndReturnsEnrichedProfile() throws SQLException {
-        UserProfileUpdateRequest request = new UserProfileUpdateRequest("updated_name", "Jan", "Nowak", "New bio");
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("updated_name", "Jan", "Nowak", "New bio", false);
         var updated = new UserEntity(USER_ID, "updated_name", "Jan", "Nowak", "New bio", Instant.now());
 
-        when(repository.updateUser(USER_ID, "updated_name", "Jan", "Nowak", "New bio")).thenReturn(updated);
+        when(repository.updateUser(USER_ID, "updated_name", "Jan", "Nowak", "New bio", false)).thenReturn(updated);
         when(repository.findActiveAvatar(USER_ID, false)).thenReturn(Optional.empty());
 
         UserProfileDto profile = service.update(USER_ID, USER_ID, request);
@@ -183,7 +222,7 @@ class UserServiceTest {
 
     @Test
     void update_throwsForbidden_whenNotSelf() {
-        UserProfileUpdateRequest request = new UserProfileUpdateRequest("hacked", null, null, null);
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest("hacked", null, null, null, null);
 
         assertThrows(SecurityException.class, () -> service.update(USER_ID, CALLER_ID, request));
         verifyNoInteractions(repository);
@@ -225,21 +264,45 @@ class UserServiceTest {
     void getFollowers_throwsNotFound_whenTargetUserDoesNotExist() throws SQLException {
         when(repository.existsById(USER_ID)).thenReturn(false);
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFollowers(USER_ID, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFollowers(USER_ID, CALLER_ID, null, 20));
     }
 
     @Test
     void getFollowers_returnsPage() throws SQLException {
         when(repository.existsById(USER_ID)).thenReturn(true);
         var follower = new UserEntity(CALLER_ID, "follower1", "F", "L", null, Instant.now());
-        when(repository.findFollowers(eq(USER_ID), any(), any(), eq(21)))
-                .thenReturn(List.of(new UserRepository.UserRelationRow(follower, Instant.now())));
+        when(repository.findFollowers(eq(USER_ID), eq(CALLER_ID), any(), any(), eq(21)))
+                .thenReturn(List.of(new UserRepository.UserRelationRow(follower, Instant.now(), true)));
 
-        var page = service.getFollowers(USER_ID, null, 20);
+        var page = service.getFollowers(USER_ID, CALLER_ID, null, 20);
 
         assertNotNull(page);
         assertEquals(1, page.items().size());
-        assertEquals("follower1", page.items().get(0).username());
+        assertEquals("follower1", page.items().get(0).summary().username());
+        assertTrue(page.items().get(0).followsYou());
+    }
+
+    @Test
+    void getFollowing_asksWhoInThePageFollowsTheCaller() throws SQLException {
+        when(repository.existsById(USER_ID)).thenReturn(true);
+        var followed = new UserEntity(UUID.randomUUID(), "followed1", "F", "L", null, Instant.now());
+        when(repository.findFollowing(eq(USER_ID), eq(CALLER_ID), any(), any(), eq(21)))
+                .thenReturn(List.of(new UserRepository.UserRelationRow(followed, Instant.now(), false)));
+
+        var page = service.getFollowing(USER_ID, CALLER_ID, null, 20);
+
+        assertEquals(1, page.items().size());
+        assertFalse(page.items().get(0).followsYou());
+    }
+
+    @Test
+    void getByIdForCaller_followsYouIsFalse_forAGuestAndForYourself() throws SQLException {
+        var user = new UserEntity(USER_ID, "testuser", "Jan", "Kowalski", "Bio", Instant.now());
+        when(repository.findById(USER_ID)).thenReturn(Optional.of(user));
+
+        assertFalse(service.getByIdForCaller(USER_ID, null).followsYou());
+        assertFalse(service.getByIdForCaller(USER_ID, USER_ID).followsYou());
+        verify(repository, never()).isFollowing(any(), any());
     }
 
     @Test

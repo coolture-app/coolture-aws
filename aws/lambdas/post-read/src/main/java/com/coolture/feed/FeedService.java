@@ -1,5 +1,6 @@
 package com.coolture.feed;
 
+import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.pagination.CursorPage;
@@ -64,9 +65,9 @@ public class FeedService {
             return upcomingPage(viewer, filters, cursor.get().t(), cursor.get().st(), cursor.get().id(), effectiveLimit);
         }
 
-        Session session = cursor
-            .map(c -> new Session(c.t(), c.seed(), c.lat(), c.lon(), new Ranked(c.id(), c.s())))
-            .orElseGet(() -> new Session(clock.instant().truncatedTo(ChronoUnit.MILLIS), seeds.getAsLong(), round(latitude), round(longitude), null));
+        Session session = cursor.isPresent()
+            ? resume(cursor.get())
+            : newSession(viewer, round(latitude), round(longitude));
 
         List<Ranked> ranked;
         try {
@@ -81,6 +82,27 @@ public class FeedService {
             .encode());
 
         return new FeedPage(FeedMode.RANKED, loadInOrder(viewer, page.items()), page.page());
+    }
+
+    private static Session resume(FeedCursor c) {
+        return new Session(c.t(), c.seed(), c.lat(), c.lon(), new Ranked(c.id(), c.s()));
+    }
+
+    /** With no position in the request, proximity measures from the viewer's home, if they set one. */
+    private Session newSession(UUID viewer, Double latitude, Double longitude) {
+        Instant asOf = clock.instant().truncatedTo(ChronoUnit.MILLIS);
+        if (latitude == null) {
+            try {
+                Optional<GeoPointDto> home = repository.findHome(viewer);
+                if (home.isPresent()) {
+                    return new Session(asOf, seeds.getAsLong(), home.get().latitude(), home.get().longitude(), null);
+                }
+            } catch (SQLException e) {
+                // Proximity is one signal of several, so a failed lookup ranks without it rather than failing the page.
+                System.err.println("Home lookup failed, ranking without proximity: " + e);
+            }
+        }
+        return new Session(asOf, seeds.getAsLong(), latitude, longitude, null);
     }
 
     private List<Ranked> rank(UUID viewer, Session session, PostFeedFilters filters, int count) throws SQLException {
