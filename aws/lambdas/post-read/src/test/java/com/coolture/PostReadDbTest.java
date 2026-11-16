@@ -41,6 +41,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -333,19 +334,18 @@ class PostReadDbTest {
         }
     }
 
-    /** A PageRank run that finished at the given time, with one score for ME. Returns its number. */
-    private static long pprRun(Instant finishedAt, UUID post, double score) throws SQLException {
+    /** As the admin role, which writes what the PageRank job writes. Returns the first column of a returned row, else 0. */
+    private static long asAdmin(String sql, Object... params) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("RESET ROLE");
-            try (PreparedStatement write = conn.prepareStatement("""
-                     WITH run AS (INSERT INTO rec_ppr_runs (finished_at) VALUES (?) RETURNING run_number)
-                     INSERT INTO rec_ppr_scores (run_number, user_id, post_id, score)
-                     SELECT run_number, ?, ?, ? FROM run RETURNING run_number""")) {
-                write.setObject(1, java.sql.Timestamp.from(finishedAt));
-                write.setObject(2, ME);
-                write.setObject(3, post);
-                write.setDouble(4, score);
-                try (ResultSet rs = write.executeQuery()) {
+            try (PreparedStatement write = conn.prepareStatement(sql)) {
+                for (int i = 0; i < params.length; i++) {
+                    write.setObject(i + 1, params[i]);
+                }
+                if (!write.execute()) {
+                    return 0;
+                }
+                try (ResultSet rs = write.getResultSet()) {
                     rs.next();
                     return rs.getLong(1);
                 }
@@ -357,20 +357,25 @@ class PostReadDbTest {
 
     @Test
     void feed_readsTheLatestPprRunFinishedAMinuteBeforeAsOf() throws SQLException {
-        Instant now = Instant.now();
+        // A day ahead, so a run made just now, as make seed's last step does, is never the latest.
+        Instant base = Instant.now().plus(Duration.ofDays(1));
         UUID post = postTitled("future_public");
-        long earlier = pprRun(now.minus(Duration.ofHours(1)), post, 0.25);
-        long later = pprRun(now.plus(Duration.ofHours(1)), post, 0.75);
+        UUID commented = postTitled("commented");
+        String run = "INSERT INTO rec_ppr_runs (finished_at) VALUES (?) RETURNING run_number";
+        String score = "INSERT INTO rec_ppr_scores (run_number, user_id, post_id, score) VALUES (?, ?, ?, ?)";
+        // The later run is made first, so the latest isn't simply the highest number.
+        long later = asAdmin(run, Timestamp.from(base.plus(Duration.ofHours(1))));
+        long earlier = asAdmin(run, Timestamp.from(base.minus(Duration.ofHours(1))));
+        asAdmin(score, later, ME, post, 0.75);
+        asAdmin(score, earlier, ME, post, 0.25);
+        asAdmin(score, earlier, UUID.fromString("a0000000-0000-0000-0000-000000000002"), commented, 0.9);
         try {
-            assertEquals(0.25, pprOf(post, now), 1e-6);
-            assertEquals(0.75, pprOf(post, now.plus(Duration.ofHours(2))), 1e-6);
-            assertNull(pprOf(postTitled("commented"), now));
+            assertEquals(0.25, pprOf(post, base), 1e-6);
+            assertEquals(0.25, pprOf(post, base.plus(Duration.ofHours(1)).plusSeconds(30)), 1e-6);
+            assertEquals(0.75, pprOf(post, base.plus(Duration.ofHours(2))), 1e-6);
+            assertNull(pprOf(commented, base), "another user's score");
         } finally {
-            try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
-                stmt.execute("RESET ROLE");
-                stmt.execute("DELETE FROM rec_ppr_runs WHERE run_number IN (" + earlier + ", " + later + ")");
-                stmt.execute("SET ROLE coolture_reader");
-            }
+            asAdmin("DELETE FROM rec_ppr_runs WHERE run_number IN (?, ?)", earlier, later);
         }
     }
 

@@ -45,8 +45,9 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 4. Lets the demo users react to posts close to their interests, so their feeds are personal.
 5. Has Anna's, Jan's and Ola's friends mark the soonest posts, so the top of Wszystkie, sorted Nadchodzące, shows every
    shape of a card's friends line. This step puts its cases back on every run, on the posts soonest then.
+6. Scores every user's events with personalised PageRank (`make ppr`), a new run each time.
 
-The first run takes about 30 minutes. Later runs take a minute and add nothing. How the snapshot is picked and loaded
+The first run takes about 30 minutes. Later runs take a minute and add only a new PageRank run. How the snapshot is picked and loaded
 is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
 
 **The geocoder**, Photon with an index of Poland, serves the post form's place search and locates the scraper's

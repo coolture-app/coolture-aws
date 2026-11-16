@@ -3,7 +3,6 @@
 
 CREATE TABLE rec_ppr_runs (
     run_number BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at TIMESTAMPTZ
 );
 

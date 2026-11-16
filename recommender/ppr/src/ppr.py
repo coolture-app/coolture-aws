@@ -1,6 +1,6 @@
 """Personalised PageRank over users, events, venues and interests. No I/O."""
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from scipy import sparse
@@ -25,10 +25,10 @@ class Inputs:
     post_average: np.ndarray
     interest_vectors: np.ndarray
     user_ids: list
-    picks: list = field(default_factory=list)
-    stances: list = field(default_factory=list)
-    follows: list = field(default_factory=list)
-    hidden: dict = field(default_factory=dict)
+    picks: list
+    stances: list
+    follows: list
+    hidden: dict
 
 
 def centred(vectors: np.ndarray, average: np.ndarray) -> np.ndarray:
@@ -49,9 +49,11 @@ def content_edges(inputs: Inputs) -> tuple[list, list]:
 
     live = np.flatnonzero(inputs.scorable & has_content)
     k = min(EVENT_NEIGHBOURS, len(live) - 1)
+    if k < 1:
+        return to_interest, []
     to_event = set()
     # In blocks of rows, so memory doesn't grow with the square of the events.
-    for start in range(0, len(live) if k > 0 else 0, CHUNK):
+    for start in range(0, len(live), CHUNK):
         rows = np.arange(start, min(start + CHUNK, len(live)))
         pairs = events[live[rows]] @ events[live].T
         pairs[np.arange(len(rows)), rows] = -np.inf
@@ -95,8 +97,6 @@ def adjacency(inputs: Inputs) -> sparse.csr_matrix:
 def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
     """(user, event, score): the walk's mass ranked among the user's candidates, 0 to 1. A user whose walk can't tell
     them apart gets no rows, which the feed reads as 0.5 for all."""
-    if not inputs.event_ids or not inputs.user_ids:
-        return
     a = adjacency(inputs)
     user_at = a.shape[0] - len(inputs.user_ids)
     degree = np.asarray(a.sum(axis=1)).ravel()

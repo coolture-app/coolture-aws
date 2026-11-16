@@ -123,19 +123,21 @@ The thesis's graph signal. `PprFunction` runs personalised PageRank from every u
 | Edges | From |
 |---|---|
 | Event–venue | `event_locations`, by lower-cased name and city |
-| Event–interest | Each event's 2 nearest interests, both sides centred as in the feed |
+| Event–interest | Each event's nearest interests (`INTERESTS_PER_EVENT` in `ppr.py`), both sides centred as in the feed |
+| Event–event | Each event to its nearest events (`EVENT_NEIGHBOURS`), among events that haven't ended |
 | User–interest | `user_interests` |
-| User–event | Likes, interested and going, faded as the feed fades them |
-| Event–event | Each event's 5 nearest among events that haven't ended |
-| User → user | Follows, minus blocks either way |
+| User–event | Likes, interested and going, weighed and faded as the feed weighs and fades them |
+| User → user | Friends (mutual follows, no block) who share their stances: a one-way follow reveals nothing |
 
 Each user's candidates, the posts the feed may show them as new, get the walk's mass as a rank from 0 to 1. The feed
-reads the latest run finished a minute before the session's `asOf`, so a run landing mid-scroll doesn't move its pages;
-a post with no score gets `0.5` (weight `ppr` in `FeedConfig`). Runs are kept a day.
+reads the latest run finished a minute before the session's `asOf`, so a run landing mid-scroll doesn't move its pages,
+and gives a post with no score `NEUTRAL` (weight `ppr` in `FeedConfig`). A run is deleted once a newer one finished over
+a day ago.
 
 ```bash
 make ppr                           # one run locally; make seed ends with it
 DB_TEST=true make test-python      # with its database tests, after make seed
 ```
 
-On AWS it runs every 6 hours once the stack's `PprScheduleEnabled` is `true`; it's off by default.
+On AWS it runs on a schedule once deployed with `PPR_SCHEDULE=true make deploy-embeddings`, and keeps that setting on
+later deploys; it's off by default.

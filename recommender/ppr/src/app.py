@@ -20,11 +20,10 @@ DEFAULT_EVENT_HOURS = 3
 
 EVENT_END = f"COALESCE(p.ends_at, p.starts_at + interval '{DEFAULT_EVENT_HOURS} hours')"
 
-# Runs whose scores landed but which never finished, and runs older than one finished a day ago.
+# Runs older than the newest one finished over a day ago, which no session still reads.
 PRUNE = """
 DELETE FROM rec_ppr_runs
-WHERE (finished_at IS NULL AND started_at < now() - interval '1 hour')
-   OR finished_at < (SELECT max(finished_at) FROM rec_ppr_runs WHERE finished_at < now() - interval '1 day')
+WHERE finished_at < (SELECT max(finished_at) FROM rec_ppr_runs WHERE finished_at < now() - interval '1 day')
 """
 
 
@@ -81,12 +80,15 @@ def load(conn: psycopg.Connection) -> Inputs | None:
            WHERE type = ANY(%s) AND created_at > now() - make_interval(days => %s)""",
         (list(STANCE_WEIGHTS), STANCE_MAX_AGE_DAYS)).fetchall()
     relations = conn.execute("SELECT source_user_id, target_user_id, type FROM user_relations").fetchall()
+    sharing = {u for (u,) in conn.execute("SELECT id FROM users WHERE share_stances")}
     reacted = conn.execute(
         "SELECT user_id, post_id FROM post_reactions UNION SELECT user_id, post_id FROM post_participations").fetchall()
 
     following = {(a, b) for a, b, t in relations if t == "FOLLOW"}
     blocked = {pair for a, b, t in relations if t == "BLOCK" for pair in ((a, b), (b, a))}
-    follows = sorted(following - blocked)
+    # Only to friends who share their stances, the people whose stances the cards show: a one-way follow must not
+    # reveal where someone goes.
+    follows = sorted((a, b) for a, b in following if (b, a) in following and b in sharing and (a, b) not in blocked)
     event_index = {row[0]: e for e, row in enumerate(events)}
     interest_index = {row[0]: i for i, row in enumerate(interests)}
     user_ids = sorted({u for u, _ in picks} | {row[0] for row in stances} | {u for pair in follows for u in pair})
@@ -122,7 +124,6 @@ def load(conn: psycopg.Connection) -> Inputs | None:
 
 
 def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
-    """The scores land first and the run is marked finished after, so the feed never reads a run half written."""
     rows = 0
     with conn.transaction():
         (run,) = conn.execute("INSERT INTO rec_ppr_runs DEFAULT VALUES RETURNING run_number").fetchone()
@@ -130,8 +131,9 @@ def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
             for user, event, score in scores(inputs):
                 copy.write_row((run, inputs.user_ids[user], inputs.event_ids[event], score))
                 rows += 1
-    conn.execute("UPDATE rec_ppr_runs SET finished_at = now() WHERE run_number = %s", (run,))
-    conn.execute(PRUNE)
+        # Not now(), which is when the transaction began, before the scores were written.
+        conn.execute("UPDATE rec_ppr_runs SET finished_at = clock_timestamp() WHERE run_number = %s", (run,))
+        conn.execute(PRUNE)
     return run, rows
 
 

@@ -1,9 +1,11 @@
 import numpy as np
+import pytest
 
+import ppr
 from ppr import Inputs, adjacency, content_edges, scores
 
 DIM, GROUPS, PER_GROUP = 12, 6, 4
-# Six interests along six axes, and four events near each, with a little seeded noise so no two are alike.
+# Each interest is an axis with its own events near it, and seeded noise so no two events are alike.
 INTERESTS = np.eye(DIM)[:GROUPS]
 _noise = np.random.default_rng(7).normal(scale=0.15, size=(GROUPS * PER_GROUP, DIM))
 
@@ -30,6 +32,10 @@ def inputs(**kw):
         post_average=EVENTS.mean(axis=0),
         interest_vectors=INTERESTS,
         user_ids=["u0"],
+        picks=[],
+        stances=[],
+        follows=[],
+        hidden={},
     )
     base.update(kw)
     return Inputs(**base)
@@ -93,8 +99,6 @@ def test_a_venue_links_its_events():
 
 
 def test_batches_give_the_same_scores(monkeypatch):
-    import ppr
-
     many = inputs(user_ids=["u0", "u1", "u2"], picks=[(0, 0), (1, 2), (2, 4)])
     whole = sorted(scores(many))
     monkeypatch.setattr(ppr, "BATCH", 1)
@@ -121,9 +125,31 @@ def test_a_single_event_still_links_to_interests():
     assert to_interest and not to_event
 
 
-def test_event_neighbours_dont_depend_on_the_chunk_size(monkeypatch):
-    import ppr
-
+@pytest.mark.parametrize("chunk", [1, 5, 7])
+def test_event_neighbours_dont_depend_on_the_chunk_size(monkeypatch, chunk):
     whole = content_edges(inputs())
-    monkeypatch.setattr(ppr, "CHUNK", 5)
+    monkeypatch.setattr(ppr, "CHUNK", chunk)
     assert content_edges(inputs()) == whole
+
+
+def test_the_walk_is_personalised_pagerank():
+    many = inputs(user_ids=["u0", "u1"], picks=[(0, 1)], stances=[(1, 12, 1.0), (0, 13, 2.0)], follows=[(0, 1)])
+    a = adjacency(many).toarray()
+    p = a / np.maximum(a.sum(axis=1, keepdims=True), 1)
+    seed = np.zeros(len(a))
+    seed[len(a) - 2] = 1
+    exact = np.linalg.solve(np.eye(len(a)) - (1 - ppr.RESTART) * p.T, ppr.RESTART * seed)[:N]
+    got = by_event(scores(many))
+    assert sorted(got, key=got.get) == sorted(range(N), key=lambda e: exact[e])
+
+
+def test_a_stronger_stance_pulls_harder():
+    def scored(weight):
+        return by_event(scores(inputs(stances=[(0, 0, 1.0), (0, 12, weight)], hidden={0: {0, 12}})))
+
+    assert scored(2.0)[13] > scored(1.0)[13]
+
+
+def test_what_every_interest_shares_doesnt_choose_an_events_interests():
+    shift = np.random.default_rng(1).normal(size=DIM)
+    assert content_edges(inputs(interest_vectors=INTERESTS + shift))[0] == content_edges(inputs())[0]

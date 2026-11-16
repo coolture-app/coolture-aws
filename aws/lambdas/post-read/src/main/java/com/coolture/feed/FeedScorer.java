@@ -35,8 +35,7 @@ public final class FeedScorer {
 
     /** The parts before weighting, kept so that explanations can be added later, and the weighted total. */
     public record Score(double affinity, double notForMe, double proximity, double time, double popularity, double jitter,
-                        double ppr,
-                        double total) {}
+                        double ppr,                         double total) {}
 
     private final FeedConfig config;
 
