@@ -262,6 +262,8 @@ components:
         - tags
         - positiveReactionCount
         - participantCount
+        - interestedCount
+        - goingCount
         - commentsCount
         - type
         - status
@@ -279,6 +281,8 @@ components:
         tags: {type: array, items: {type: string}}
         positiveReactionCount: {type: integer}
         participantCount: {type: integer}
+        interestedCount: {type: integer, description: People who marked it Interesuje mnie.}
+        goingCount: {type: integer, description: People who marked it Wezmę udział.}
         commentsCount: {type: integer}
         type: {$ref: '#/components/schemas/PostType'}
         status: {$ref: '#/components/schemas/PostStatus'}
