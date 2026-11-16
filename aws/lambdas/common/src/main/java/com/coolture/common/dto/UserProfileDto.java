@@ -19,5 +19,6 @@ public record UserProfileDto(
     Instant createdAt,
     boolean isFollowing,
     boolean isBlocked,
+    boolean followsYou,
     List<String> interests
 ) {}

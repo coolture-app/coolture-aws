@@ -11,10 +11,12 @@ import com.coolture.common.storage.S3StorageService;
 import com.coolture.user.dto.HomeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
+import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.repository.UserRepository.AvatarRecord;
 import com.coolture.user.repository.UserRepository.HomeRecord;
+import com.coolture.user.repository.UserRepository.ListedUser;
 import com.coolture.user.repository.UserRepository.UserEntity;
 
 import java.sql.SQLException;
@@ -37,7 +39,7 @@ public class UserService {
         this.s3StorageService = s3StorageService;
     }
 
-    public CursorPage<UserSummaryDto> search(UUID callerId, String q, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> search(UUID callerId, String q, String cursor, int limit) throws SQLException {
         if (callerId == null) {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
         }
@@ -49,45 +51,15 @@ public class UserService {
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
 
-        List<UserEntity> users = userRepository.search(q, cursorCreatedAt, cursorId, limit + 1);
+        List<ListedUser> users = userRepository.search(callerId, q, cursorCreatedAt, cursorId, limit + 1);
 
-        List<UUID> userIds = users.stream().map(UserEntity::id).toList();
-        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(userIds);
-
-        List<UserSummaryDto> dtos = new ArrayList<>();
-        for (UserEntity user : users) {
-            MediaResourceDto avatar = null;
-            AvatarRecord record = avatarMap.get(user.id());
-            if (record != null) {
-                String url = s3StorageService.presignGet(record.objectKey());
-                avatar = new MediaResourceDto(
-                        record.id(),
-                        record.purpose(),
-                        record.mimeType(),
-                        record.sizeBytes(),
-                        record.status(),
-                        url,
-                        record.createdAt(),
-                        record.deletedAt()
-                );
-            }
-
-            int followersCount = userRepository.countFollowers(user.id());
-            int followingCount = userRepository.countFollowing(user.id());
-
-            dtos.add(new UserSummaryDto(
-                    user.id(),
-                    user.username(),
-                    user.firstName(),
-                    user.lastName(),
-                    avatar,
-                    user.createdAt(),
-                    followersCount,
-                    followingCount
-            ));
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(users.stream().map(u -> u.user().id()).toList());
+        List<UserListItemDto> dtos = new ArrayList<>();
+        for (ListedUser listed : users) {
+            dtos.add(toListItem(listed.user(), listed.followsYou(), avatarMap));
         }
 
-        return CursorPage.of(dtos, limit, UserSummaryDto::id, UserSummaryDto::createdAt);
+        return CursorPage.of(dtos, limit, dto -> dto.summary().id(), dto -> dto.summary().createdAt());
     }
 
     public UserProfileDto getByIdForCaller(UUID targetId, UUID callerId) throws SQLException {
@@ -193,7 +165,7 @@ public class UserService {
         return Math.round(coordinate * 100) / 100.0;
     }
 
-    public CursorPage<UserSummaryDto> getFollowers(UUID targetUserId, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getFollowers(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
         if (limit < 1 || limit > 100) {
             throw new IllegalArgumentException("Limit must be between 1 and 100");
         }
@@ -204,11 +176,11 @@ public class UserService {
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
 
-        List<UserRepository.UserRelationRow> rows = userRepository.findFollowers(targetUserId, cursorCreatedAt, cursorId, limit + 1);
+        List<UserRepository.UserRelationRow> rows = userRepository.findFollowers(targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
         return toRelationPage(rows, limit);
     }
 
-    public CursorPage<UserSummaryDto> getFollowing(UUID targetUserId, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getFollowing(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
         if (limit < 1 || limit > 100) {
             throw new IllegalArgumentException("Limit must be between 1 and 100");
         }
@@ -219,11 +191,11 @@ public class UserService {
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
 
-        List<UserRepository.UserRelationRow> rows = userRepository.findFollowing(targetUserId, cursorCreatedAt, cursorId, limit + 1);
+        List<UserRepository.UserRelationRow> rows = userRepository.findFollowing(targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
         return toRelationPage(rows, limit);
     }
 
-    public CursorPage<UserSummaryDto> getBlocking(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getBlocking(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
         if (callerId == null) {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
         }
@@ -237,7 +209,7 @@ public class UserService {
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
 
-        List<UserRepository.UserRelationRow> rows = userRepository.findBlocking(targetUserId, cursorCreatedAt, cursorId, limit + 1);
+        List<UserRepository.UserRelationRow> rows = userRepository.findBlocking(targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
         return toRelationPage(rows, limit);
     }
 
@@ -304,49 +276,47 @@ public class UserService {
         }
     }
 
-    private CursorPage<UserSummaryDto> toRelationPage(List<UserRepository.UserRelationRow> rows, int limit) throws SQLException {
-        List<UUID> userIds = rows.stream().map(r -> r.user().id()).toList();
-        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(userIds);
+    private CursorPage<UserListItemDto> toRelationPage(List<UserRepository.UserRelationRow> rows, int limit) throws SQLException {
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(rows.stream().map(r -> r.user().id()).toList());
 
         Map<UUID, Instant> relationCreatedAtMap = new HashMap<>();
-        List<UserSummaryDto> dtos = new ArrayList<>();
-
+        List<UserListItemDto> dtos = new ArrayList<>();
         for (UserRepository.UserRelationRow row : rows) {
-            UserEntity user = row.user();
-            relationCreatedAtMap.put(user.id(), row.relationCreatedAt());
-
-            MediaResourceDto avatar = null;
-            AvatarRecord record = avatarMap.get(user.id());
-            if (record != null) {
-                String url = s3StorageService.presignGet(record.objectKey());
-                avatar = new MediaResourceDto(
-                        record.id(),
-                        record.purpose(),
-                        record.mimeType(),
-                        record.sizeBytes(),
-                        record.status(),
-                        url,
-                        record.createdAt(),
-                        record.deletedAt()
-                );
-            }
-
-            int followersCount = userRepository.countFollowers(user.id());
-            int followingCount = userRepository.countFollowing(user.id());
-
-            dtos.add(new UserSummaryDto(
-                    user.id(),
-                    user.username(),
-                    user.firstName(),
-                    user.lastName(),
-                    avatar,
-                    user.createdAt(),
-                    followersCount,
-                    followingCount
-            ));
+            relationCreatedAtMap.put(row.user().id(), row.relationCreatedAt());
+            dtos.add(toListItem(row.user(), row.followsYou(), avatarMap));
         }
 
-        return CursorPage.of(dtos, limit, UserSummaryDto::id, dto -> relationCreatedAtMap.get(dto.id()));
+        return CursorPage.of(dtos, limit, dto -> dto.summary().id(), dto -> relationCreatedAtMap.get(dto.summary().id()));
+    }
+
+    private UserListItemDto toListItem(UserEntity user, boolean followsYou, Map<UUID, AvatarRecord> avatarMap) throws SQLException {
+        MediaResourceDto avatar = null;
+        AvatarRecord record = avatarMap.get(user.id());
+        if (record != null) {
+            String url = s3StorageService.presignGet(record.objectKey());
+            avatar = new MediaResourceDto(
+                    record.id(),
+                    record.purpose(),
+                    record.mimeType(),
+                    record.sizeBytes(),
+                    record.status(),
+                    url,
+                    record.createdAt(),
+                    record.deletedAt()
+            );
+        }
+
+        UserSummaryDto summary = new UserSummaryDto(
+                user.id(),
+                user.username(),
+                user.firstName(),
+                user.lastName(),
+                avatar,
+                user.createdAt(),
+                userRepository.countFollowers(user.id()),
+                userRepository.countFollowing(user.id())
+        );
+        return new UserListItemDto(summary, followsYou);
     }
 
     private UserProfileDto toProfileDto(UserEntity user, UUID callerId) throws SQLException {
@@ -372,6 +342,7 @@ public class UserService {
 
         boolean isFollowing = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(callerId, user.id());
         boolean isBlocked = callerId != null && !callerId.equals(user.id()) && userRepository.isBlocked(callerId, user.id());
+        boolean followsYou = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(user.id(), callerId);
 
         return new UserProfileDto(
                 user.id(),
@@ -385,6 +356,7 @@ public class UserService {
                 user.createdAt(),
                 isFollowing,
                 isBlocked,
+                followsYou,
                 userRepository.findInterestKeys(user.id())
         );
     }

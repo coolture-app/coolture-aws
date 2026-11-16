@@ -5,7 +5,6 @@ import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.coolture.common.dto.UserProfileDto;
-import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.json.JsonUtils;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
@@ -15,6 +14,7 @@ import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserInterestsDto;
+import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.UserRepository.UserEntity;
 import com.coolture.user.service.InterestService;
@@ -168,7 +168,7 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         String limitStr = getQueryParam(event, "limit");
         int limit = limitStr != null ? Integer.parseInt(limitStr) : 20;
 
-        CursorPage<UserSummaryDto> page = service.search(callerId, q, cursor, limit);
+        CursorPage<UserListItemDto> page = service.search(callerId, q, cursor, limit);
         return ApiResponse.ok(page);
     }
 
@@ -259,22 +259,24 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
     }
 
     private APIGatewayV2HTTPResponse getFollowers(APIGatewayV2HTTPEvent event) throws Exception {
+        UUID callerId = SecurityContext.getUserIdOptional(event).orElse(null);
         UUID userId = extractUserId(event);
         String cursor = getQueryParam(event, "cursor");
         String limitStr = getQueryParam(event, "limit");
         int limit = limitStr != null ? Integer.parseInt(limitStr) : 20;
 
-        CursorPage<UserSummaryDto> page = service.getFollowers(userId, cursor, limit);
+        CursorPage<UserListItemDto> page = service.getFollowers(userId, callerId, cursor, limit);
         return ApiResponse.ok(page);
     }
 
     private APIGatewayV2HTTPResponse getFollowing(APIGatewayV2HTTPEvent event) throws Exception {
+        UUID callerId = SecurityContext.getUserIdOptional(event).orElse(null);
         UUID userId = extractUserId(event);
         String cursor = getQueryParam(event, "cursor");
         String limitStr = getQueryParam(event, "limit");
         int limit = limitStr != null ? Integer.parseInt(limitStr) : 20;
 
-        CursorPage<UserSummaryDto> page = service.getFollowing(userId, cursor, limit);
+        CursorPage<UserListItemDto> page = service.getFollowing(userId, callerId, cursor, limit);
         return ApiResponse.ok(page);
     }
 
@@ -285,7 +287,7 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         String limitStr = getQueryParam(event, "limit");
         int limit = limitStr != null ? Integer.parseInt(limitStr) : 20;
 
-        CursorPage<UserSummaryDto> page = service.getBlocking(userId, callerId, cursor, limit);
+        CursorPage<UserListItemDto> page = service.getBlocking(userId, callerId, cursor, limit);
         return ApiResponse.ok(page);
     }
 
