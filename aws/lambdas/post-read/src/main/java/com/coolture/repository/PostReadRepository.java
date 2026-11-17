@@ -1,9 +1,11 @@
 package com.coolture.repository;
 
+import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.StanceCounts;
 import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
@@ -133,15 +135,16 @@ public class PostReadRepository {
             LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid
             LEFT JOIN post_participations pp_my ON pp_my.post_id = p.id AND pp_my.user_id = ?::uuid
             WHERE p.id = ? AND p.deleted_at IS NULL
-        """;
+            """ + "  AND " + PostSql.NOT_BLOCKED;
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            new ParamBinder(stmt, conn)
+            ParamBinder b = new ParamBinder(stmt, conn)
                 .bindUUID(callerId)
                 .bindUUID(callerId)
                 .bindUUID(postId);
+            Blocks.bindViewer(b, callerId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -183,15 +186,11 @@ public class PostReadRepository {
         return Optional.empty();
     }
 
-    /** Empty when the post is missing or deleted, as on the post's page. */
+    /** Empty when the post's page would be a 404. */
     public Optional<PostFriendsDto> findFriends(UUID postId, UUID callerId) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM posts WHERE id = ? AND deleted_at IS NULL")) {
-            new ParamBinder(stmt, conn).bindUUID(postId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            if (!PostQueries.isPostVisible(conn, postId, callerId)) {
+                return Optional.empty();
             }
             return Optional.of(Friends.forPost(conn, callerId, postId));
         }

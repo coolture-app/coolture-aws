@@ -43,6 +43,22 @@ public final class CommentQueries {
                 OR (c.created_at = ? AND c.id < ?))
         """;
 
+    /**
+     * A comment is hidden from a viewer in a blocked pair with its author or with the author of any comment above it,
+     * so a hidden comment takes its thread with it. Binds the viewer twice.
+     */
+    public static final String NOT_HIDDEN = "NOT EXISTS (SELECT 1 FROM comments hc"
+        + " WHERE hc.id = ANY(array_append(c.ancestor_ids, c.id)) AND " + Blocks.withViewer("hc.author_id") + ")";
+
+    public static boolean isVisible(Connection conn, UUID commentId, UUID viewer) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM comments c WHERE c.id = ? AND " + NOT_HIDDEN)) {
+            Blocks.bindViewer(new ParamBinder(stmt, conn).bindUUID(commentId), viewer);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
     public static Optional<CommentSummaryDto> findDetailById(Connection conn, UUID commentId) throws SQLException {
         String sql = "SELECT " + SELECT_COLUMNS + AUTHOR_JOINS + "WHERE c.id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
