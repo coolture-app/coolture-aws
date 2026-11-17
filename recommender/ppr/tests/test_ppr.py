@@ -86,6 +86,14 @@ def test_a_friends_friends_dont_reach_you():
     assert by_event(scores(further)) == by_event(scores(inputs(**FRIENDS)))
 
 
+def test_a_shared_friend_doesnt_pass_on_their_other_friends():
+    # u0 and u2 are both friends of u1; u3 is u2's friend, not u0's, and is going to events 12 and 13.
+    shared = inputs(user_ids=["u0", "u1", "u2", "u3"], stances=[(1, 0, 2.0), (3, 12, 2.0), (3, 13, 2.0)],
+                    friends=[(0, 1), (1, 0), (1, 2), (2, 1), (2, 3), (3, 2)])
+    alone = inputs(user_ids=["u0", "u1"], stances=[(1, 0, 2.0)], friends=[(0, 1), (1, 0)])
+    assert by_event(scores(shared)) == by_event(scores(alone))
+
+
 def test_a_venue_links_a_friends_event_to_others_there():
     venues = [None] * N
     venues[0] = venues[16] = "hall"
@@ -100,9 +108,10 @@ def test_a_friend_who_marked_many_events_weighs_no_more_than_one_who_marked_one(
     assert got[0] > max(got[12], got[13], got[14])
 
 
-def test_going_pulls_harder_than_interested():
-    got = by_event(scores(inputs(**{**FRIENDS, "stances": [(1, 0, 1.5), (1, 12, 2.0)]})))
-    assert got[12] > got[0]
+@pytest.mark.parametrize("going, interested", [(0, 12), (12, 0)])
+def test_going_pulls_harder_than_interested(going, interested):
+    got = by_event(scores(inputs(**{**FRIENDS, "stances": [(1, interested, 1.5), (1, going, 2.0)]})))
+    assert got[going] > got[interested]
 
 
 def test_batches_give_the_same_scores(monkeypatch):
@@ -140,7 +149,7 @@ def test_similar_events_dont_depend_on_the_block_size(monkeypatch, block):
 def test_the_walk_keeps_all_its_mass():
     graph = adjacency(inputs(**FRIENDS))
     seed = np.zeros((graph.shape[0], 1))
-    seed[graph.shape[0] - 4] = 1
+    seed[graph.shape[0] - 2 * len(FRIENDS["user_ids"])] = 1
     mass = ppr.walk(ppr.transition(graph), seed)
     assert np.isfinite(mass).all() and (mass >= 0).all() and mass.sum() == pytest.approx(1)
 

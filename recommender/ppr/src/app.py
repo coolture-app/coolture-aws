@@ -51,9 +51,7 @@ ORDER BY p.id
 
 STANCES = """
 SELECT user_id, post_id, type, floor(extract(epoch FROM %(as_of)s - created_at) / 86400)::int AS age_days
-FROM (SELECT user_id, post_id, type, created_at FROM post_reactions
-      UNION ALL
-      SELECT user_id, post_id, type, created_at FROM post_participations) s
+FROM post_participations
 WHERE type = ANY(%(types)s)
   AND created_at <= %(as_of)s AND created_at > %(as_of)s - make_interval(days => %(max_age_days)s)
 """
@@ -206,7 +204,7 @@ def lambda_handler(_event: dict[str, Any], context: Any) -> dict[str, Any]:
             logger.info("nothing to score: no events with %s vectors", EMBEDDING_MODEL)
             return {"run": None, "rows": 0}
         loaded = time.monotonic()
-        logger.info("loaded %d events (%d not ended), %d users, %d friendships in %.1f s", len(inputs.event_ids),
+        logger.info("loaded %d events (%d not ended), %d users, %d friend edges in %.1f s", len(inputs.event_ids),
                     inputs.not_ended.sum(), len(inputs.user_ids), len(inputs.friends), loaded - started)
         # The database ends the run's transaction itself, before Lambda stops this process. 0 would mean no limit.
         timeout_ms = max(context.get_remaining_time_in_millis() - 15_000, 1_000)

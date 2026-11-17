@@ -29,7 +29,7 @@ class Inputs:
     post_average: np.ndarray
     user_ids: list[UUID]
     stances: list[tuple[int, int, float]]  # (user, event, weight)
-    friends: Pairs  # (user, friend), one row per direction
+    friends: Pairs  # (user, friend who shares their stances)
     hidden: dict[int, set[int]]  # user: events the feed never shows them as new
 
 
