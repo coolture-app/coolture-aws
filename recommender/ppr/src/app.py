@@ -92,8 +92,8 @@ def _db_credentials() -> dict[str, str]:
 
 
 def _matrix(sent: Sequence[bytes]) -> np.ndarray:
-    # pgvector's binary form: dimensions and an unused int16, then big-endian float4. Text arrays took four times as
-    # long and three times the memory.
+    # pgvector's binary form: dimensions and an unused int16, then big-endian float4. Several times faster and smaller
+    # than text arrays.
     return np.array([np.frombuffer(v, dtype=">f4", offset=4) for v in sent], dtype=float)
 
 
@@ -105,29 +105,16 @@ def _stance_weight(kind: str, age_days: int) -> float:
     return STANCE_WEIGHTS[kind] * 0.5 ** (age_days / STANCE_HALF_LIFE_DAYS)
 
 
-def _blocked(user_index: dict[UUID, int], blocks: list[tuple[UUID, UUID]]) -> dict[int, set[int]]:
-    blocked = defaultdict(set)
-    for a, b in blocks:
-        if a in user_index and b in user_index:
-            blocked[user_index[a]].add(user_index[b])
-            blocked[user_index[b]].add(user_index[a])
-    return dict(blocked)
-
-
 def _hidden(user_index: dict[UUID, int], event_index: dict[UUID, int], authors: Sequence[UUID],
-            reacted: list[tuple[UUID, UUID]], blocks: list[tuple[UUID, UUID]]) -> dict[int, set[int]]:
+            reacted: list[tuple[UUID, UUID]], unseen: dict[UUID, set[UUID]]) -> dict[int, set[int]]:
     """What the feed never shows a user as new: PostSql's NOT_MINE and NOT_BLOCKED."""
     events_by_author = defaultdict(list)
     for e, author in enumerate(authors):
         events_by_author[author].append(e)
-    unseen_authors = defaultdict(set)
-    for a, b in blocks:
-        unseen_authors[a].add(b)
-        unseen_authors[b].add(a)
 
     hidden = {}
     for user, u in user_index.items():
-        hidden[u] = {e for author in {user} | unseen_authors[user] for e in events_by_author[author]}
+        hidden[u] = {e for author in {user} | unseen[user] for e in events_by_author[author]}
     for user, post in reacted:
         if user in user_index and post in event_index:
             hidden[user_index[user]].add(event_index[post])
@@ -163,9 +150,13 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
                               WHERE COALESCE(created_at, '-infinity') <= %(as_of)s""", at).fetchall()
 
     following = {(a, b) for a, b, kind in relations if kind == "FOLLOW"}
-    blocks = [(a, b) for a, b, kind in relations if kind == "BLOCK"]
-    # Only to friends who share their stances, the people whose stances the cards show: a one-way follow must not
-    # reveal where someone goes. A block replaces the blocker's follow, so friends never block each other.
+    unseen = defaultdict(set)  # user: the people on the other side of their blocks
+    for a, b, kind in relations:
+        if kind == "BLOCK":
+            unseen[a].add(b)
+            unseen[b].add(a)
+    # Friends.sharingFriend's rule, the people whose stances the cards show: a one-way follow must not reveal where
+    # someone goes. A block replaces the blocker's follow, so friends never block each other.
     follows = sorted((a, b) for a, b in following if (b, a) in following and b in sharing)
 
     event_index = _positions(event_ids)
@@ -185,15 +176,15 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
         stances=[(user_index[u], event_index[p], _stance_weight(kind, age_days))
                  for u, p, kind, age_days in stances if p in event_index],
         follows=[(user_index[a], user_index[b]) for a, b in follows],
-        hidden=_hidden(user_index, event_index, authors, reacted, blocks),
+        hidden=_hidden(user_index, event_index, authors, reacted, unseen),
         private={user_index[u] for u in user_ids if u not in sharing},
-        blocked=_blocked(user_index, blocks),
+        blocked={user_index[u]: {user_index[o] for o in unseen[u] if o in user_index} for u in user_ids if unseen[u]},
     )
 
 
 def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
     """Scores while it copies, so the rows never all sit in memory."""
-    # Before the run's transaction, which then ends right after the run is stamped finished.
+    # Outside the run's transaction, so old runs go even when this run fails.
     conn.execute(DELETE_OLD_RUNS)
     rows = 0
     with conn.transaction():
@@ -219,9 +210,9 @@ def lambda_handler(_event: dict[str, Any], context: Any) -> dict[str, Any]:
         loaded = time.monotonic()
         logger.info("loaded %d events (%d not ended), %d interests, %d users in %.1f s", len(inputs.event_ids),
                     inputs.not_ended.sum(), len(inputs.interest_vectors), len(inputs.user_ids), loaded - started)
-        # The database ends the run's transaction itself, before Lambda stops this process.
-        conn.execute("SELECT set_config('statement_timeout', %s, false)",
-                     (f"{context.get_remaining_time_in_millis() - 15_000}ms",))
+        # The database ends the run's transaction itself, before Lambda stops this process. 0 would mean no limit.
+        timeout_ms = max(context.get_remaining_time_in_millis() - 15_000, 1_000)
+        conn.execute("SELECT set_config('statement_timeout', %s, false)", (f"{timeout_ms}ms",))
         run, rows = write(conn, inputs)
     logger.info("run %s: %d rows, scored and written in %.1f s", run, rows, time.monotonic() - loaded)
     return {"run": run, "rows": rows}

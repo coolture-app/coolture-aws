@@ -116,9 +116,9 @@ Resources:
       Runtime: python3.13
       # One full vCPU: the walk and the copy into the database run on one thread.
       MemorySize: 1769
-      Timeout: 300
-      # A run started by hand waits for the scheduled one. One retry covers Aurora resuming from a pause; the feed keeps
-      # reading the newest finished run anyway.
+      Timeout: 900
+      # One run at a time. One retry covers Aurora resuming from a pause; the feed keeps reading the newest finished
+      # run anyway.
       ReservedConcurrentExecutions: 1
       EventInvokeConfig:
         MaximumRetryAttempts: 1
@@ -129,4 +129,7 @@ Resources:
           Type: ScheduleV2
           Properties:
             ScheduleExpression: rate(6 hours)
+            # The function's own retry is enough, as for the scraper.
+            RetryPolicy:
+              MaximumRetryAttempts: 0
             State: !If [PprScheduleOn, ENABLED, DISABLED]

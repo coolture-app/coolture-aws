@@ -95,6 +95,12 @@ def adjacency(inputs: Inputs) -> sparse.csr_matrix:
         add_one_way(a, b, weight)
         add_one_way(b, a, weight)
 
+    def add_from_user(u, node, weight=1.0):
+        add_one_way(first_user + u, node, weight)
+        # No walk but their own enters a user who doesn't share their stances, so it can't follow them to their events.
+        if u not in inputs.private:
+            add_one_way(node, first_user + u, weight)
+
     for e, venue in enumerate(inputs.venues):
         if venue:
             add_both_ways(e, first_venue + venue_index[venue])
@@ -103,17 +109,11 @@ def adjacency(inputs: Inputs) -> sparse.csr_matrix:
         add_both_ways(e, first_interest + i)
     for e, other in event_event:
         add_both_ways(e, other)
-    def add_from_user(u, node, weight=1.0):
-        add_one_way(first_user + u, node, weight)
-        # No walk but their own enters a user who doesn't share their stances, so it can't follow them to their events.
-        if u not in inputs.private:
-            add_one_way(node, first_user + u, weight)
-
     for u, i in inputs.picks:
         add_from_user(u, first_interest + i)
     for u, e, weight in inputs.stances:
         add_from_user(u, e, weight)
-    # All of a user's friends together weigh like one interest pick. Each its own weight made friends half of the
+    # All of a user's friends together weigh like one interest pick. Weighed one each, friends would take most of a
     # walk's first step and put the same few friend-marked events on top for everyone.
     friends = np.bincount([follower for follower, _ in inputs.follows], minlength=len(inputs.user_ids))
     for follower, followed in inputs.follows:
@@ -148,8 +148,8 @@ def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
     them apart gets no rows, which the feed reads as NEUTRAL for all."""
     graph = adjacency(inputs)
     first_user = graph.shape[0] - len(inputs.user_ids)
-    users_with_edges = [u for u in range(len(inputs.user_ids)) if graph[first_user + u].nnz]
-    unblocked = [u for u in users_with_edges if not inputs.blocked.get(u)]
+    users_with_edges = np.flatnonzero(np.diff(graph.indptr)[first_user:]).tolist()
+    unblocked = [u for u in users_with_edges if u not in inputs.blocked]
     step = transition(graph)
     for start in range(0, len(unblocked), USERS_PER_BATCH):
         batch = unblocked[start:start + USERS_PER_BATCH]
@@ -157,12 +157,11 @@ def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
 
     # Each over a graph without the people on the other side of their blocks, whose stances would otherwise still
     # reach them through a shared event. Few users block anyone, so walking them one by one costs little.
-    for u in users_with_edges:
-        if inputs.blocked.get(u):
-            keep = np.ones(graph.shape[0])
-            keep[[first_user + other for other in inputs.blocked[u]]] = 0
-            without = sparse.diags(keep) @ graph @ sparse.diags(keep)
-            yield from ranked(inputs, [u], walk(transition(without.tocsr()), starts(graph.shape[0], [first_user + u])))
+    for u in sorted(set(users_with_edges) & inputs.blocked.keys()):
+        keep = np.ones(graph.shape[0])
+        keep[[first_user + other for other in inputs.blocked[u]]] = 0
+        without = sparse.diags(keep) @ graph @ sparse.diags(keep)
+        yield from ranked(inputs, [u], walk(transition(without.tocsr()), starts(graph.shape[0], [first_user + u])))
 
 
 def starts(size: int, nodes: list[int]) -> np.ndarray:

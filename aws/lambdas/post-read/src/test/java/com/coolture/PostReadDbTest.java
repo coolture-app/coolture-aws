@@ -342,7 +342,7 @@ class PostReadDbTest {
     }
 
     @Test
-    void feed_readsTheLatestPprRunFinishedAMinuteBeforeAsOf_andNoneOverADayOld() throws SQLException {
+    void feed_readsTheLatestPprRunFinishedBeforeAsOfWithinItsMaxAge() throws SQLException {
         // A day ahead, so a run made just now, as make seed's last step does, is never the latest.
         Instant base = Instant.now().plus(Duration.ofDays(1));
         UUID post = postTitled("future_public");

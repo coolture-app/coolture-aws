@@ -57,7 +57,7 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     public static final int PPR_RUN_MARGIN_SECONDS = 60;
     /**
      * An older run counts as none, and every post gets NEUTRAL for PageRank: its scores may still carry friendships,
-     * blocks and sharing people have changed since. A day spans three missed runs of the schedule.
+     * blocks and sharing people have changed since. Long enough to outlast a few failed scheduled runs.
      */
     public static final int PPR_RUN_MAX_AGE_HOURS = 24;
 

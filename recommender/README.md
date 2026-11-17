@@ -129,12 +129,17 @@ The thesis's graph signal. `PprFunction` runs personalised PageRank from every u
 | User–event | Likes, interested and going, weighed and faded as the feed weighs and fades them |
 | User → user | Friends (mutual follows, no block) who share their stances: a one-way follow reveals nothing. All of a user's friends together weigh like one interest pick |
 
-Each user's candidates, the posts the feed may show them as new, get the walk's mass as a rank from 0 to 1. The feed
-reads the latest run finished a minute before the session's `asOf`, so a run landing mid-scroll doesn't move its pages,
-and gives a post with no score `NEUTRAL` (weight `ppr` in `FeedConfig`). A run is deleted once a newer one finished over
-a day ago. `FEED_WEIGHTS=ppr=0` on `PostReadFunction` keeps the runs but gives them no say in the feed.
+A user who doesn't share their stances has no edges leading in, so their picks and stances move only their own scores.
+A user with a block walks a graph without the other person, both ways.
 
-Only the event–venue, user–event and user → user edges are relations people made. The event–interest and event–event
+Each user's candidates, the posts the feed may show them as new, get the walk's mass as a rank from 0 to 1. The feed
+reads the latest run finished `PPR_RUN_MARGIN_SECONDS` before the session's `asOf`, so a run landing mid-scroll doesn't
+move its pages, and ignores a run older than `PPR_RUN_MAX_AGE_HOURS`, whose relations may have changed since. A post with
+no score gets `NEUTRAL` (weight `ppr` in `FeedConfig`), so locally PageRank's effect goes after a day unless `make ppr`
+runs again. A run is deleted once a newer one is over a day old. `FEED_WEIGHTS=ppr=0` on `PostReadFunction` keeps the
+runs but gives them no say in the feed.
+
+Only the event–venue, user–interest, user–event and user → user edges are relations people made. The event–interest and event–event
 edges come from the same vectors as the feed's affinity, so through them PageRank mostly repeats it; they are what
 reaches a new user's events and an event nobody marked. `load()` takes an `as_of` to replay an earlier moment, with the
 limits its docstring lists.
