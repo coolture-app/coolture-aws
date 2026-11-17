@@ -188,3 +188,34 @@ FROM generate_series(1, 10) g;
 INSERT INTO post_media (post_id, media_id, position)
 SELECT 'a0000000-0000-0000-0000-000000000201', ('a0000000-0000-0000-0001-' || lpad(g::text, 12, '0'))::uuid, g % 10
 FROM generate_series(1, 10) g;
+
+-- Dates by overlap, at each edge of the window 2040-06-06 00:00 to 2040-06-07 23:59:59.999 (UTC), by their own author.
+INSERT INTO users (id, username) VALUES ('a0000000-0000-0000-0000-000000000011', 'timekeeper');
+
+INSERT INTO posts (author_id, title, starts_at, ends_at, open_ended, type)
+SELECT 'a0000000-0000-0000-0000-000000000011', title, starts::timestamptz, ends::timestamptz, open_ended, 'ONLINE'
+FROM (VALUES
+  ('time_ends_at_from',          '2040-06-05 10:00Z',         '2040-06-06 00:00Z',  false),
+  ('time_ends_before_from',      '2040-06-05 10:00Z',         '2040-06-05 23:59:59Z', false),
+  ('time_starts_at_to',          '2040-06-07 23:59:59.999Z',  NULL,                 false),
+  ('time_starts_after_to',       '2040-06-08 00:00Z',         NULL,                 false),
+  ('time_spans_the_window',      '2040-06-01 10:00Z',         '2040-06-30 18:00Z',  false),
+  ('time_default_end_inside',    '2040-06-05 22:00Z',         NULL,                 false),
+  ('time_default_end_before',    '2040-06-05 20:59Z',         NULL,                 false),
+  ('time_no_end_date_before',    '2039-01-01 10:00Z',         NULL,                 true),
+  ('time_no_end_date_after',     '2040-07-01 10:00Z',         NULL,                 true)
+) AS t(title, starts, ends, open_ended);
+
+-- Nadchodzące's two streams, relative to now: nine dated events a day apart, and three already running. The description
+-- "rytm" marks the dated ones and the running one that ends first.
+INSERT INTO users (id, username) VALUES ('a0000000-0000-0000-0000-000000000012', 'rhythm');
+
+INSERT INTO posts (author_id, title, description, starts_at, ends_at, type)
+SELECT 'a0000000-0000-0000-0000-000000000012', 'rhythm_dated_' || g, 'rytm', date_trunc('minute', now()) + (g || ' days')::interval,
+       NULL, 'ONLINE'
+FROM generate_series(1, 9) g;
+
+INSERT INTO posts (author_id, title, description, starts_at, ends_at, open_ended, type) VALUES
+  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_1',    'rytm', now() - interval '1 day',   now() + interval '1 day',  false, 'ONLINE'),
+  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_2',    NULL,   now() - interval '1 day',   now() + interval '2 days', false, 'ONLINE'),
+  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_open', NULL,   now() - interval '10 days', NULL,                      true,  'ONLINE');

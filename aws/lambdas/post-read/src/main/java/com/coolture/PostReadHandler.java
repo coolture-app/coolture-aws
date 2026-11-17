@@ -143,8 +143,8 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         Boolean followed = parseBoolean(qp.get("followed"), "followed") ? true : null;
         PostType type = qp.get("type") != null ? PostType.valueOf(qp.get("type").toUpperCase()) : null;
 
-        Instant startsFrom = qp.get("startsFrom") != null ? Instant.parse(qp.get("startsFrom")) : null;
-        Instant startsTo = qp.get("startsTo") != null ? Instant.parse(qp.get("startsTo")) : null;
+        Instant from = qp.get("from") != null ? Instant.parse(qp.get("from")) : null;
+        Instant to = qp.get("to") != null ? Instant.parse(qp.get("to")) : null;
 
         Double lat = parseCoordinate(qp, "latitude", 90);
         Double lng = parseCoordinate(qp, "longitude", 180);
@@ -160,7 +160,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
 
         return new PostFeedFilters(
             q, authorId, status, followed, type,
-            startsFrom, startsTo, lat, lng, radiusKm,
+            from, to, lat, lng, radiusKm,
             partTypes, reactionType, cursor, limit, sortBy, includePast
         );
     }

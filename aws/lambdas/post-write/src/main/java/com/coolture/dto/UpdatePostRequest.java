@@ -23,6 +23,9 @@ public record UpdatePostRequest(
 
     Instant endsAt,
 
+    /** No end date ("do odwołania"). Can't come with an endsAt. */
+    Boolean openEnded,
+
     PostType type,
 
     @Valid
@@ -33,7 +36,7 @@ public record UpdatePostRequest(
     UUID coverMediaId
 ) {
     public UpdatePostRequest withMediaIds(List<UUID> ordered) {
-        return new UpdatePostRequest(title, description, eventUrl, startsAt, endsAt, type, location,
+        return new UpdatePostRequest(title, description, eventUrl, startsAt, endsAt, openEnded, type, location,
             ordered, coverMediaId);
     }
 }

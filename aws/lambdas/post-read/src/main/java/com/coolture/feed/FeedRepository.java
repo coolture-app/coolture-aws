@@ -1,6 +1,7 @@
 package com.coolture.feed;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.EventTime;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
@@ -10,6 +11,7 @@ import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.repository.PostFilterSql;
 import com.coolture.repository.PostSql;
+import com.coolture.repository.Upcoming;
 
 import java.sql.Array;
 import java.sql.Connection;
@@ -58,7 +60,8 @@ public class FeedRepository {
         )
         SELECT p.id,
                p.starts_at,
-        """ + "       " + PostSql.EVENT_END + " AS ends_at,\n" + """
+               p.ends_at,
+               p.open_ended,
                COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0) AS engagement,
                1 - (c.centred <=> ?::vector) AS similarity,
                (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
@@ -249,14 +252,18 @@ public class FeedRepository {
             List<FeedScorer.Facts> candidates = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
+                    Instant startsAt = ResultSetMappers.mapInstant(rs, "starts_at");
+                    Instant endsAt = ResultSetMappers.mapInstant(rs, "ends_at");
+                    boolean openEnded = rs.getBoolean("open_ended");
                     candidates.add(new FeedScorer.Facts(
                         (UUID) rs.getObject("id"),
-                        ResultSetMappers.mapInstant(rs, "starts_at"),
-                        ResultSetMappers.mapInstant(rs, "ends_at"),
+                        startsAt,
+                        EventTime.end(startsAt, endsAt, openEnded),
                         rs.getInt("engagement"),
                         (Double) rs.getObject("similarity"),
                         (Double) rs.getObject("meters"),
-                        nearMark((Double) rs.getObject("near_mark"))
+                        nearMark((Double) rs.getObject("near_mark")),
+                        EventTime.isStanding(startsAt, endsAt, openEnded)
                     ));
                 }
             }
@@ -269,30 +276,15 @@ public class FeedRepository {
         return value == null || value.isNaN() ? 0 : value;
     }
 
-    /** The fallback order: soonest first, continuing after the given start time and id when they're set. */
-    public List<PostCardDto> findUpcoming(UUID viewer, Instant asOf, PostFeedFilters filters,
-                                          Instant afterStartsAt, UUID afterId, int limit) throws SQLException {
-        boolean continues = afterStartsAt != null;
-        String sql = PostSql.CARD_SELECT
-            + "WHERE " + feedRules(false)
-            + (continues ? "  AND (p.starts_at, p.id) > (?::timestamptz, ?::uuid)\n" : "")
-            + "ORDER BY p.starts_at ASC, p.id ASC\n"
-            + "LIMIT ?";
-
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            ParamBinder b = new ParamBinder(stmt, conn);
+    /** The fallback order, Nadchodzące's (Upcoming), from the given position. */
+    public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
+        Upcoming.Query query = new Upcoming.Query(PostSql.CARD_SELECT + "WHERE " + feedRules(false), b -> {
             b.bindNullableUUID(viewer)
              .bindNullableUUID(viewer);
-            bindRules(b, viewer, asOf, filters);
-            if (continues) {
-                b.bindTimestamp(afterStartsAt)
-                 .bindUUID(afterId);
-            }
-            b.bindInt(limit);
-
-            return readCards(stmt, viewer);
+            bindRules(b, viewer, at.asOf(), filters);
+        });
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Upcoming.find(conn, query, viewer, filters.from(), at, limit);
         }
     }
 

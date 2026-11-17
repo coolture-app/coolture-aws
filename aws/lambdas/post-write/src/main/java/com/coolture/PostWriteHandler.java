@@ -1,7 +1,10 @@
 package com.coolture;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
@@ -9,6 +12,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.json.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
 import com.coolture.dto.CreatePostRequest;
@@ -85,7 +89,7 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
     private APIGatewayV2HTTPResponse updatePost(APIGatewayV2HTTPEvent event, UUID userId) throws Exception {
         UUID postId = extractPostId(event);
         UpdatePostRequest request = JsonUtils.fromJsonAndValidate(event.getBody(), UpdatePostRequest.class);
-        PostDetailDto updated = service.updatePost(postId, userId, request);
+        PostDetailDto updated = service.updatePost(postId, userId, request, sentAsNull(event.getBody()));
         return ApiResponse.ok(updated);
     }
 
@@ -119,6 +123,17 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
         UUID postId = extractPostId(event);
         service.deleteParticipation(postId, userId);
         return ApiResponse.noContent();
+    }
+
+    /** The removable fields the body sets to null, which a record can't tell from fields left out. */
+    private static Set<String> sentAsNull(String body) {
+        JsonNode tree = body == null || body.isBlank() ? null : JsonUtils.readTree(body);
+        if (tree == null || !tree.isObject()) {
+            return Set.of();
+        }
+        return Stream.of("endsAt", "eventUrl")
+            .filter(field -> tree.has(field) && tree.get(field).isNull())
+            .collect(Collectors.toUnmodifiableSet());
     }
 
     private UUID extractPostId(APIGatewayV2HTTPEvent event) {

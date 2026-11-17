@@ -171,9 +171,12 @@ seed: seed-events embed-interests embed-posts seed-reactions seed-friends ## All
 
 .NOTPARALLEL: seed
 
-test-db: build-common ## Run the post-read and post-write database tests against `make up`
+test-db: build-common ## Run the database tests of posts, comments and users against `make up`
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-read/pom.xml -Dtest=PostReadDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-write/pom.xml -Dtest=PostWriteDbTest
+	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/comment-read/pom.xml -Dtest=CommentReadDbTest
+	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/comment-write/pom.xml -Dtest=CommentWriteDbTest
+	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/user/pom.xml -Dtest=UserDbTest
 
 embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
 	@scripts/embed-posts.sh

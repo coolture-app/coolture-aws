@@ -62,6 +62,57 @@ HTTP 200
 [Asserts]
 jsonpath "$.location" not exists
 
+# PATCH follows merge-patch rules: a field left out keeps its value, and null removes it.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "endsAt": null, "eventUrl": null }
+HTTP 200
+[Asserts]
+jsonpath "$.endsAt" not exists
+jsonpath "$.eventUrl" not exists
+jsonpath "$.openEnded" == false
+jsonpath "$.title" == "Wieczór z planszówkami online, edycja zimowa"
+
+# No end date and an end at once is a contradiction.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "openEnded": true, "endsAt": "2030-01-15T21:00:00Z" }
+HTTP 400
+
+# With no end date, the post runs in every later window.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "openEnded": true }
+HTTP 200
+[Asserts]
+jsonpath "$.openEnded" == true
+jsonpath "$.endsAt" not exists
+
+GET {{api}}/posts?authorId={{anna}}&from=2031-06-06T00:00:00Z&to=2031-06-07T23:59:59Z&limit=100
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.items[?(@.id == '{{post}}')].openEnded" == true
+
+# An end turns it off again.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "endsAt": "2030-01-15T21:00:00Z" }
+HTTP 200
+[Asserts]
+jsonpath "$.openEnded" == false
+jsonpath "$.endsAt" == "2030-01-15T21:00:00Z"
+
+GET {{api}}/posts?authorId={{anna}}&from=2031-06-06T00:00:00Z&to=2031-06-07T23:59:59Z&limit=100
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.items[?(@.id == '{{post}}')]" not exists
+
 # Jan likes it and is interested. PUT replaces his reaction, so sending it twice changes nothing.
 PUT {{api}}/posts/{{post}}/reaction
 X-User-Id: {{jan}}
@@ -241,3 +292,31 @@ GET {{api}}/posts/{{post}}/friends
 X-User-Id: {{jan}}
 X-User-Name: jan_demo
 HTTP 404
+
+# The start can't move to the past, but an edit may send an unchanged start back, as the edit form always does. (Once
+# an event has ended, Interesuje mnie and Biorę udział are refused too; PostWriteDbTest shows it, since a post can't be
+# created in the past.)
+POST {{api}}/posts
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Koncert w Ergo", "description": "Wieczór z jazzem.", "startsAt": "2030-03-01T19:00:00Z", "type": "ONLINE" }
+HTTP 201
+[Captures]
+dated: jsonpath "$.id"
+
+PATCH {{api}}/posts/{{dated}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Koncert w Ergo Arenie", "startsAt": "2030-03-01T19:00:00Z" }
+HTTP 200
+
+PATCH {{api}}/posts/{{dated}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "startsAt": "2020-03-01T19:00:00Z" }
+HTTP 400
+
+DELETE {{api}}/posts/{{dated}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 204

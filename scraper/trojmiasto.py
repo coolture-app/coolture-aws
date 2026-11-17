@@ -28,6 +28,13 @@ HOUR = re.compile(r'godz\.\s*(\d{1,2})[:.](\d{2})', re.IGNORECASE)
 END_HOUR = re.compile(r'godz\.\s*\d{1,2}[:.]\d{2}\s*[-–]\s*(\d{1,2})[:.](\d{2})', re.IGNORECASE)
 BUILDING_NUMBER = re.compile(r'^(?P<street>.*\S)\s+(?P<number>\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)?)$')
 REMARK = re.compile(r'\s*\([^)]*\)$')
+MONTHS = ('stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca', 'lipca', 'sierpnia', 'września', 'października',
+          'listopada', 'grudnia')
+# An exhibition's run is often only in its text, such as "Wystawa czynna: od 26 listopada 2026 do 28 lutego 2027".
+WRITTEN_END = re.compile(r'(?:wystaw|ekspozycj)\w*\s+(?:czynn\w*|potrwa|trwa)\b[^\n]{0,60}?\bdo\s+(\d{1,2})\s+('
+                         + '|'.join(MONTHS) + r')(?:\s+(\d{4}))?', re.IGNORECASE)
+# Only these say an event has no end date. The site's "wystawy, spotkania" category also holds talks and workshops.
+STANDING = re.compile(r'(?:wystaw|ekspozycj)\w*\s+sta[łl]\w*|\bdo\s+odwo[łl]ania\b', re.IGNORECASE)
 
 LOWER = 'a-ząćęłńóśźż'
 UPPER = 'A-ZĄĆĘŁŃÓŚŹŻ'
@@ -97,6 +104,8 @@ class Event:
     start: datetime
     end: datetime | None
     image_urls: tuple[str, ...] = ()
+    # No end date ("do odwołania"). Then end is None.
+    open_ended: bool = False
 
 
 def clean_text(value: str | None) -> str:
@@ -354,6 +363,22 @@ def _ends_at(end: datetime | None, start: datetime) -> datetime | None:
     return end if end > start else None
 
 
+def _written_end(text: str, start: datetime) -> datetime | None:
+    """The last day an exhibition's text gives, to its end. With no year, the first such day after the start."""
+    match = WRITTEN_END.search(text)
+    if match is None:
+        return None
+    day, month = int(match.group(1)), MONTHS.index(match.group(2).lower()) + 1
+    year = int(match.group(3)) if match.group(3) else start.year
+    try:
+        end = datetime.combine(date(year, month, day), time(23, 59), tzinfo=WARSAW)
+    except ValueError:
+        return None
+    if end <= start and not match.group(3):
+        end = end.replace(year=year + 1)
+    return end if end > start else None
+
+
 def _listed_end(end_hour: time | None, start: datetime) -> datetime | None:
     if end_hour is None:
         return None
@@ -374,6 +399,11 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
         return None
     start = datetime.combine(day, item.hour or page.hour or NO_HOUR, tzinfo=WARSAW)
     venue = page.venue or item.venue
+    # Every end the site gives counts first. A listed hour range of a standing exhibition is its daily opening hours.
+    end = _ends_at(page.end, start) or _written_end(page.description, start)
+    open_ended = end is None and bool(STANDING.search(page.description))
+    if end is None and not open_ended:
+        end = _listed_end(item.end_hour, start)
     return Event(
         url=item.url,
         title=item.title,
@@ -386,8 +416,9 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
         online=page.online,
         description=page.description or _facts(item, venue),
         start=start,
-        end=_ends_at(page.end, start) or _listed_end(item.end_hour, start),
+        end=end,
         image_urls=page.image_urls,
+        open_ended=open_ended,
     )
 
 

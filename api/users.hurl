@@ -182,3 +182,76 @@ X-User-Name: ola_demo
 HTTP 200
 [Asserts]
 jsonpath "$.home" not exists
+
+# Anna blocks Iza, who follows her. A block works both ways and doesn't say who blocked whom: Iza gets 404 for Anna's
+# profile and her posts, and doesn't find her in search. Anna gets a slim profile of Iza, to unblock her from there.
+POST {{api}}/posts
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Spacer po Oliwie", "description": "Zbiórka przy katedrze.", "startsAt": "2030-02-01T10:00:00Z", "type": "ONLINE" }
+HTTP 201
+[Captures]
+annas_post: jsonpath "$.id"
+
+POST {{api}}/users/{{iza}}/block
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 204
+
+GET {{api}}/users/{{anna}}
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+HTTP 404
+
+GET {{api}}/users?q=anna_demo
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+HTTP 200
+[Asserts]
+jsonpath "$.items" count == 0
+
+GET {{api}}/posts/{{annas_post}}
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+HTTP 404
+
+PUT {{api}}/posts/{{annas_post}}/reaction
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+{ "type": "LIKE" }
+HTTP 404
+
+GET {{api}}/users/{{iza}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 200
+[Asserts]
+jsonpath "$.isBlocked" == true
+jsonpath "$.username" == "iza_demo"
+jsonpath "$.followersCount" not exists
+jsonpath "$.interests" not exists
+
+# Unblocking brings the profile back, but not Iza's follow, which she makes again.
+DELETE {{api}}/users/{{iza}}/block
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 204
+
+GET {{api}}/users/{{anna}}
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+HTTP 200
+[Asserts]
+jsonpath "$.isFollowing" == false
+
+POST {{api}}/users/{{anna}}/follow
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+HTTP *
+[Asserts]
+status < 300
+
+DELETE {{api}}/posts/{{annas_post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 204

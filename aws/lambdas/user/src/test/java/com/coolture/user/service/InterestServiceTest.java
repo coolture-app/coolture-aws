@@ -113,7 +113,7 @@ class InterestServiceTest {
     void getSelection_readsAnyonesInterests() throws SQLException {
         when(repository.findSelectedKeys(USER_ID)).thenReturn(List.of("jazz", "opera"));
 
-        assertEquals(new UserInterestsDto(List.of("jazz", "opera")), service.getSelection(USER_ID));
+        assertEquals(new UserInterestsDto(List.of("jazz", "opera")), service.getSelection(USER_ID, null));
         verify(repository, never()).userExists(any());
     }
 
@@ -123,12 +123,23 @@ class InterestServiceTest {
         when(repository.findSelectedKeys(any())).thenReturn(List.of());
         when(repository.userExists(USER_ID)).thenReturn(true);
 
-        assertEquals(new UserInterestsDto(List.of()), service.getSelection(USER_ID));
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> service.getSelection(nobody));
+        assertEquals(new UserInterestsDto(List.of()), service.getSelection(USER_ID, null));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> service.getSelection(nobody, null));
         assertTrue(e.getMessage().contains("not found"));
     }
 
     private static UserInterestsDto request(String... keys) {
         return new UserInterestsDto(List.of(keys));
+    }
+
+    @Test
+    void getSelection_isNotFound_acrossABlock() throws SQLException {
+        UUID caller = UUID.randomUUID();
+        when(repository.isBlockedPair(USER_ID, caller)).thenReturn(true);
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> service.getSelection(USER_ID, caller));
+
+        assertTrue(e.getMessage().contains("not found"));
+        verify(repository, never()).findSelectedKeys(any());
     }
 }

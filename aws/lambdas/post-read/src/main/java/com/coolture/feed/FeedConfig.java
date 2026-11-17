@@ -46,12 +46,15 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     public static final int STANCE_MAX_AGE_DAYS = 112;
     public static final double PROXIMITY_SCALE_METERS = 20_000;
     public static final double TIME_SCALE_DAYS = 30;
+    /**
+     * The most time can give a standing event (EventTime.isStanding), so a permanent exhibition can't rank like tonight's
+     * concert for months. A cap, not a penalty: a strong match still comes first. Measured in benchmarks/standing-events.
+     */
+    public static final double STANDING_TIME_CAP = 0.3;
     public static final int POPULARITY_CAP = 100;
 
     public static final int QUERY_TIMEOUT_SECONDS = 5;
 
-    /** An event with no end time has ended this long after it starts. */
-    public static final int DEFAULT_EVENT_HOURS = 3;
     /** How long after its end an event still shows in browse. */
     public static final int PAST_WINDOW_HOURS = 12;
 

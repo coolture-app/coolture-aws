@@ -58,9 +58,15 @@ public class CommentWriteRepository {
         return Optional.empty();
     }
 
-    public void ensurePostVisible(UUID postId) throws SQLException {
+    public void ensurePostVisible(UUID postId, UUID viewer) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {
-            PostQueries.ensurePostVisible(conn, postId);
+            PostQueries.ensurePostVisible(conn, postId, viewer);
+        }
+    }
+
+    public boolean isCommentVisible(UUID commentId, UUID viewer) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return CommentQueries.isVisible(conn, commentId, viewer);
         }
     }
 
@@ -73,7 +79,7 @@ public class CommentWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                PostQueries.ensurePostVisible(conn, postId);
+                PostQueries.ensurePostVisible(conn, postId, authorId);
 
                 String insertSql = """
                     INSERT INTO comments (

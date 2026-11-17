@@ -74,6 +74,8 @@ def to_post(event: Event, place: Place | None) -> dict:
     }
     if event.end is not None:
         post['endsAt'] = _iso(event.end)
+    if event.open_ended:
+        post['openEnded'] = True
     if place is not None:
         post['location'] = _location(event, place)
     return post

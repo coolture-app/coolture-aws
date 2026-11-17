@@ -17,6 +17,7 @@ import org.mockito.MockedStatic;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -82,7 +83,7 @@ class PostWriteHandlerTest {
 
         PostDetailDto createdPost = new PostDetailDto(
             postId, null, null, "Cool Event", "A very cool event", null,
-            Instant.parse("2026-09-01T12:00:00Z"), null, 0, 0, 0, 0, 0,
+            Instant.parse("2026-09-01T12:00:00Z"), null, false, 0, 0, 0, 0, 0,
             PostType.ONLINE, PostStatus.ACTIVE,
             Instant.now(), null, null, null, List.of(), null, null, null
         );
@@ -214,19 +215,38 @@ class PostWriteHandlerTest {
 
         PostDetailDto updatedPost = new PostDetailDto(
             postId, null, null, "Updated Title", "Desc", null,
-            Instant.parse("2026-09-01T12:00:00Z"), null, 0, 0, 0, 0, 0,
+            Instant.parse("2026-09-01T12:00:00Z"), null, false, 0, 0, 0, 0, 0,
             PostType.ONLINE, PostStatus.EDITED,
             Instant.now(), Instant.now(), null, null, List.of(), null, null, null
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-            when(service.updatePost(eq(postId), eq(userId), any())).thenReturn(updatedPost);
+            when(service.updatePost(eq(postId), eq(userId), any(), any())).thenReturn(updatedPost);
 
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            verify(service).updatePost(eq(postId), eq(userId), any());
+            verify(service).updatePost(eq(postId), eq(userId), any(), eq(Set.of()));
+        }
+    }
+
+    @Test
+    void updatePost_tellsTheServiceWhichFieldsWereSentAsNull() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID postId = UUID.randomUUID();
+        String body = "{\"title\":\"Updated Title\",\"endsAt\":null,\"eventUrl\":null,\"description\":null}";
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+            "PATCH", "/posts/" + postId, body, Map.of("id", postId.toString())
+        );
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
+            when(service.updatePost(eq(postId), eq(userId), any(), any())).thenReturn(null);
+
+            handler.handleRequest(event, lambdaContext);
+
+            verify(service).updatePost(eq(postId), eq(userId), any(), eq(Set.of("endsAt", "eventUrl")));
         }
     }
 
