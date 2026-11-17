@@ -83,12 +83,17 @@ def adjacency(inputs: Inputs) -> sparse.csr_matrix:
             add_both_ways(e, first_venue + venue_index[venue])
     for e, other in similar_events(inputs):
         add_both_ways(e, other)
-    # A user's own picks and stances are in the feed's affinity already, so their walk leaves only along friend edges,
-    # each friend alike. It reaches a friend's interested and going, as the cards show them, and nothing past them.
+    # A user's own picks and stances are in the feed's affinity already, so their walk leaves only along friend edges.
+    # It reaches a friend's interested and going, as the cards show them, and nothing past them.
+    marked = np.zeros(len(inputs.user_ids))
     for u, e, weight in inputs.stances:
         add_one_way(first_shown + u, e, weight)
+        marked[u] += weight
+    # By the square root of a friend's faded stances: fresh ones count more than old ones, and a friend who marks more
+    # gets more say but less on each event, so an active friend is neither drowned out nor takes the walk over.
     for u, friend in inputs.friends:
-        add_one_way(first_user + u, first_shown + friend)
+        if marked[friend]:
+            add_one_way(first_user + u, first_shown + friend, np.sqrt(marked[friend]))
     return sparse.csr_matrix((weights, (sources, targets)), shape=(size, size))
 
 
@@ -100,8 +105,8 @@ def walk(step: sparse.csr_matrix, seed: np.ndarray) -> np.ndarray:
 
 
 def transition(graph: sparse.csr_matrix) -> sparse.csr_matrix:
-    """Column j spreads node j's mass over its edges by weight. Mass reaching a node with no edges out, such as a
-    friend who marked nothing, is lost, which scales a walk without changing its ranks."""
+    """Column j spreads node j's mass over its edges by weight. Mass reaching a node with no edges out, such as an ended
+    event with no venue, is lost, which scales a walk without changing its ranks."""
     out_weight = np.asarray(graph.sum(axis=1)).ravel()
     out_weight[out_weight == 0] = 1
     return (sparse.diags(1 / out_weight) @ graph).T.tocsr()

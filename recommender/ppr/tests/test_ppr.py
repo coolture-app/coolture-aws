@@ -100,12 +100,21 @@ def test_a_venue_links_a_friends_event_to_others_there():
     assert by_event(scores(inputs(**FRIENDS, venues=venues)))[16] > by_event(scores(inputs(**FRIENDS)))[16]
 
 
-def test_a_friend_who_marked_many_events_weighs_no_more_than_one_who_marked_one():
+def test_a_friend_who_marked_many_events_gets_less_on_each_but_isnt_drowned_out():
     # u1 is going to event 0; u2 to events 12, 13 and 14.
     two = inputs(user_ids=["u0", "u1", "u2"], stances=[(1, 0, 2.0), (2, 12, 2.0), (2, 13, 2.0), (2, 14, 2.0)],
                  friends=[(0, 1), (0, 2)])
     got = by_event(scores(two))
     assert got[0] > max(got[12], got[13], got[14])
+    assert min(got[12], got[13], got[14]) > max(got[e] for e in group(0) - {0})
+
+
+def test_a_friends_old_stance_counts_less_than_anothers_fresh_one():
+    # u1 was interested in event 12 98 days ago; u2 is going to event 0 now.
+    old = 1.5 * 0.5 ** (98 / 14)
+    got = by_event(scores(inputs(user_ids=["u0", "u1", "u2"], stances=[(1, 12, old), (2, 0, 2.0)],
+                                 friends=[(0, 1), (0, 2)])))
+    assert got[12] < max(got[e] for e in group(0) - {0})
 
 
 @pytest.mark.parametrize("going, interested", [(0, 12), (12, 0)])

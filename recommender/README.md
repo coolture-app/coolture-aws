@@ -123,7 +123,7 @@ PageRank from every user over one graph:
 
 | Edges | From |
 |---|---|
-| User → a friend's stances | Friends: mutual follows, no block, who share their stances. Each friend alike |
+| User → a friend's stances | Friends: mutual follows, no block, who share their stances. By the square root of the friend's faded stances: fresh ones count more, and an active friend gets more say but less on each event |
 | Friend's stances → event | Their interested and going, weighed and faded as the feed weighs and fades them. Not likes |
 | Event–event | Each event to its nearest events by content (`EVENT_NEIGHBOURS` in `ppr.py`), among events that haven't ended |
 | Event–venue | `event_locations`, by lower-cased name and city |
