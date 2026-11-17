@@ -30,7 +30,7 @@ SUFFIXES = {'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/png': '.png', 'i
 
 
 def category_of(item: ListingItem) -> str:
-    """The site's top category, which is also a post's first tag."""
+    """The site's top category, the first part of what a snapshot keeps as `category`."""
     return (item.category or NO_CATEGORY).split(', ')[0]
 
 
@@ -77,6 +77,8 @@ class Entry:
     scraped_at: datetime
     post: dict
     images: tuple[dict, ...]
+    # The site's label, such as "wystawy, spotkania": evaluation data, never sent to the app.
+    category: str | None = None
 
 
 def read(directory: Path) -> list[Entry]:
@@ -87,7 +89,10 @@ def read(directory: Path) -> list[Entry]:
     for line in posts.read_text(encoding='utf-8').splitlines():
         if line.strip():
             saved = json.loads(line)
-            entries.append(Entry(datetime.fromisoformat(saved['scrapedAt']), saved['post'], tuple(saved['images'])))
+            # Snapshots saved before the app dropped tags keep the category as the post's tags.
+            category = saved.get('category') or ', '.join(saved['post'].get('tags', [])) or None
+            entries.append(Entry(datetime.fromisoformat(saved['scrapedAt']), saved['post'], tuple(saved['images']),
+                                 category))
     return entries
 
 
@@ -118,7 +123,7 @@ class Snapshot:
     def existing_event_urls(self) -> set[str]:
         return {entry.post['eventUrl'] for entry in read(self.directory)}
 
-    def create_post(self, post: dict, images: Iterable[Image] = ()) -> Outcome:
+    def create_post(self, post: dict, images: Iterable[Image] = (), category: str | None = None) -> Outcome:
         # Named after the event, so a run that stopped halfway writes the same files again rather than new ones.
         key = hashlib.sha1(post['eventUrl'].encode()).hexdigest()[:12]
         saved = []
@@ -127,7 +132,8 @@ class Snapshot:
             (self.directory / IMAGES_DIR / name).write_bytes(image.content)
             saved.append({'file': name, 'fileName': image.file_name, 'mimeType': image.mime_type,
                           'width': image.width, 'height': image.height})
-        line = json.dumps({'scrapedAt': self._clock().isoformat(), 'post': post, 'images': saved}, ensure_ascii=False)
+        line = json.dumps({'scrapedAt': self._clock().isoformat(), 'post': post, 'images': saved, 'category': category},
+                          ensure_ascii=False)
         # The line comes after its photos, so every line in the file has all of them.
         with (self.directory / POSTS_FILE).open('a', encoding='utf-8', newline='\n') as posts:
             posts.write(line + '\n')

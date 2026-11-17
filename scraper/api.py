@@ -140,8 +140,8 @@ class CooltureApi:
             except WRONG_SHAPE as error:
                 raise ApiError(f'GET /posts gave an unexpected body: {_answer(response)}') from error
 
-    def create_post(self, post: dict, images: Iterable[Image] = ()) -> Outcome:
-        """Uploads the images, up to the API's limit, and sends the post with them.
+    def create_post(self, post: dict, images: Iterable[Image] = (), category: str | None = None) -> Outcome:
+        """Uploads the images, up to the API's limit, and sends the post with them. The category stays out of the app.
 
         The images are deleted again when the post is refused, or when something stops the run before it's sent.
         """

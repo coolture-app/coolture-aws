@@ -147,12 +147,12 @@ public class PostWriteRepository {
                 String postSql = """
                     INSERT INTO posts (
                         id, author_id, event_location_id, title, description, event_url,
-                        tags, type, status,
+                        type, status,
                         positive_reaction_count, participant_count, comments_count,
                         starts_at, ends_at, created_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?,
+                        ?, ?,
                         0, 0, 0,
                         ?, ?, ?
                     )
@@ -164,15 +164,8 @@ public class PostWriteRepository {
                      .bindObject(locationId)
                      .bindString(req.title())
                      .bindString(req.description())
-                     .bindString(req.eventUrl());
-
-                    if (req.tags() != null && !req.tags().isEmpty()) {
-                        b.bindVarcharArray(req.tags().toArray(new String[0]));
-                    } else {
-                        b.bindVarcharArray(null);
-                    }
-
-                    b.bindString(req.type().name())
+                     .bindString(req.eventUrl())
+                     .bindString(req.type().name())
                      .bindString(PostStatus.ACTIVE.name())
                      .bindTimestamp(req.startsAt())
                      .bindTimestamp(req.endsAt())
@@ -229,7 +222,6 @@ public class PostWriteRepository {
                         title = ?,
                         description = ?,
                         event_url = ?,
-                        tags = COALESCE(?, tags),
                         type = ?,
                         event_location_id = ?,
                         starts_at = ?,
@@ -242,11 +234,8 @@ public class PostWriteRepository {
                     ParamBinder b = new ParamBinder(stmt, conn);
                     b.bindString(req.title() != null ? req.title() : existing.title())
                      .bindString(req.description() != null ? req.description() : existing.description())
-                     .bindString(req.eventUrl() != null ? req.eventUrl() : existing.eventUrl());
-
-                    b.bindVarcharArray(req.tags() != null ? req.tags().toArray(new String[0]) : null);
-
-                    b.bindString(newType.name())
+                     .bindString(req.eventUrl() != null ? req.eventUrl() : existing.eventUrl())
+                     .bindString(newType.name())
                      .bindObject(effectiveLocationId)
                      .bindTimestamp(req.startsAt() != null ? req.startsAt() : existing.startsAt())
                      .bindTimestamp(req.endsAt() != null ? req.endsAt() : existing.endsAt())
