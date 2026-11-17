@@ -129,37 +129,46 @@ def test_the_job_and_the_feed_have_their_grants(conn):
 
 
 def test_a_run_as_of_an_earlier_time_leaves_out_what_came_after(conn):
-    user, friend = users(conn, 2)
-    post, fresh = [p for (p,) in conn.execute(
-        "SELECT post_id FROM post_embeddings WHERE model = %s ORDER BY post_id LIMIT 2", (app.EMBEDDING_MODEL,))]
-    conn.execute("UPDATE posts SET created_at = now() - interval '1 day'")
+    user, friend, blocked = users(conn, 3)
+    going, fresh, deleted, liked, by_blocked = [p for (p,) in conn.execute(
+        "SELECT post_id FROM post_embeddings WHERE model = %s ORDER BY post_id LIMIT 5", (app.EMBEDDING_MODEL,))]
+    conn.execute("UPDATE posts SET created_at = now() - interval '1 day', deleted_at = NULL")
     conn.execute("UPDATE posts SET created_at = now() WHERE id = %s", (fresh,))
+    conn.execute("UPDATE posts SET deleted_at = now() WHERE id = %s", (deleted,))
+    conn.execute("UPDATE posts SET author_id = %s WHERE id = %s", (blocked, by_blocked))
     conn.execute("DELETE FROM post_reactions WHERE user_id = %s", (user,))
     conn.execute("DELETE FROM post_participations WHERE user_id = %s", (user,))
-    conn.execute("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (%s, %s, 'LIKE', now())",
-                 (post, user))
+    conn.execute("INSERT INTO post_participations (post_id, user_id, type, created_at) "
+                 "VALUES (%s, %s, 'TAKES_PART', now())", (going, user))
+    conn.execute("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (%s, %s, 'LIKE', NULL)",
+                 (liked, user))
     for a, b in ((user, friend), (friend, user)):
         relate(conn, a, b, "FOLLOW")
-    # Friends only since now; the other side's follow has no time and counts as always there.
     conn.execute("UPDATE user_relations SET created_at = now() WHERE source_user_id = %s AND target_user_id = %s",
                  (user, friend))
-    conn.execute("UPDATE user_relations SET created_at = NULL WHERE source_user_id = %s AND target_user_id = %s",
-                 (friend, user))
     conn.execute("UPDATE users SET share_stances = true WHERE id IN (%s, %s)", (user, friend))
+    relate(conn, user, blocked, "BLOCK")
+    conn.execute("UPDATE user_relations SET created_at = NULL WHERE source_user_id = %s AND target_user_id = %s",
+                 (user, blocked))
     (now,) = conn.execute("SELECT now()").fetchone()
 
     earlier = app.load(conn, now - timedelta(minutes=30))
     u, f = earlier.user_ids.index(user), earlier.user_ids.index(friend)
-    assert not any(s == u for s, _, _ in earlier.stances)
-    assert earlier.event_ids.index(post) not in earlier.hidden[u]
-    assert (u, f) not in earlier.friends and (f, u) not in earlier.friends
-    assert fresh not in earlier.event_ids
+    position = earlier.event_ids.index
+    assert not any(s == u for s, _, _ in earlier.stances) and position(going) not in earlier.hidden[u]
+    assert (u, f) not in earlier.friends, "friends only since now"
+    assert fresh not in earlier.event_ids and deleted in earlier.event_ids
+    # Rows with no time count as always there.
+    assert position(liked) in earlier.hidden[u] and position(by_blocked) in earlier.hidden[u]
 
 
-def test_a_run_that_fails_while_writing_leaves_no_trace(conn, monkeypatch):
+def test_a_run_that_fails_while_writing_leaves_no_trace_but_still_deletes_old_runs(conn, monkeypatch):
     inputs = app.load(conn)
-    runs_before = conn.execute("SELECT count(*) FROM rec_ppr_runs").fetchone()[0]
-    rows_before = conn.execute("SELECT count(*) FROM rec_ppr_scores").fetchone()[0]
+    conn.execute("DELETE FROM rec_ppr_scores")
+    conn.execute("DELETE FROM rec_ppr_runs")
+    oldest, day_old = [conn.execute("INSERT INTO rec_ppr_runs (finished_at) VALUES (now() - %s::interval) "
+                                    "RETURNING run_number", (ago,)).fetchone()[0] for ago in ("3 days", "2 days")]
+    conn.execute("INSERT INTO rec_ppr_scores VALUES (%s, gen_random_uuid(), gen_random_uuid(), 0.5)", (oldest,))
 
     real_scores = app.scores
 
@@ -172,5 +181,5 @@ def test_a_run_that_fails_while_writing_leaves_no_trace(conn, monkeypatch):
     with pytest.raises(MemoryError):
         app.write(conn, inputs)
 
-    assert conn.execute("SELECT count(*) FROM rec_ppr_runs").fetchone()[0] == runs_before
-    assert conn.execute("SELECT count(*) FROM rec_ppr_scores").fetchone()[0] == rows_before
+    assert [r for (r,) in conn.execute("SELECT run_number FROM rec_ppr_runs")] == [day_old]
+    assert not conn.execute("SELECT 1 FROM rec_ppr_scores").fetchone()

@@ -207,3 +207,19 @@ def test_all_of_a_users_friends_weigh_like_one_edge_into_what_they_show():
     first_user, first_shown = a.shape[0] - 8, a.shape[0] - 4
     assert a[first_user, first_shown + 1:].sum() == pytest.approx(1)
     assert not a[first_user, first_user:first_shown].any() and not a[:, first_user:first_shown].any()
+
+
+def test_a_user_whose_walk_ties_every_candidate_gets_no_rows():
+    vectors = EVENTS.copy()
+    vectors[5] = EVENTS.mean(axis=0)
+    not_ended = np.ones(N, dtype=bool)
+    not_ended[5] = False
+    assert not list(scores(inputs(stances=[(0, 5, 2.0)], event_vectors=vectors, post_average=vectors[5],
+                                  not_ended=not_ended)))
+
+
+def test_events_the_walk_ties_share_one_score():
+    vectors = EVENTS.copy()
+    vectors[[6, 7]] = EVENTS.mean(axis=0)
+    got = by_event(scores(inputs(picks=[(0, 0)], event_vectors=vectors, post_average=EVENTS.mean(axis=0))))
+    assert got[6] == got[7] == pytest.approx(0.5 / (N - 1))
