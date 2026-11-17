@@ -8,7 +8,7 @@ import java.sql.SQLException;
 import java.util.UUID;
 
 /**
- * The filters a person sets: search, tags, author, status, people I follow, type, dates and a radius. /posts, /posts/map
+ * The filters a person sets: search, author, status, people I follow, type, dates and a radius. /posts, /posts/map
  * and /feed all narrow their posts with exactly this, so a filter means the same everywhere. Needs `p` and `el`
  * (posts and event_locations) in the query.
  */
@@ -25,7 +25,6 @@ public final class PostFilterSql {
      */
     public static final String MATCHES = """
         (?::varchar IS NULL OR concat_ws(chr(10), p.title, p.description, el.city, el.venue_name) ILIKE '%' || ?::varchar || '%')
-          AND (?::varchar[] IS NULL OR p.tags && ?::varchar[])
           AND (?::uuid IS NULL OR p.author_id = ?::uuid)
           AND (?::varchar IS NULL OR p.status = ?::varchar)
           AND (?::boolean IS NOT TRUE
@@ -42,9 +41,6 @@ public final class PostFilterSql {
 
     public static void bind(ParamBinder b, PostFeedFilters f, UUID viewer) throws SQLException {
         b.bindStringFilterPair(blankToNull(f.q()));
-
-        String[] tags = f.tags() != null && !f.tags().isEmpty() ? f.tags().toArray(new String[0]) : null;
-        b.bindVarcharArrayFilterPair(tags);
 
         b.bindUUIDFilterPair(f.authorId());
         b.bindStringFilterPair(f.status() != null ? f.status().name() : null);

@@ -44,7 +44,6 @@ public class PostWriteRepository {
         String eventUrl,
         Instant startsAt,
         Instant endsAt,
-        List<String> tags,
         PostType type,
         PostStatus status,
         Instant createdAt,
@@ -56,7 +55,7 @@ public class PostWriteRepository {
     public Optional<ExistingPost> findById(UUID postId) throws SQLException {
         String sql = """
             SELECT p.id, p.author_id, p.event_location_id, p.title, p.description, p.event_url,
-                   p.starts_at, p.ends_at, p.tags, p.type, p.status,
+                   p.starts_at, p.ends_at, p.type, p.status,
                    p.created_at, p.last_modified_at, p.deleted_at,
                    el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
                    el.street, el.postal_code, el.city,
@@ -81,7 +80,6 @@ public class PostWriteRepository {
                         rs.getString("event_url"),
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
-                        mapTags(rs),
                         mapEnum(rs, "type", PostType.class),
                         mapEnum(rs, "status", PostStatus.class),
                         mapInstant(rs, "created_at"),
@@ -231,7 +229,7 @@ public class PostWriteRepository {
                         title = ?,
                         description = ?,
                         event_url = ?,
-                        tags = ?,
+                        tags = COALESCE(?, tags),
                         type = ?,
                         event_location_id = ?,
                         starts_at = ?,
@@ -246,12 +244,7 @@ public class PostWriteRepository {
                      .bindString(req.description() != null ? req.description() : existing.description())
                      .bindString(req.eventUrl() != null ? req.eventUrl() : existing.eventUrl());
 
-                    List<String> effectiveTags = req.tags() != null ? req.tags() : existing.tags();
-                    if (effectiveTags != null && !effectiveTags.isEmpty()) {
-                        b.bindVarcharArray(effectiveTags.toArray(new String[0]));
-                    } else {
-                        b.bindVarcharArray(null);
-                    }
+                    b.bindVarcharArray(req.tags() != null ? req.tags().toArray(new String[0]) : null);
 
                     b.bindString(newType.name())
                      .bindObject(effectiveLocationId)
@@ -313,7 +306,7 @@ public class PostWriteRepository {
 
     private PostDetailDto getPostDetail(Connection conn, UUID postId) throws SQLException {
         String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status,
+            SELECT p.id, p.title, p.description, p.event_url, p.type, p.status,
                    p.positive_reaction_count, p.comments_count,
                    stances.participant_count, stances.interested_count, stances.going_count,
                    p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
@@ -356,7 +349,6 @@ public class PostWriteRepository {
                     rs.getString("event_url"),
                     mapInstant(rs, "starts_at"),
                     mapInstant(rs, "ends_at"),
-                    mapTags(rs),
                     rs.getInt("positive_reaction_count"),
                     rs.getInt("participant_count"),
                     rs.getInt("interested_count"),

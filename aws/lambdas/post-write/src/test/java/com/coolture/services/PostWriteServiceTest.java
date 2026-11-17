@@ -192,7 +192,7 @@ class PostWriteServiceTest {
 
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
@@ -212,7 +212,7 @@ class PostWriteServiceTest {
 
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, PostType.ONLINE,
             PostStatus.DELETED, Instant.now(), null, Instant.now(), null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
@@ -233,7 +233,7 @@ class PostWriteServiceTest {
 
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
@@ -249,7 +249,7 @@ class PostWriteServiceTest {
 
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
@@ -347,7 +347,7 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
@@ -368,7 +368,7 @@ class PostWriteServiceTest {
         EventLocationDto saved = new EventLocationDto("PL", "Hala", null, null, null, "Gdańsk", new GeoPointDto(54.4, 18.6));
         return new PostWriteRepository.ExistingPost(
             postId, authorId, UUID.randomUUID(), "Title", "Desc", null,
-            Instant.now(), null, List.of(), PostType.OFFLINE,
+            Instant.now(), null, PostType.OFFLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, saved
         );
     }
@@ -412,7 +412,7 @@ class PostWriteServiceTest {
             List.of("talk"), PostType.ONLINE,
             null, null, null
         );
-        PostDetailDto created = postDetail(UUID.randomUUID(), "Online Event", "Description", List.of("talk"));
+        PostDetailDto created = postDetail(UUID.randomUUID(), "Online Event", "Description");
         when(repository.createPost(authorId, req)).thenReturn(created);
 
         PostDetailDto result = service.createPost(authorId, req);
@@ -445,7 +445,7 @@ class PostWriteServiceTest {
         UpdatePostRequest req = new UpdatePostRequest(
             "New Title", null, null, null, null, null, null, null, null, null
         );
-        PostDetailDto updated = postDetail(postId, "New Title", "Desc", List.of());
+        PostDetailDto updated = postDetail(postId, "New Title", "Desc");
         when(repository.updatePost(postId, authorId, existing, req)).thenReturn(updated);
 
         service.updatePost(postId, authorId, req);
@@ -463,7 +463,7 @@ class PostWriteServiceTest {
         UpdatePostRequest req = new UpdatePostRequest(
             "Title", null, "https://new.example.com", null, null, null, null, null, null, null
         );
-        PostDetailDto updated = postDetail(postId, "Title", "Desc", null);
+        PostDetailDto updated = postDetail(postId, "Title", "Desc");
         when(repository.updatePost(postId, authorId, existing, req)).thenReturn(updated);
 
         service.updatePost(postId, authorId, req);
@@ -474,15 +474,15 @@ class PostWriteServiceTest {
     private PostWriteRepository.ExistingPost activeExistingPost(UUID postId, UUID authorId) {
         return new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
     }
 
-    private PostDetailDto postDetail(UUID postId, String title, String description, List<String> tags) {
+    private PostDetailDto postDetail(UUID postId, String title, String description) {
         return new PostDetailDto(
             postId, null, null, title, description, null,
-            Instant.now(), null, tags, 0, 0, 0, 0, 0,
+            Instant.now(), null, 0, 0, 0, 0, 0,
             PostType.ONLINE, PostStatus.ACTIVE,
             Instant.now(), null, null, null, null, null, null, null
         );

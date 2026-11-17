@@ -21,8 +21,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.Collections;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -40,13 +38,6 @@ public final class ResultSetMappers {
     public static <T extends Enum<T>> T mapEnum(ResultSet rs, String column, Class<T> enumClass) throws SQLException {
         String value = rs.getString(column);
         return value != null ? Enum.valueOf(enumClass, value) : null;
-    }
-
-    public static List<String> mapTags(ResultSet rs) throws SQLException {
-        Array tagsArray = rs.getArray("tags");
-        return tagsArray != null
-            ? List.of((String[]) tagsArray.getArray())
-            : Collections.emptyList();
     }
 
     /**
@@ -236,7 +227,6 @@ public final class ResultSetMappers {
             rs.getString("event_url"),
             mapInstant(rs, "starts_at"),
             mapInstant(rs, "ends_at"),
-            mapTags(rs),
             rs.getInt("positive_reaction_count"),
             rs.getInt("participant_count"),
             rs.getInt("interested_count"),

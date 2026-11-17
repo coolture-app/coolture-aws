@@ -38,7 +38,7 @@ class PostReadServiceTest {
     @Test
     void getFeed_whenParticipationFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             List.of("INTERESTED"), null, null, 20, null
         );
 
@@ -49,7 +49,7 @@ class PostReadServiceTest {
     void getFeed_whenInvalidParticipationType_throwsIllegalArgumentException() {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             List.of("INVALID_TYPE"), null, null, 20, null
         );
 
@@ -59,7 +59,7 @@ class PostReadServiceTest {
     @Test
     void getFeed_whenReactionFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             null, "LIKE", null, 20, null
         );
 
@@ -70,7 +70,7 @@ class PostReadServiceTest {
     void getFeed_whenInvalidReactionType_throwsIllegalArgumentException() {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             null, "SUPER_LIKE", null, 20, null
         );
 
@@ -91,7 +91,7 @@ class PostReadServiceTest {
     void getFeed_whenLimitNonPositive_clampsTo20(int limit) throws SQLException {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             null, null, null, limit, null
         );
 
@@ -107,7 +107,7 @@ class PostReadServiceTest {
     void getFeed_whenLimitExceeds100_clampsTo100() throws SQLException {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             null, null, null, 500, null
         );
 
@@ -124,7 +124,7 @@ class PostReadServiceTest {
         boolean nearest = "NEAREST".equals(sortBy);
         boolean stances = "STANCE_NEWEST".equals(sortBy);
         return new PostFeedFilters(
-            null, null, null, null, null, null, null, null, nearest ? 54.35 : null, nearest ? 18.65 : null, null,
+            null, null, null, null, null, null, null, nearest ? 54.35 : null, nearest ? 18.65 : null, null,
             stances ? List.of("NOT_INTERESTED") : null, null, null, 20, sortBy
         );
     }
@@ -132,7 +132,7 @@ class PostReadServiceTest {
     @Test
     void getFeed_whenStanceNewestHasNoParticipationTypes_throws() {
         PostFeedFilters noStances = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             null, null, null, 20, "STANCE_NEWEST"
         );
 
@@ -142,7 +142,7 @@ class PostReadServiceTest {
     @Test
     void getFeed_whenNearestHasNoPosition_throws() {
         PostFeedFilters noPosition = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             null, null, null, 20, "NEAREST"
         );
 
@@ -151,7 +151,7 @@ class PostReadServiceTest {
 
     private static PostCardDto card(int likes) {
         Instant now = Instant.parse("2026-11-02T12:00:00.123456Z");
-        return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, now.plusSeconds(60), null, List.of(),
+        return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, now.plusSeconds(60), null,
             likes, 0, 0, 0, 0, null, null, now, null, null, null, null, null, null, null);
     }
 
@@ -208,11 +208,11 @@ class PostReadServiceTest {
     void showsAllPastEvents_whenOptedInOrADateIsChosen() {
         Instant date = Instant.parse("2026-11-02T12:00:00Z");
         assertFalse(sortedBy(null).showsAllPastEvents());
-        assertTrue(new PostFeedFilters(null, null, null, null, null, null, null, null, null, null, null,
+        assertTrue(new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
             null, null, null, 20, null, true).showsAllPastEvents());
-        assertTrue(new PostFeedFilters(null, null, null, null, null, null, date, null, null, null, null,
+        assertTrue(new PostFeedFilters(null, null, null, null, null, date, null, null, null, null,
             null, null, null, 20, null).showsAllPastEvents());
-        assertTrue(new PostFeedFilters(null, null, null, null, null, null, null, date, null, null, null,
+        assertTrue(new PostFeedFilters(null, null, null, null, null, null, date, null, null, null,
             null, null, null, 20, null).showsAllPastEvents());
     }
 
@@ -234,7 +234,7 @@ class PostReadServiceTest {
     void getMapMarks_whenValid_callsRepository() throws SQLException {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
             null, null, null, 20, null
         );
         var bounds = new com.coolture.common.dto.MapBoundsDto(

@@ -11,7 +11,7 @@ import app
 
 POST_ID = "11111111-1111-1111-1111-111111111111"
 POST_KEY = f"posts/{POST_ID}"
-POST_ROW = ("Jazz night", "Live jazz", ["music", "jazz"])
+POST_ROW = ("Jazz night", "Live jazz")
 EMBEDDING = [0.5, 0.25, 1.0]
 MODEL = "sdadas/mmlw-roberta-base"
 NO_FAILURES = {"batchItemFailures": []}
@@ -63,16 +63,16 @@ def test_should_store_embedding_of_current_post_content_when_post_exists(model, 
 
     # then
     assert result == NO_FAILURES
-    assert model.encode.call_args_list == [call("Jazz night Live jazz music jazz", normalize_embeddings=True)]
+    assert model.encode.call_args_list == [call("Jazz night Live jazz", normalize_embeddings=True)]
     assert conn.execute.call_args_list == [
         call(ANY, (POST_ID,)),
         call(ANY, (POST_ID, EMBEDDING, MODEL)),
     ]
 
 
-def test_should_embed_title_only_when_description_and_tags_are_null(model, conn):
+def test_should_embed_title_only_when_description_is_null(model, conn):
     # given
-    conn.execute.return_value.fetchone.return_value = ("Jazz night", None, None)
+    conn.execute.return_value.fetchone.return_value = ("Jazz night", None)
     event = sqs_event(s3_body(POST_KEY))
 
     # when

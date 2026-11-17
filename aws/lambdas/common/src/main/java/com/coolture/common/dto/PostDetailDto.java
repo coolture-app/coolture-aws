@@ -20,7 +20,6 @@ public record PostDetailDto(
     String eventUrl,
     Instant startsAt,
     Instant endsAt,
-    List<String> tags,
     int positiveReactionCount,
     int participantCount,
     int interestedCount,

@@ -91,7 +91,7 @@ class FeedServiceTest {
     }
 
     private static PostCardDto card(FeedScorer.Facts f) {
-        return new PostCardDto(f.id(), null, null, "t", null, null, f.startsAt(), null, List.of(),
+        return new PostCardDto(f.id(), null, null, "t", null, null, f.startsAt(), null,
             f.engagement(), 0, 0, 0, 0, null, null, START, null, null, null, null, null, null, null);
     }
 

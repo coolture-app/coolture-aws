@@ -101,7 +101,7 @@ class PostReadDbTest {
     }
 
     private static PostFeedFilters filters(String sortBy, boolean includePast, Instant startsFrom, Instant startsTo) {
-        return new PostFeedFilters(null, null, null, null, null, null, startsFrom, startsTo, null, null, null,
+        return new PostFeedFilters(null, null, null, null, null, startsFrom, startsTo, null, null, null,
             null, null, null, 20, sortBy, includePast);
     }
 
@@ -548,7 +548,7 @@ class PostReadDbTest {
     }
 
     private static PostFeedFilters stances(String... types) {
-        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null, null,
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
             List.of(types), null, null, 20, "STANCE_NEWEST", true);
     }
 
@@ -579,7 +579,7 @@ class PostReadDbTest {
     private static final Set<String> FOLLOWED_AND_FRIENDS = Set.of("by_followed", "friend_going", "friend_interested", "friends_crowd");
 
     private static PostFeedFilters followed() {
-        return new PostFeedFilters(null, null, null, null, true, null, null, null, null, null, null,
+        return new PostFeedFilters(null, null, null, true, null, null, null, null, null, null,
             null, null, null, 20, "RECENT", false);
     }
 
@@ -685,12 +685,12 @@ class PostReadDbTest {
 
     /** Around the fixtures' centre, (54.35, 18.65): close is there, mid about 650 m away, far about 6.5 km. */
     private static PostFeedFilters around(String sortBy, Double radiusKm) {
-        return new PostFeedFilters(null, null, null, null, null, null, null, null, 54.35, 18.65, radiusKm,
+        return new PostFeedFilters(null, null, null, null, null, null, null, 54.35, 18.65, radiusKm,
             null, null, null, 20, sortBy, false);
     }
 
     private static PostFeedFilters searching(String q) {
-        return new PostFeedFilters(q, null, null, null, null, null, null, null, null, null, null,
+        return new PostFeedFilters(q, null, null, null, null, null, null, null, null, null,
             null, null, null, 20, null, false);
     }
 

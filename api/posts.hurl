@@ -11,7 +11,6 @@ X-User-Name: anna_demo
   "eventUrl": "https://example.com/planszowki",
   "startsAt": "2030-01-15T18:00:00Z",
   "endsAt": "2030-01-15T21:00:00Z",
-  "tags": ["planszówki", "online"],
   "type": "ONLINE"
 }
 HTTP 201
