@@ -1,5 +1,7 @@
 package com.coolture.repository;
 
+import com.coolture.common.db.Blocks;
+import com.coolture.common.db.EventTime;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.StanceCounts;
 import com.coolture.feed.FeedConfig;
@@ -14,23 +16,14 @@ public final class PostSql {
 
     private PostSql() {}
 
-    /** When an event has ended. Binds nothing. */
-    public static final String EVENT_END =
-        "COALESCE(p.ends_at, p.starts_at + interval '" + FeedConfig.DEFAULT_EVENT_HOURS + " hours')";
-
-    /** Binds nothing. */
-    public static final String NOT_ENDED = EVENT_END + " >= now()";
+    public static final String NOT_ENDED = EventTime.NOT_ENDED;
 
     /** Binds whether to show every past event. */
     public static final String NOT_LONG_ENDED =
-        "(?::boolean OR " + EVENT_END + " >= now() - interval '" + FeedConfig.PAST_WINDOW_HOURS + " hours')";
+        "(?::boolean OR " + EventTime.END + " >= now() - interval '" + FeedConfig.PAST_WINDOW_HOURS + " hours')";
 
-    /** Binds the viewer twice. Holds for a guest, who has no blocks. */
-    public static final String NOT_BLOCKED = """
-        NOT EXISTS (SELECT 1 FROM user_relations b
-                    WHERE b.type = 'BLOCK'
-                      AND ((b.source_user_id = ?::uuid AND b.target_user_id = p.author_id)
-                        OR (b.source_user_id = p.author_id AND b.target_user_id = ?::uuid)))""";
+    /** Bind with Blocks.bindViewer. */
+    public static final String NOT_BLOCKED = Blocks.notWithViewer("p.author_id");
 
     /** Not the viewer's own, and not reacted to or taken part in: what makes the feed "new for you". Bind with bindNotMine. */
     public static final String NOT_MINE = """
