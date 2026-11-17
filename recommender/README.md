@@ -118,19 +118,19 @@ weights and the decay are in `FeedConfig`.
 
 ## Personalised PageRank
 
-The thesis's graph signal. `PprFunction` runs personalised PageRank from every user over one graph:
+The thesis's graph signal: where a user's friends go, and events like those. `PprFunction` runs personalised
+PageRank from every user over one graph:
 
 | Edges | From |
 |---|---|
+| User → a friend's stances | Friends: mutual follows, no block, who share their stances. Each friend alike |
+| Friend's stances → event | Their interested and going, weighed and faded as the feed weighs and fades them. Not likes |
+| Event–event | Each event to its nearest events by content (`EVENT_NEIGHBOURS` in `ppr.py`), among events that haven't ended |
 | Event–venue | `event_locations`, by lower-cased name and city |
-| Event–interest | Each event's nearest interests (`INTERESTS_PER_EVENT` in `ppr.py`), both sides centred as in the feed |
-| Event–event | Each event to its nearest events (`EVENT_NEIGHBOURS`), among events that haven't ended |
-| User → interest | `user_interests`, one way |
-| User → event | Interested and going, one way, weighed and faded as the feed weighs and fades them. Not likes |
-| User → friend's stances | Friends (mutual follows, no block) who share their stances, to a node with only that friend's interested and going. All of a user's friends together weigh like one interest pick |
 
-Edges lead out of users only, so a walk reaches someone else's stances only through a friend edge, and nothing past
-them: not their picks, not their friends. That is what the cards show a friend, and a block ends the friendship.
+A user's own picks and stances aren't in the graph: the feed's affinity holds them. A walk reaches a friend's
+interested and going, as the cards show them, and nothing past them: not their friends, not strangers. A block ends
+the friendship. A user whose friends marked nothing gets no scores.
 
 Each user's candidates, the posts the feed may show them as new, get the walk's mass as a rank from 0 to 1. The feed
 reads the latest run finished `PPR_RUN_MARGIN_SECONDS` before the session's `asOf`, so a run landing mid-scroll doesn't
@@ -139,9 +139,7 @@ with no score gets `NEUTRAL` (weight `ppr` in `FeedConfig`), so locally PageRank
 `make ppr` runs again. A run is deleted once a newer one is over a day old. `FEED_WEIGHTS=ppr=0` on `PostReadFunction`
 keeps the runs but gives them no say in the feed.
 
-Venues, stances and friends are relations people made. The event–interest and event–event edges come from the same
-vectors as the feed's affinity, so through them PageRank mostly repeats it; they are what reaches a new user's events
-and an event nobody marked. `load()` takes an `as_of` to replay an earlier moment, with the limits its docstring lists.
+`load()` takes an `as_of` to replay an earlier moment, with the limits its docstring lists.
 
 ```bash
 make ppr                           # one run locally; make seed ends with it
