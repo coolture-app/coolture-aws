@@ -194,3 +194,11 @@ def test_description_with_no_sentence_end_is_cut_at_a_word():
 def test_start_keeps_its_time_zone_through_the_post():
     assert to_post(event(), PLACE)['startsAt'].endswith('Z')
     assert event().start.astimezone(timezone.utc).hour == 18
+
+
+def test_a_post_with_no_end_date_says_so_and_has_no_end():
+    post = to_post(event(open_ended=True), PLACE)
+
+    assert post['openEnded'] is True
+    assert 'endsAt' not in post
+    assert 'openEnded' not in to_post(event(), PLACE)
