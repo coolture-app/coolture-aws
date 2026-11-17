@@ -236,6 +236,7 @@ public final class ResultSetMappers {
             rs.getString("event_url"),
             mapInstant(rs, "starts_at"),
             mapInstant(rs, "ends_at"),
+            rs.getBoolean("open_ended"),
             mapTags(rs),
             rs.getInt("positive_reaction_count"),
             rs.getInt("participant_count"),

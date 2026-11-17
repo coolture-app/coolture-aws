@@ -44,6 +44,7 @@ public class PostWriteRepository {
         String eventUrl,
         Instant startsAt,
         Instant endsAt,
+        boolean openEnded,
         List<String> tags,
         PostType type,
         PostStatus status,
@@ -56,7 +57,7 @@ public class PostWriteRepository {
     public Optional<ExistingPost> findById(UUID postId) throws SQLException {
         String sql = """
             SELECT p.id, p.author_id, p.event_location_id, p.title, p.description, p.event_url,
-                   p.starts_at, p.ends_at, p.tags, p.type, p.status,
+                   p.starts_at, p.ends_at, p.open_ended, p.tags, p.type, p.status,
                    p.created_at, p.last_modified_at, p.deleted_at,
                    el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
                    el.street, el.postal_code, el.city,
@@ -81,6 +82,7 @@ public class PostWriteRepository {
                         rs.getString("event_url"),
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
+                        rs.getBoolean("open_ended"),
                         mapTags(rs),
                         mapEnum(rs, "type", PostType.class),
                         mapEnum(rs, "status", PostStatus.class),
@@ -151,12 +153,12 @@ public class PostWriteRepository {
                         id, author_id, event_location_id, title, description, event_url,
                         tags, type, status,
                         positive_reaction_count, participant_count, comments_count,
-                        starts_at, ends_at, created_at
+                        starts_at, ends_at, open_ended, created_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?,
                         ?, ?, ?,
                         0, 0, 0,
-                        ?, ?, ?
+                        ?, ?, ?, ?
                     )
                 """;
                 try (PreparedStatement stmt = conn.prepareStatement(postSql)) {
@@ -178,6 +180,7 @@ public class PostWriteRepository {
                      .bindString(PostStatus.ACTIVE.name())
                      .bindTimestamp(req.startsAt())
                      .bindTimestamp(req.endsAt())
+                     .bindBoolean(Boolean.TRUE.equals(req.openEnded()))
                      .bindTimestamp(now);
                     stmt.executeUpdate();
                 }
@@ -195,7 +198,11 @@ public class PostWriteRepository {
         }
     }
 
-    public PostDetailDto updatePost(UUID postId, UUID callerId, ExistingPost existing, UpdatePostRequest req) throws SQLException {
+    /** The fields a PATCH can remove, as the service resolved them from the request and the saved post. */
+    public record Removable(String eventUrl, Instant endsAt, boolean openEnded) {}
+
+    public PostDetailDto updatePost(UUID postId, UUID callerId, ExistingPost existing, UpdatePostRequest req,
+                                    Removable removable) throws SQLException {
         Instant now = Instant.now();
         PostType newType = req.type() != null ? req.type() : existing.type();
         UUID effectiveLocationId = existing.eventLocationId();
@@ -236,6 +243,7 @@ public class PostWriteRepository {
                         event_location_id = ?,
                         starts_at = ?,
                         ends_at = ?,
+                        open_ended = ?,
                         status = 'EDITED',
                         last_modified_at = ?
                     WHERE id = ?
@@ -244,7 +252,7 @@ public class PostWriteRepository {
                     ParamBinder b = new ParamBinder(stmt, conn);
                     b.bindString(req.title() != null ? req.title() : existing.title())
                      .bindString(req.description() != null ? req.description() : existing.description())
-                     .bindString(req.eventUrl() != null ? req.eventUrl() : existing.eventUrl());
+                     .bindString(removable.eventUrl());
 
                     List<String> effectiveTags = req.tags() != null ? req.tags() : existing.tags();
                     if (effectiveTags != null && !effectiveTags.isEmpty()) {
@@ -256,7 +264,8 @@ public class PostWriteRepository {
                     b.bindString(newType.name())
                      .bindObject(effectiveLocationId)
                      .bindTimestamp(req.startsAt() != null ? req.startsAt() : existing.startsAt())
-                     .bindTimestamp(req.endsAt() != null ? req.endsAt() : existing.endsAt())
+                     .bindTimestamp(removable.endsAt())
+                     .bindBoolean(removable.openEnded())
                      .bindTimestamp(now)
                      .bindUUID(postId);
                     stmt.executeUpdate();
@@ -316,7 +325,7 @@ public class PostWriteRepository {
             SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status,
                    p.positive_reaction_count, p.comments_count,
                    stances.participant_count, stances.interested_count, stances.going_count,
-                   p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
+                   p.starts_at, p.ends_at, p.open_ended, p.created_at, p.last_modified_at, p.deleted_at,
                    u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
                    avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
                    avatar_m.size_bytes AS avatar_size_bytes, avatar_m.status AS avatar_status,
@@ -356,6 +365,7 @@ public class PostWriteRepository {
                     rs.getString("event_url"),
                     mapInstant(rs, "starts_at"),
                     mapInstant(rs, "ends_at"),
+                    rs.getBoolean("open_ended"),
                     mapTags(rs),
                     rs.getInt("positive_reaction_count"),
                     rs.getInt("participant_count"),

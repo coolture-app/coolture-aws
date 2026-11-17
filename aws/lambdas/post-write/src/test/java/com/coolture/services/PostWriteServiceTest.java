@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -41,7 +42,7 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         CreatePostRequest req = new CreatePostRequest(
             "Concert", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("music"), PostType.OFFLINE,
             null, null, null
         );
@@ -59,7 +60,7 @@ class PostWriteServiceTest {
         );
         CreatePostRequest req = new CreatePostRequest(
             "Stream", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("tech"), PostType.ONLINE,
             loc, null, null
         );
@@ -76,7 +77,7 @@ class PostWriteServiceTest {
 
         CreatePostRequest req = new CreatePostRequest(
             "Online Event", "Description", "https://example.com",
-            startsAt, endsAt,
+            startsAt, endsAt, null,
             List.of("talk"), PostType.ONLINE,
             null, null, null
         );
@@ -92,7 +93,7 @@ class PostWriteServiceTest {
 
         CreatePostRequest req = new CreatePostRequest(
             "Online Event", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("talk"), PostType.ONLINE,
             null, List.of(mediaId, mediaId), null
         );
@@ -109,7 +110,7 @@ class PostWriteServiceTest {
 
         CreatePostRequest req = new CreatePostRequest(
             "Online Event", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("talk"), PostType.ONLINE,
             null, tooMany, null
         );
@@ -126,7 +127,7 @@ class PostWriteServiceTest {
 
         CreatePostRequest req = new CreatePostRequest(
             "Online Event", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("talk"), PostType.ONLINE,
             null, List.of(media1), coverMedia
         );
@@ -138,7 +139,7 @@ class PostWriteServiceTest {
     private static CreatePostRequest onlinePostWith(List<UUID> mediaIds, UUID cover) {
         return new CreatePostRequest(
             "Online Event", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("talk"), PostType.ONLINE,
             null, mediaIds, cover
         );
@@ -192,13 +193,13 @@ class PostWriteServiceTest {
 
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, false, List.of(), PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         UpdatePostRequest req = new UpdatePostRequest(
-            "New Title", null, null, null, null, null, null, null, null, null
+            "New Title", null, null, null, null, null, null, null, null, null, null
         );
 
         SecurityException ex = assertThrows(SecurityException.class, () -> service.updatePost(postId, otherUser, req));
@@ -212,13 +213,13 @@ class PostWriteServiceTest {
 
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, false, List.of(), PostType.ONLINE,
             PostStatus.DELETED, Instant.now(), null, Instant.now(), null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         UpdatePostRequest req = new UpdatePostRequest(
-            "New Title", null, null, null, null, null, null, null, null, null
+            "New Title", null, null, null, null, null, null, null, null, null, null
         );
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req));
@@ -233,7 +234,7 @@ class PostWriteServiceTest {
 
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, false, List.of(), PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
@@ -249,7 +250,7 @@ class PostWriteServiceTest {
 
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, false, List.of(), PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
@@ -306,7 +307,7 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         CreatePostRequest req = new CreatePostRequest(
             "Online Event", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("talk"), PostType.ONLINE,
             null, null, null
         );
@@ -328,7 +329,7 @@ class PostWriteServiceTest {
         );
         CreatePostRequest req = new CreatePostRequest(
             "Concert", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("music"), PostType.OFFLINE,
             loc, null, null
         );
@@ -347,28 +348,28 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, false, List.of(), PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         UpdatePostRequest req = new UpdatePostRequest(
-            "New Title", "New Desc", null, null, null, null, null, null, null, null
+            "New Title", "New Desc", null, null, null, null, null, null, null, null, null
         );
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req)))
+        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
             .thenReturn(mock(com.coolture.common.dto.PostDetailDto.class));
 
         var result = service.updatePost(postId, authorId, req);
 
         assertNotNull(result);
-        verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req));
+        verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any());
     }
 
     private PostWriteRepository.ExistingPost inPersonPost(UUID postId, UUID authorId) {
         EventLocationDto saved = new EventLocationDto("PL", "Hala", null, null, null, "Gdańsk", new GeoPointDto(54.4, 18.6));
         return new PostWriteRepository.ExistingPost(
             postId, authorId, UUID.randomUUID(), "Title", "Desc", null,
-            Instant.now(), null, List.of(), PostType.OFFLINE,
+            Instant.now(), null, false, List.of(), PostType.OFFLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, saved
         );
     }
@@ -380,14 +381,14 @@ class PostWriteServiceTest {
         PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
         UpdatePostRequest req = new UpdatePostRequest(
-            null, null, null, null, null, null, PostType.ONLINE, null, null, null
+            null, null, null, null, null, null, null, PostType.ONLINE, null, null, null
         );
-        when(repository.updatePost(postId, authorId, existing, req))
+        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
             .thenReturn(mock(com.coolture.common.dto.PostDetailDto.class));
 
         service.updatePost(postId, authorId, req);
 
-        verify(repository).updatePost(postId, authorId, existing, req);
+        verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any());
     }
 
     @Test
@@ -397,7 +398,7 @@ class PostWriteServiceTest {
         PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
         UpdatePostRequest req = new UpdatePostRequest(
-            null, null, null, null, null, null, PostType.ONLINE, existing.location(), null, null
+            null, null, null, null, null, null, null, PostType.ONLINE, existing.location(), null, null
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req));
@@ -408,7 +409,7 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         CreatePostRequest req = new CreatePostRequest(
             "Online Event", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("talk"), PostType.ONLINE,
             null, null, null
         );
@@ -426,7 +427,7 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         CreatePostRequest req = new CreatePostRequest(
             "Concert", "Description", "https://example.com",
-            Instant.now(), Instant.now().plusSeconds(3600),
+            Instant.now(), Instant.now().plusSeconds(3600), null,
             List.of("music"), PostType.OFFLINE,
             null, null, null
         );
@@ -443,10 +444,10 @@ class PostWriteServiceTest {
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         UpdatePostRequest req = new UpdatePostRequest(
-            "New Title", null, null, null, null, null, null, null, null, null
+            "New Title", null, null, null, null, null, null, null, null, null, null
         );
         PostDetailDto updated = postDetail(postId, "New Title", "Desc", List.of());
-        when(repository.updatePost(postId, authorId, existing, req)).thenReturn(updated);
+        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
 
         service.updatePost(postId, authorId, req);
 
@@ -461,10 +462,10 @@ class PostWriteServiceTest {
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         UpdatePostRequest req = new UpdatePostRequest(
-            "Title", null, "https://new.example.com", null, null, null, null, null, null, null
+            "Title", null, "https://new.example.com", null, null, null, null, null, null, null, null
         );
         PostDetailDto updated = postDetail(postId, "Title", "Desc", null);
-        when(repository.updatePost(postId, authorId, existing, req)).thenReturn(updated);
+        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
 
         service.updatePost(postId, authorId, req);
 
@@ -474,7 +475,7 @@ class PostWriteServiceTest {
     private PostWriteRepository.ExistingPost activeExistingPost(UUID postId, UUID authorId) {
         return new PostWriteRepository.ExistingPost(
             postId, authorId, null, "Title", "Desc", "url",
-            Instant.now(), null, List.of(), PostType.ONLINE,
+            Instant.now(), null, false, List.of(), PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null
         );
     }
@@ -482,9 +483,109 @@ class PostWriteServiceTest {
     private PostDetailDto postDetail(UUID postId, String title, String description, List<String> tags) {
         return new PostDetailDto(
             postId, null, null, title, description, null,
-            Instant.now(), null, tags, 0, 0, 0, 0, 0,
+            Instant.now(), null, false, tags, 0, 0, 0, 0, 0,
             PostType.ONLINE, PostStatus.ACTIVE,
             Instant.now(), null, null, null, null, null, null, null
         );
+    }
+
+    // ===== No end date and merge-patch =====
+
+    private PostWriteRepository.Removable savedEnd(UUID postId, UUID authorId, PostWriteRepository.ExistingPost existing,
+                                                   UpdatePostRequest req, Set<String> removed) throws SQLException {
+        when(repository.findById(postId)).thenReturn(Optional.of(existing));
+        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
+            .thenReturn(postDetail(postId, existing.title(), existing.description(), existing.tags()));
+        service.updatePost(postId, authorId, req, removed);
+        var saved = org.mockito.ArgumentCaptor.forClass(PostWriteRepository.Removable.class);
+        verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), saved.capture());
+        return saved.getValue();
+    }
+
+    private static PostWriteRepository.ExistingPost withEnd(UUID postId, UUID authorId, Instant endsAt, boolean openEnded) {
+        Instant start = Instant.parse("2030-01-15T18:00:00Z");
+        return new PostWriteRepository.ExistingPost(postId, authorId, null, "Title", "Desc", "https://example.com",
+            start, endsAt, openEnded, List.of(), PostType.ONLINE, PostStatus.ACTIVE, Instant.now(), null, null, null);
+    }
+
+    private static UpdatePostRequest patch(String eventUrl, Instant endsAt, Boolean openEnded) {
+        return new UpdatePostRequest(null, null, eventUrl, null, endsAt, openEnded, null, null, null, null, null);
+    }
+
+    @Test
+    void createPost_withNoEndDateAndAnEnd_throwsIllegalArgumentException() {
+        CreatePostRequest req = new CreatePostRequest("Wystawa", "Opis", null, Instant.now().plusSeconds(60),
+            Instant.now().plusSeconds(7200), true, List.of(), PostType.ONLINE, null, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.createPost(UUID.randomUUID(), req));
+    }
+
+    @Test
+    void updatePost_withNoEndDateAndAnEnd_throwsIllegalArgumentException() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        when(repository.findById(postId)).thenReturn(Optional.of(withEnd(postId, authorId, null, false)));
+
+        assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId,
+            patch(null, Instant.parse("2030-01-15T21:00:00Z"), true)));
+    }
+
+    @Test
+    void updatePost_leavingFieldsOut_keepsThem() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        Instant end = Instant.parse("2030-01-15T21:00:00Z");
+
+        PostWriteRepository.Removable saved = savedEnd(postId, authorId, withEnd(postId, authorId, end, false),
+            patch(null, null, null), Set.of());
+
+        assertEquals(new PostWriteRepository.Removable("https://example.com", end, false), saved);
+    }
+
+    @Test
+    void updatePost_endsAtAndEventUrlSentAsNull_areRemoved() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+
+        PostWriteRepository.Removable saved = savedEnd(postId, authorId,
+            withEnd(postId, authorId, Instant.parse("2030-01-15T21:00:00Z"), false),
+            patch(null, null, null), Set.of("endsAt", "eventUrl"));
+
+        assertEquals(new PostWriteRepository.Removable(null, null, false), saved);
+    }
+
+    @Test
+    void updatePost_noEndDate_dropsTheSavedEnd() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+
+        PostWriteRepository.Removable saved = savedEnd(postId, authorId,
+            withEnd(postId, authorId, Instant.parse("2030-01-15T21:00:00Z"), false),
+            patch(null, null, true), Set.of());
+
+        assertEquals(new PostWriteRepository.Removable("https://example.com", null, true), saved);
+    }
+
+    @Test
+    void updatePost_anEndOnAPostWithNoEndDate_turnsItOff() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        Instant end = Instant.parse("2030-01-16T21:00:00Z");
+
+        PostWriteRepository.Removable saved = savedEnd(postId, authorId, withEnd(postId, authorId, null, true),
+            patch(null, end, null), Set.of());
+
+        assertEquals(new PostWriteRepository.Removable("https://example.com", end, false), saved);
+    }
+
+    @Test
+    void updatePost_anotherFieldOnAPostWithNoEndDate_keepsIt() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+
+        PostWriteRepository.Removable saved = savedEnd(postId, authorId, withEnd(postId, authorId, null, true),
+            patch("https://new.example.com", null, null), Set.of());
+
+        assertEquals(new PostWriteRepository.Removable("https://new.example.com", null, true), saved);
     }
 }

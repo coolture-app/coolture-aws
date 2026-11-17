@@ -30,6 +30,9 @@ public record CreatePostRequest(
 
     Instant endsAt,
 
+    /** No end date ("do odwołania"). Can't come with an endsAt. */
+    Boolean openEnded,
+
     @Size(max = 10, message = "Maximum 10 tags allowed")
     List<@Size(max = 32, message = "Tag length cannot exceed 32 characters") String> tags,
 
@@ -44,7 +47,7 @@ public record CreatePostRequest(
     UUID coverMediaId
 ) {
     public CreatePostRequest withMediaIds(List<UUID> ordered) {
-        return new CreatePostRequest(title, description, eventUrl, startsAt, endsAt, tags, type, location,
+        return new CreatePostRequest(title, description, eventUrl, startsAt, endsAt, openEnded, tags, type, location,
             ordered, coverMediaId);
     }
 }

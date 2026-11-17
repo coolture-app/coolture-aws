@@ -3,6 +3,8 @@ package com.coolture;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.dto.PostDetailDto;
+import com.coolture.dto.UpdatePostRequest;
 import com.coolture.repository.PostWriteRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,10 +20,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Stances on the migrated database. Needs `make up`; run it with `make test-db`. Its rows are removed afterwards. */
+/** Stances and edits on the migrated database. Needs `make up`; run it with `make test-db`. Its rows are removed afterwards. */
 @EnabledIfEnvironmentVariable(named = "DB_TEST", matches = "true")
 class PostWriteDbTest {
 
@@ -101,6 +105,31 @@ class PostWriteDbTest {
         Instant createdAt = Instant.parse(queryString(
             "SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') FROM post_participations WHERE post_id = '" + POST + "'"));
         assertTrue(createdAt.isAfter(before), "the mark kept the old stance's time: " + createdAt);
+    }
+
+    @Test
+    void aPostWithNoEndDate_cantHaveAnEnd() {
+        SQLException e = assertThrows(SQLException.class, () -> execute(
+            "UPDATE posts SET open_ended = true, ends_at = starts_at + interval '1 day' WHERE id = '" + POST + "'"));
+        assertTrue(e.getMessage().contains("posts_open_ended_has_no_end"), e.getMessage());
+    }
+
+    @Test
+    void anEdit_removesTheEndAndTheLink_andSetsNoEndDate_andBack() throws SQLException {
+        execute("UPDATE posts SET ends_at = starts_at + interval '2 hours', event_url = 'https://example.com' WHERE id = '" + POST + "'");
+        UpdatePostRequest title = new UpdatePostRequest("still a stance test", null, null, null, null, null, null, null, null, null, null);
+
+        PostDetailDto standing = repository.updatePost(POST, AUTHOR, repository.findById(POST).orElseThrow(), title,
+            new PostWriteRepository.Removable(null, null, true));
+        assertTrue(standing.openEnded());
+        assertNull(standing.endsAt());
+        assertNull(standing.eventUrl());
+
+        Instant end = Instant.parse("2040-01-01T21:00:00Z");
+        PostDetailDto dated = repository.updatePost(POST, AUTHOR, repository.findById(POST).orElseThrow(), title,
+            new PostWriteRepository.Removable(null, end, false));
+        assertFalse(dated.openEnded());
+        assertEquals(end, dated.endsAt());
     }
 
     private static String stance() throws SQLException {
