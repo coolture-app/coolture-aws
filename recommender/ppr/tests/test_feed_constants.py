@@ -14,7 +14,7 @@ def java(pattern: str) -> str:
 def test_the_job_reads_stances_and_events_as_the_feed_does():
     # A difference would score users from other stances or other ages than the vector the feed builds from them.
     weights = re.findall(r'"(\w+)", ([\d.]+)', java(r"STANCE_WEIGHTS = Map\.of\(([^)]*)\)"))
-    assert app.STANCE_WEIGHTS == {k: float(v) for k, v in weights}
+    assert app.STANCE_WEIGHTS.items() <= {k: float(v) for k, v in weights}.items()
     assert app.STANCE_HALF_LIFE_DAYS == float(java(r"STANCE_HALF_LIFE_DAYS = ([\d.]+);"))
     assert app.STANCE_MAX_AGE_DAYS == int(java(r"STANCE_MAX_AGE_DAYS = (\d+);"))
     assert app.DEFAULT_EVENT_HOURS == int(java(r"DEFAULT_EVENT_HOURS = (\d+);"))

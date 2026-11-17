@@ -43,8 +43,9 @@ public class FeedRepository {
      * viewer's "Nie dla mnie" marks, centred the same way. Marks count up to asOf, fade as stances do, and only the newest
      * NOT_FOR_ME_MARKS. MATERIALIZED, because an inlined CTE would run again for every candidate, and OFFSET 0, because a
      * flattened lateral would read and centre the post's vector again for every mark (100 marks took 6 s at 2,000 posts).
-     * The PageRank score comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf and less than
-     * PPR_RUN_MAX_AGE_HOURS before it, so a run landing mid-session doesn't move its pages.
+     * The PageRank score comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf, so a run landing
+     * mid-session doesn't move its pages, and less than PPR_RUN_MAX_AGE_HOURS before now too, since a cursor's asOf
+     * comes from the client.
      */
     private static final String FEATURES = """
         WITH marks AS MATERIALIZED (
@@ -74,7 +75,7 @@ public class FeedRepository {
         CROSS JOIN LATERAL (SELECT CASE WHEN pe.model = ? THEN pe.embedding - ?::vector END AS centred OFFSET 0) c
         LEFT JOIN rec_ppr_scores pr ON pr.post_id = p.id AND pr.user_id = ?::uuid
             AND pr.run_number = (SELECT run_number FROM rec_ppr_runs
-                                 WHERE finished_at BETWEEN ?::timestamptz - make_interval(hours => ?)
+                                 WHERE finished_at BETWEEN GREATEST(?::timestamptz, now()) - make_interval(hours => ?)
                                                        AND ?::timestamptz - make_interval(secs => ?)
                                  ORDER BY finished_at DESC LIMIT 1)
         WHERE

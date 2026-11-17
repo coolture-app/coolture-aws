@@ -34,10 +34,8 @@ def inputs(**kw):
         user_ids=["u0"],
         picks=[],
         stances=[],
-        follows=[],
+        friends=[],
         hidden={},
-        private=set(),
-        blocked={},
     )
     base.update(kw)
     return Inputs(**base)
@@ -71,25 +69,27 @@ def test_a_user_with_no_edges_gets_no_rows():
     assert by_event(rows, user=0) and not by_event(rows, user=1)
 
 
-def test_others_reactions_carry_over():
-    # u0 and u1 both like event 0; u1 also likes event 12, of another kind. u0's walk reaches it through u1.
-    stances = [(0, 0, 1.0), (1, 0, 1.0), (1, 12, 1.0)]
-    got = by_event(scores(inputs(user_ids=["u0", "u1"], stances=stances, hidden={0: {0}, 1: {0, 12}})))
-    alone = by_event(scores(inputs(user_ids=["u0", "u1"], stances=[(0, 0, 1.0)], hidden={0: {0}})))
-    assert got[12] > alone[12]
+def test_a_strangers_stances_move_no_ones_scores():
+    # u0 and u1 are both going to event 0, and u1 to event 12 too, but they aren't friends.
+    together = inputs(user_ids=["u0", "u1"], stances=[(0, 0, 2.0), (1, 0, 2.0), (1, 12, 2.0)], hidden={0: {0}})
+    alone = inputs(user_ids=["u0", "u1"], stances=[(0, 0, 2.0)], hidden={0: {0}})
+    assert by_event(scores(together)) == by_event(scores(alone))
 
 
-def test_a_follow_points_one_way():
-    a = adjacency(inputs(user_ids=["u0", "u1"], follows=[(0, 1)])).toarray()
-    users = a.shape[0] - 2
-    assert a[users, users + 1] == 1 and a[users + 1, users] == 0
-
-
-def test_following_someone_pulls_their_events_up():
+def test_a_friends_stances_pull_their_events_up():
     stances = [(1, 12, 1.0)]
-    followed = by_event(scores(inputs(user_ids=["u0", "u1"], picks=[(0, 0)], stances=stances, follows=[(0, 1)])))
-    not_followed = by_event(scores(inputs(user_ids=["u0", "u1"], picks=[(0, 0)], stances=stances)))
-    assert followed[12] > not_followed[12]
+    friends = by_event(scores(inputs(user_ids=["u0", "u1"], picks=[(0, 0)], stances=stances, friends=[(0, 1)])))
+    strangers = by_event(scores(inputs(user_ids=["u0", "u1"], picks=[(0, 0)], stances=stances)))
+    assert friends[12] > strangers[12]
+
+
+def test_a_friend_passes_on_their_stances_but_not_their_picks_or_their_friends():
+    # u1 is u0's friend, picked interest 3 and is going to event 4; u2 is u1's friend, not u0's.
+    full = inputs(user_ids=["u0", "u1", "u2"], picks=[(0, 0), (1, 3)], stances=[(1, 4, 2.0), (2, 12, 2.0)],
+                  friends=[(0, 1), (1, 0), (1, 2), (2, 1)])
+    stances_only = inputs(user_ids=["u0", "u1", "u2"], picks=[(0, 0)], stances=[(1, 4, 2.0)],
+                          friends=[(0, 1), (1, 0)])
+    assert by_event(scores(full)) == by_event(scores(stances_only))
 
 
 def test_a_venue_links_its_events():
@@ -134,17 +134,6 @@ def test_event_neighbours_dont_depend_on_the_chunk_size(monkeypatch, chunk):
     assert content_edges(inputs()) == whole
 
 
-def test_the_walk_is_personalised_pagerank():
-    many = inputs(user_ids=["u0", "u1"], picks=[(0, 1)], stances=[(1, 12, 1.0), (0, 13, 2.0)], follows=[(0, 1)])
-    a = adjacency(many).toarray()
-    p = a / np.maximum(a.sum(axis=1, keepdims=True), 1)
-    seed = np.zeros(len(a))
-    seed[len(a) - 2] = 1
-    exact = np.linalg.solve(np.eye(len(a)) - (1 - ppr.RESTART_PROBABILITY) * p.T, ppr.RESTART_PROBABILITY * seed)[:N]
-    got = by_event(scores(many))
-    assert sorted(got, key=got.get) == sorted(range(N), key=lambda e: exact[e])
-
-
 def test_a_stronger_stance_pulls_harder():
     def scored(weight):
         return by_event(scores(inputs(stances=[(0, 0, 1.0), (0, 12, weight)], hidden={0: {0, 12}})))
@@ -158,10 +147,10 @@ def test_what_every_interest_shares_doesnt_choose_an_events_interests():
 
 
 def test_the_walk_keeps_all_its_mass():
-    friends = inputs(user_ids=["u0", "u1"], picks=[(0, 1)], stances=[(1, 12, 1.0)], follows=[(0, 1), (1, 0)])
+    friends = inputs(user_ids=["u0", "u1"], picks=[(0, 1)], stances=[(1, 12, 1.0)], friends=[(0, 1), (1, 0)])
     graph = adjacency(friends)
     seed = np.zeros((graph.shape[0], 1))
-    seed[-2] = 1
+    seed[graph.shape[0] - 4] = 1
     mass = ppr.walk(ppr.transition(graph), seed)
     assert np.isfinite(mass).all() and (mass >= 0).all() and mass.sum() == pytest.approx(1)
 
@@ -176,28 +165,31 @@ def test_an_event_the_walk_cant_reach_ranks_last():
 def test_matches_a_walk_over_edges_written_by_hand():
     # Two interests, so every event with content is near both; three upcoming events, all each other's neighbours;
     # event 3 has ended and shares a venue with event 0. u0 picked interest 0, is going to event 3 and is friends
-    # with u1, who likes event 1.
+    # with u1, who is interested in event 1.
     rng = np.random.default_rng(3)
     small = Inputs(event_ids=["e0", "e1", "e2", "e3"],
                    event_vectors=np.array([unit(v) for v in rng.normal(size=(4, 5))]),
                    not_ended=np.array([True, True, True, False]), venues=["hall", None, None, "hall"],
                    post_average=np.zeros(5), interest_vectors=np.array([unit(v) for v in rng.normal(size=(2, 5))]),
-                   user_ids=["u0", "u1"], picks=[(0, 0)], stances=[(0, 3, 2.0), (1, 1, 1.0)],
-                   follows=[(0, 1), (1, 0)], hidden={}, private=set(), blocked={})
-    both_ways = [("e0", "hall", 1), ("e3", "hall", 1), ("e0", "e1", 1), ("e0", "e2", 1), ("e1", "e2", 1),
-                 ("u0", "i0", 1), ("u0", "e3", 2), ("u1", "e1", 1)]
+                   user_ids=["u0", "u1"], picks=[(0, 0)], stances=[(0, 3, 2.0), (1, 1, 1.5)],
+                   friends=[(0, 1), (1, 0)], hidden={})
+    both_ways = [("e0", "hall", 1), ("e3", "hall", 1), ("e0", "e1", 1), ("e0", "e2", 1), ("e1", "e2", 1)]
     both_ways += [(e, i, 1) for e in ("e0", "e1", "e2", "e3") for i in ("i0", "i1")]
     edges = {}
     for a, b, w in both_ways:
         edges.setdefault(a, {})[b] = w
         edges.setdefault(b, {})[a] = w
-    edges["u0"]["u1"] = edges["u1"]["u0"] = 1
+    # Out of users only; u1's stance reaches u0 through what u1 shows friends.
+    edges["u0"] = {"i0": 1, "e3": 2, "u1 shown": 1}
+    edges["u1 shown"] = {"e1": 1.5}
 
     restart = ppr.RESTART_PROBABILITY
     mass = {"u0": 1.0}
     for _ in range(500):
         moved = {"u0": restart}
         for node, m in mass.items():
+            if node not in edges:
+                continue
             total = sum(edges[node].values())
             for other, w in edges[node].items():
                 moved[other] = moved.get(other, 0) + (1 - restart) * m * w / total
@@ -208,29 +200,10 @@ def test_matches_a_walk_over_edges_written_by_hand():
     assert len({round(mass[e], 9) for e in ("e0", "e1", "e2")}) == 3
 
 
-def test_all_of_a_users_friends_weigh_like_one_edge():
-    a = adjacency(inputs(user_ids=["u0", "u1", "u2", "u3"], follows=[(0, 1), (0, 2), (0, 3), (1, 0)])).toarray()
-    first_user = a.shape[0] - 4
-    assert a[first_user, first_user + 1:].sum() == pytest.approx(1)
-    assert a[first_user + 1, first_user] == 1
-
-
-# u0 and u2 like event 0; u2 also likes event 12, of another kind, so u0's walk reaches it through u2.
-SHARED = dict(user_ids=["u0", "u1", "u2"], picks=[(0, 0), (1, 2)], stances=[(0, 0, 1.0), (2, 0, 1.0), (2, 12, 1.0)],
-              hidden={0: {0}})
-
-
-def test_a_user_who_doesnt_share_their_stances_moves_no_one_elses_scores():
-    private = by_event(scores(inputs(**SHARED, private={2})))
-    without_them = by_event(scores(inputs(**{**SHARED, "stances": [(0, 0, 1.0)]})))
-    assert private == without_them
-    assert by_event(scores(inputs(**SHARED, private={2})), user=2)
-
-
-@pytest.mark.parametrize("viewer, other", [(0, 2), (2, 0)])
-def test_people_on_either_side_of_a_block_dont_reach_each_other(viewer, other):
-    blocked = inputs(**SHARED, blocked={viewer: {other}, other: {viewer}})
-    alone = [(u, e, w) for u, e, w in SHARED["stances"] if u != other]
-    without_them = inputs(**{**SHARED, "stances": alone, "picks": [p for p in SHARED["picks"] if p[0] != other]})
-    assert by_event(scores(blocked), user=viewer) == by_event(scores(without_them), user=viewer)
-    assert by_event(scores(blocked), user=1) == by_event(scores(inputs(**SHARED)), user=1)
+def test_all_of_a_users_friends_weigh_like_one_edge_into_what_they_show():
+    users = ["u0", "u1", "u2", "u3"]
+    stances = [(1, 0, 1.5), (2, 0, 1.5), (3, 0, 1.5)]
+    a = adjacency(inputs(user_ids=users, stances=stances, friends=[(0, 1), (0, 2), (0, 3), (1, 0)])).toarray()
+    first_user, first_shown = a.shape[0] - 8, a.shape[0] - 4
+    assert a[first_user, first_shown + 1:].sum() == pytest.approx(1)
+    assert not a[first_user, first_user:first_shown].any() and not a[:, first_user:first_shown].any()

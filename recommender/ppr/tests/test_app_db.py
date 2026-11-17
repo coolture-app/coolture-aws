@@ -43,15 +43,11 @@ def test_a_run_leaves_out_what_the_feed_wont_show(conn):
     conn.execute("""INSERT INTO post_participations (post_id, user_id, type) VALUES (%s, %s, 'NOT_INTERESTED')
                     ON CONFLICT DO NOTHING""", (reacted, user))
 
-    inputs = app.load(conn)
-    run, _ = app.write(conn, inputs)
+    run, _ = app.write(conn, app.load(conn))
 
     scored = {p for (p,) in conn.execute("SELECT post_id FROM rec_ppr_scores WHERE run_number = %s AND user_id = %s",
                                          (run, user))}
     assert scored and not scored & {deleted, ended, own, by_blocked, by_blocker, reacted}
-    index = inputs.user_ids.index
-    assert inputs.blocked[index(user)] == {index(blocked), index(blocker)}
-    assert inputs.blocked[index(blocked)] == {index(user)}
 
 
 def test_the_rows_written_are_the_walks_scores(conn):
@@ -90,14 +86,14 @@ def test_stances_fade_and_age_out_and_neither_a_like_nor_nie_dla_mnie_is_an_edge
     assert inputs.event_ids.index(liked) in inputs.hidden[u]
 
 
-def test_follows_count_only_between_friends_who_share_their_stances(conn):
+def test_friends_are_mutual_follows_who_share_their_stances(conn):
     a, b = users(conn, 2)
     conn.execute("DELETE FROM user_relations WHERE (source_user_id, target_user_id) IN ((%s, %s), (%s, %s))",
                  (a, b, b, a))
 
     def edge(source, target):
         inputs = app.load(conn)
-        return (inputs.user_ids.index(source), inputs.user_ids.index(target)) in inputs.follows
+        return (inputs.user_ids.index(source), inputs.user_ids.index(target)) in inputs.friends
 
     relate(conn, a, b, "FOLLOW")
     assert not edge(a, b)
@@ -106,8 +102,6 @@ def test_follows_count_only_between_friends_who_share_their_stances(conn):
     assert edge(a, b) and edge(b, a)
     conn.execute("UPDATE users SET share_stances = false WHERE id = %s", (b,))
     assert not edge(a, b) and edge(b, a)
-    inputs = app.load(conn)
-    assert inputs.user_ids.index(b) in inputs.private and inputs.user_ids.index(a) not in inputs.private
 
 
 def test_a_run_keeps_the_newest_run_finished_over_a_day_ago_and_deletes_older_ones(conn):
@@ -158,7 +152,7 @@ def test_a_run_as_of_an_earlier_time_leaves_out_what_came_after(conn):
     u, f = earlier.user_ids.index(user), earlier.user_ids.index(friend)
     assert not any(s == u for s, _, _ in earlier.stances)
     assert earlier.event_ids.index(post) not in earlier.hidden[u]
-    assert (u, f) not in earlier.follows and (f, u) not in earlier.follows
+    assert (u, f) not in earlier.friends and (f, u) not in earlier.friends
     assert fresh not in earlier.event_ids
 
 
@@ -174,10 +168,9 @@ def test_a_run_that_fails_while_writing_leaves_no_trace(conn, monkeypatch):
         yield next(rows)
         raise MemoryError
 
-    with monkeypatch.context() as patch:
-        patch.setattr(app, "scores", fails_halfway)
-        with pytest.raises(MemoryError):
-            app.write(conn, inputs)
+    monkeypatch.setattr(app, "scores", fails_halfway)
+    with pytest.raises(MemoryError):
+        app.write(conn, inputs)
 
     assert conn.execute("SELECT count(*) FROM rec_ppr_runs").fetchone()[0] == runs_before
     assert conn.execute("SELECT count(*) FROM rec_ppr_scores").fetchone()[0] == rows_before

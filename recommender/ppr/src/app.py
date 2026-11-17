@@ -1,4 +1,3 @@
-"""Reads the app's tables, runs personalised PageRank for every user, and writes one run of rec_ppr_scores."""
 import logging
 import time
 from collections import defaultdict
@@ -16,11 +15,11 @@ from settings import settings
 logger = logging.getLogger("ppr")
 logger.setLevel(logging.INFO)
 
-# The feed's own rules, from FeedConfig and PostSql. tests/test_feed_constants.py checks they agree.
 EMBEDDING_MODEL = "sdadas/mmlw-roberta-base"
-STANCE_WEIGHTS = {"LIKE": 1.0, "INTERESTED": 1.5, "TAKES_PART": 2.0}
+
+# The feed's own rules, from FeedConfig and PostSql. tests/test_feed_constants.py checks they agree.
 # Not likes: friends see only interested and going on the cards, and through the graph a like would reach them.
-GRAPH_STANCES = ["INTERESTED", "TAKES_PART"]
+STANCE_WEIGHTS = {"INTERESTED": 1.5, "TAKES_PART": 2.0}
 STANCE_HALF_LIFE_DAYS = 14
 STANCE_MAX_AGE_DAYS = 112
 DEFAULT_EVENT_HOURS = 3
@@ -82,7 +81,7 @@ DELETE FROM rec_ppr_scores WHERE run_number IN (SELECT run_number FROM old)
 
 
 def _connect() -> psycopg.Connection:
-    # The same connection as post-embedding's app.py.
+    # A copy of post-embedding's _connect; change both.
     return psycopg.connect(
         host=settings.db_host,
         port=settings.db_port,
@@ -119,7 +118,7 @@ def _stance_weight(kind: str, age_days: int) -> float:
 
 
 def _hidden(user_index: dict[UUID, int], event_index: dict[UUID, int], authors: Sequence[UUID],
-            reacted: list[tuple[UUID, UUID]], unseen: dict[UUID, set[UUID]]) -> dict[int, set[int]]:
+            reacted: list[tuple[UUID, UUID]], blocked: dict[UUID, set[UUID]]) -> dict[int, set[int]]:
     """What the feed never shows a user as new: PostSql's NOT_MINE and NOT_BLOCKED."""
     events_by_author = defaultdict(list)
     for e, author in enumerate(authors):
@@ -127,7 +126,7 @@ def _hidden(user_index: dict[UUID, int], event_index: dict[UUID, int], authors: 
 
     hidden = {}
     for user, u in user_index.items():
-        hidden[u] = {e for author in {user} | unseen[user] for e in events_by_author[author]}
+        hidden[u] = {e for author in {user} | blocked[user] for e in events_by_author[author]}
     for user, post in reacted:
         if user in user_index and post in event_index:
             hidden[user_index[user]].add(event_index[post])
@@ -140,7 +139,8 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
     only its latest time, and removed stances, follows and edited posts leave no trace."""
     if as_of is None:
         (as_of,) = conn.execute("SELECT now()").fetchone()
-    at = {"as_of": as_of, "model": EMBEDDING_MODEL, "max_age_days": STANCE_MAX_AGE_DAYS, "types": GRAPH_STANCES}
+    assert as_of.tzinfo, "a naive as_of would be read in the session's time zone"
+    at = {"as_of": as_of, "model": EMBEDDING_MODEL, "max_age_days": STANCE_MAX_AGE_DAYS, "types": list(STANCE_WEIGHTS)}
     (average,) = conn.execute(POST_AVERAGE, at).fetchone()
     events = conn.execute(EVENTS, at).fetchall()
     interests = conn.execute(
@@ -158,18 +158,18 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
     reacted = conn.execute(REACTED, at).fetchall()
 
     following = {(a, b) for a, b, kind in relations if kind == "FOLLOW"}
-    unseen = defaultdict(set)
+    blocked = defaultdict(set)
     for a, b, kind in relations:
         if kind == "BLOCK":
-            unseen[a].add(b)
-            unseen[b].add(a)
-    # Friends.sharingFriend's rule, the people whose stances the cards show: a one-way follow must not reveal where
-    # someone goes. A block replaces the blocker's follow, so friends never block each other.
-    follows = sorted((a, b) for a, b in following if (b, a) in following and b in sharing)
+            blocked[a].add(b)
+            blocked[b].add(a)
+    # Friends.sharingFriend's rule, the people whose stances the cards show. A block replaces the blocker's follow, so
+    # friends never block each other.
+    friends = sorted((a, b) for a, b in following if (b, a) in following and b in sharing)
 
     event_index = _positions(event_ids)
     interest_index = _positions(interest_keys)
-    user_ids = sorted({u for u, _ in picks} | {u for u, _, _, _ in stances} | {u for pair in follows for u in pair})
+    user_ids = sorted({u for u, _ in picks} | {u for u, _, _, _ in stances} | {u for pair in friends for u in pair})
     user_index = _positions(user_ids)
 
     return Inputs(
@@ -183,10 +183,8 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
         picks=[(user_index[u], interest_index[k]) for u, k in picks if k in interest_index],
         stances=[(user_index[u], event_index[p], _stance_weight(kind, age_days))
                  for u, p, kind, age_days in stances if p in event_index],
-        follows=[(user_index[a], user_index[b]) for a, b in follows],
-        hidden=_hidden(user_index, event_index, authors, reacted, unseen),
-        private={user_index[u] for u in user_ids if u not in sharing},
-        blocked={user_index[u]: {user_index[o] for o in unseen[u] if o in user_index} for u in user_ids if unseen[u]},
+        friends=[(user_index[a], user_index[b]) for a, b in friends],
+        hidden=_hidden(user_index, event_index, authors, reacted, blocked),
     )
 
 

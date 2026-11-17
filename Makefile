@@ -245,7 +245,7 @@ deploy-waf: ## Deploy CloudFront WAF web ACL + allowed-IP sets to us-east-1 (dev
 deploy-all: ## Deploy all stacks (dev)
 	@scripts/deploy.sh dev
 
-delete-embeddings: ## Delete embedding workers stack
+delete-embeddings: ## Delete the embedding worker and PageRank stack
 	@sam delete --stack-name coolture-embeddings-dev --no-prompts
 
 delete-backend: ## Delete backend stack (delete embeddings first: it imports backend outputs)

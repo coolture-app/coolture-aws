@@ -45,10 +45,10 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 4. Lets the demo users react to posts close to their interests, so their feeds are personal.
 5. Has Anna's, Jan's and Ola's friends mark the soonest posts, so the top of Wszystkie, sorted Nadchodzące, shows every
    shape of a card's friends line. This step puts its cases back on every run, on the posts soonest then.
-6. Scores every user's events with personalised PageRank (`make ppr`), a new run each time.
+6. Scores every user's events with personalised PageRank (`make ppr`).
 
-The first run takes about 30 minutes. Later runs take a minute and add only a new PageRank run. How the snapshot is picked and loaded
-is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
+The first run takes about 30 minutes. Later runs take a minute and add only a new PageRank run. How the snapshot is
+picked and loaded is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
 
 **The geocoder**, Photon with an index of Poland, serves the post form's place search and locates the scraper's
 events. `make geo-index` builds it once, with 3 GB of disk, alone because of the memory. Then `make up` starts it on
@@ -160,8 +160,8 @@ scripts/                        # deploy.sh, doctor.sh, embed-posts.sh, geo-publ
 | Command | Runs |
 |---|---|
 | `mvn test -f aws/lambdas/<module>/pom.xml` | A Java module's unit tests, after `make build-common`. `make build` runs them too |
-| `make test-db` | `post-read`'s and `post-write`'s database tests, against `make up` |
-| `make test-python` | The Python Lambdas: embedding workers, migrations, authorizer |
+| `make test-db` | `post-read`'s, `post-write`'s and PageRank's database tests, against `make up` |
+| `make test-python` | The Python Lambdas: embedding worker, PageRank, migrations, authorizer |
 | `make test-scraper` | The scraper |
 | `make api-test` | The request flows in `api/`, against `make dev` and `make seed` |
 

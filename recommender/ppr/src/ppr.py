@@ -32,10 +32,8 @@ class Inputs:
     user_ids: list[UUID]
     picks: Pairs  # (user, interest)
     stances: list[tuple[int, int, float]]  # (user, event, weight)
-    follows: Pairs  # (follower, followed)
+    friends: Pairs  # (user, friend), one row per direction
     hidden: dict[int, set[int]]  # user: events the feed never shows them as new
-    private: set[int]  # users who don't share their stances
-    blocked: dict[int, set[int]]  # user: the users on the other side of their blocks
 
 
 def centred_and_normalised(vectors: np.ndarray, average: np.ndarray) -> np.ndarray:
@@ -61,7 +59,7 @@ def nearest_interests(events: np.ndarray, interests: np.ndarray, linked: np.ndar
 
 
 def nearest_events(events: np.ndarray, linked: np.ndarray) -> Pairs:
-    """Each pair once. Only events that haven't ended are anyone's neighbour."""
+    """Each pair once, among the linked events."""
     k = min(EVENT_NEIGHBOURS, len(linked) - 1)
     if k < 1:
         return []
@@ -77,13 +75,15 @@ def nearest_events(events: np.ndarray, linked: np.ndarray) -> Pairs:
 
 
 def adjacency(inputs: Inputs) -> sparse.csr_matrix:
-    """Nodes are the events, then the interests, the venues, and last the users."""
+    """Nodes are the events, then the interests, the venues, the users, and last each user's stances as their friends
+    see them."""
     venue_names = sorted({v for v in inputs.venues if v})
     venue_index = {name: j for j, name in enumerate(venue_names)}
     first_interest = len(inputs.event_ids)
     first_venue = first_interest + len(inputs.interest_vectors)
     first_user = first_venue + len(venue_names)
-    size = first_user + len(inputs.user_ids)
+    first_shown = first_user + len(inputs.user_ids)
+    size = first_shown + len(inputs.user_ids)
     sources, targets, weights = [], [], []
 
     def add_one_way(a, b, weight=1.0):
@@ -95,12 +95,6 @@ def adjacency(inputs: Inputs) -> sparse.csr_matrix:
         add_one_way(a, b, weight)
         add_one_way(b, a, weight)
 
-    def add_from_user(u, node, weight=1.0):
-        add_one_way(first_user + u, node, weight)
-        # No walk but their own enters a user who doesn't share their stances, so it can't follow them to their events.
-        if u not in inputs.private:
-            add_one_way(node, first_user + u, weight)
-
     for e, venue in enumerate(inputs.venues):
         if venue:
             add_both_ways(e, first_venue + venue_index[venue])
@@ -109,15 +103,20 @@ def adjacency(inputs: Inputs) -> sparse.csr_matrix:
         add_both_ways(e, first_interest + i)
     for e, other in event_event:
         add_both_ways(e, other)
+    # A user's edges lead out only, so no one else's walk passes through them. Their stances reach only their friends,
+    # through a node that leads nowhere else: not to their picks, not to their friends. The cards show the same.
     for u, i in inputs.picks:
-        add_from_user(u, first_interest + i)
+        add_one_way(first_user + u, first_interest + i)
     for u, e, weight in inputs.stances:
-        add_from_user(u, e, weight)
+        add_one_way(first_user + u, e, weight)
+        add_one_way(first_shown + u, e, weight)
     # All of a user's friends together weigh like one interest pick. Weighed one each, friends would take most of a
     # walk's first step and put the same few friend-marked events on top for everyone.
-    friends = np.bincount([follower for follower, _ in inputs.follows], minlength=len(inputs.user_ids))
-    for follower, followed in inputs.follows:
-        add_one_way(first_user + follower, first_user + followed, 1 / friends[follower])
+    marked = {u for u, _, _ in inputs.stances}
+    shown = [(u, friend) for u, friend in inputs.friends if friend in marked]
+    count = np.bincount([u for u, _ in shown], minlength=len(inputs.user_ids))
+    for u, friend in shown:
+        add_one_way(first_user + u, first_shown + friend, 1 / count[u])
     return sparse.csr_matrix((weights, (sources, targets)), shape=(size, size))
 
 
@@ -129,8 +128,8 @@ def walk(step: sparse.csr_matrix, seed: np.ndarray) -> np.ndarray:
 
 
 def transition(graph: sparse.csr_matrix) -> sparse.csr_matrix:
-    """Column j spreads node j's mass over its edges by weight. Mass reaching a node with no edges out is lost, which
-    scales a walk without changing its ranks."""
+    """Column j spreads node j's mass over its edges by weight. Mass reaching a node with no edges out, such as an
+    event someone marked with no venue or content, is lost, which scales a walk without changing its ranks."""
     out_weight = np.asarray(graph.sum(axis=1)).ravel()
     out_weight[out_weight == 0] = 1
     return (sparse.diags(1 / out_weight) @ graph).T.tocsr()
@@ -140,18 +139,11 @@ def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
     """(user, event, score): the walk's mass ranked among the user's candidates, 0 to 1. A user whose walk can't tell
     them apart gets no rows, which the feed reads as NEUTRAL for all."""
     graph = adjacency(inputs)
-    first_user = graph.shape[0] - len(inputs.user_ids)
-    with_edges = np.flatnonzero(np.diff(graph.indptr)[first_user:]).tolist()
-    unblocked = [u for u in with_edges if u not in inputs.blocked]
+    first_user = graph.shape[0] - 2 * len(inputs.user_ids)
+    with_edges = np.flatnonzero(np.diff(graph.indptr)[first_user:first_user + len(inputs.user_ids)]).tolist()
     step = transition(graph)
-    for start in range(0, len(unblocked), USERS_PER_BATCH):
-        yield from ranked(inputs, step, first_user, unblocked[start:start + USERS_PER_BATCH])
-
-    # Without the people on the other side of their blocks, whose stances would still reach them through a shared event.
-    for u in sorted(set(with_edges) & inputs.blocked.keys()):
-        keep = np.ones(graph.shape[0])
-        keep[[first_user + other for other in inputs.blocked[u]]] = 0
-        yield from ranked(inputs, transition(sparse.diags(keep) @ graph @ sparse.diags(keep)), first_user, [u])
+    for start in range(0, len(with_edges), USERS_PER_BATCH):
+        yield from ranked(inputs, step, first_user, with_edges[start:start + USERS_PER_BATCH])
 
 
 def ranked(inputs: Inputs, step: sparse.csr_matrix, first_user: int,

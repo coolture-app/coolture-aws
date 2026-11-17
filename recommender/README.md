@@ -46,9 +46,9 @@ make embed-posts ALL=1               # every post that isn't deleted
 make embed-posts DRY_RUN=1           # print the SQS/S3 events it would send
 ```
 
-They build the worker on first use, and again when its code or the template changed (`make build-embeddings`). `embed-posts`
-(`scripts/embed-posts.sh`) wraps posts in the same events AWS delivers, 50 per invocation (`BATCH_SIZE=`), and exits
-non-zero if any fails. `make test-python` runs the worker's unit tests.
+They build the worker on first use, and again when its code or the template changed (`make build-embeddings`).
+`embed-posts` (`scripts/embed-posts.sh`) wraps posts in the same events AWS delivers, 50 per invocation (`BATCH_SIZE=`),
+and exits non-zero if any fails. `make test-python` runs the worker's unit tests.
 
 ### Changing the model
 
@@ -125,24 +125,23 @@ The thesis's graph signal. `PprFunction` runs personalised PageRank from every u
 | Event–venue | `event_locations`, by lower-cased name and city |
 | Event–interest | Each event's nearest interests (`INTERESTS_PER_EVENT` in `ppr.py`), both sides centred as in the feed |
 | Event–event | Each event to its nearest events (`EVENT_NEIGHBOURS`), among events that haven't ended |
-| User–interest | `user_interests` |
-| User–event | Interested and going, weighed and faded as the feed weighs and fades them. Not likes: friends see only interested and going on the cards |
-| User → user | Friends (mutual follows, no block) who share their stances: a one-way follow reveals nothing. All of a user's friends together weigh like one interest pick |
+| User → interest | `user_interests`, one way |
+| User → event | Interested and going, one way, weighed and faded as the feed weighs and fades them. Not likes |
+| User → friend's stances | Friends (mutual follows, no block) who share their stances, to a node with only that friend's interested and going. All of a user's friends together weigh like one interest pick |
 
-A user who doesn't share their stances has no edges leading in, so their picks and stances move only their own scores.
-A user with a block walks a graph without the other person, both ways.
+Edges lead out of users only, so a walk reaches someone else's stances only through a friend edge, and nothing past
+them: not their picks, not their friends. That is what the cards show a friend, and a block ends the friendship.
 
 Each user's candidates, the posts the feed may show them as new, get the walk's mass as a rank from 0 to 1. The feed
 reads the latest run finished `PPR_RUN_MARGIN_SECONDS` before the session's `asOf`, so a run landing mid-scroll doesn't
-move its pages, and ignores a run older than `PPR_RUN_MAX_AGE_HOURS`, whose relations may have changed since. A post with
-no score gets `NEUTRAL` (weight `ppr` in `FeedConfig`), so locally PageRank's effect goes after a day unless `make ppr`
-runs again. A run is deleted once a newer one is over a day old. `FEED_WEIGHTS=ppr=0` on `PostReadFunction` keeps the
-runs but gives them no say in the feed.
+move its pages, and ignores a run older than `PPR_RUN_MAX_AGE_HOURS`, whose friendships may have changed since. A post
+with no score gets `NEUTRAL` (weight `ppr` in `FeedConfig`), so locally PageRank's effect goes after a day unless
+`make ppr` runs again. A run is deleted once a newer one is over a day old. `FEED_WEIGHTS=ppr=0` on `PostReadFunction`
+keeps the runs but gives them no say in the feed.
 
-Only the event–venue, user–interest, user–event and user → user edges are relations people made. The event–interest and event–event
-edges come from the same vectors as the feed's affinity, so through them PageRank mostly repeats it; they are what
-reaches a new user's events and an event nobody marked. `load()` takes an `as_of` to replay an earlier moment, with the
-limits its docstring lists.
+Venues, stances and friends are relations people made. The event–interest and event–event edges come from the same
+vectors as the feed's affinity, so through them PageRank mostly repeats it; they are what reaches a new user's events
+and an event nobody marked. `load()` takes an `as_of` to replay an earlier moment, with the limits its docstring lists.
 
 ```bash
 make ppr                           # one run locally; make seed ends with it
@@ -150,4 +149,5 @@ make test-db                       # its database tests, with the others, after 
 ```
 
 On AWS it runs on a schedule once deployed with `PPR_SCHEDULE=true make deploy-embeddings`, and keeps that setting on
-later deploys; it's off by default.
+later deploys; it's off by default. To start a run by hand there, invoke it with `--invocation-type Event`: it runs one
+at a time, so a direct invoke during a run is refused.
