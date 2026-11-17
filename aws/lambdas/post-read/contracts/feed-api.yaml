@@ -140,7 +140,7 @@ paths:
       description: >
         The same friends as the post's friendStances, without the limit on names: mutual follows who marked the post
         Biorę udział (going) or Interesuje mnie (interested) and share their stances. Newest stance first. Empty lists for
-        a guest.
+        a guest. 404 for a deleted post, or when the viewer and the author blocked one another.
       parameters:
         - {name: postId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
