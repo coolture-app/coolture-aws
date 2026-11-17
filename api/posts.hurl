@@ -96,7 +96,7 @@ GET {{api}}/posts?authorId={{anna}}&from=2031-06-06T00:00:00Z&to=2031-06-07T23:5
 X-Anonymous: true
 HTTP 200
 [Asserts]
-jsonpath "$.items[?(@.id == '{{post}}')].openEnded" contains true
+jsonpath "$.items[?(@.id == '{{post}}')].openEnded" == true
 
 # An end turns it off again.
 PATCH {{api}}/posts/{{post}}
@@ -112,7 +112,7 @@ GET {{api}}/posts?authorId={{anna}}&from=2031-06-06T00:00:00Z&to=2031-06-07T23:5
 X-Anonymous: true
 HTTP 200
 [Asserts]
-jsonpath "$.items[?(@.id == '{{post}}')]" count == 0
+jsonpath "$.items[?(@.id == '{{post}}')]" not exists
 
 # Jan likes it and is interested. PUT replaces his reaction, so sending it twice changes nothing.
 PUT {{api}}/posts/{{post}}/reaction
