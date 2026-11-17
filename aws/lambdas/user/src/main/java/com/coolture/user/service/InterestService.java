@@ -55,7 +55,10 @@ public class InterestService {
         return new InterestCatalogDto(minSelections, maxSelections, categories);
     }
 
-    public UserInterestsDto getSelection(UUID targetId) throws SQLException {
+    public UserInterestsDto getSelection(UUID targetId, UUID callerId) throws SQLException {
+        if (repository.isBlockedPair(targetId, callerId)) {
+            throw new IllegalArgumentException("User " + targetId + " not found");
+        }
         List<String> keys = repository.findSelectedKeys(targetId);
         // Someone who picked nothing has no rows either, so only then is the user looked up.
         if (keys.isEmpty() && !repository.userExists(targetId)) {

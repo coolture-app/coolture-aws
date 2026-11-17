@@ -45,7 +45,7 @@ class CommentReadServiceTest {
             dto(UUID.randomUUID(), postId, now),
             dto(UUID.randomUUID(), postId, now),
             dto(UUID.randomUUID(), postId, now));
-        when(repository.findRootCommentsForPost(eq(postId), isNull(), isNull(), eq(3)))
+        when(repository.findRootCommentsForPost(eq(postId), isNull(), isNull(), isNull(), eq(3)))
             .thenReturn(rows);
 
         CursorPage<CommentSummaryDto> page = service.list(postId, null, null, null, 2);
@@ -53,17 +53,17 @@ class CommentReadServiceTest {
         assertEquals(2, page.items().size());
         assertTrue(page.page().hasMore());
         assertEquals(2, page.page().limit());
-        verify(repository).ensurePostVisible(postId);
+        verify(repository).ensurePostVisible(postId, null);
     }
 
     @Test
     void list_whenRepliesAndParentBelongs_returnsReplies() throws Exception {
         UUID postId = UUID.randomUUID();
         UUID parentId = UUID.randomUUID();
-        when(repository.findCommentHeader(parentId))
+        when(repository.findCommentHeader(parentId, null))
             .thenReturn(Optional.of(new CommentReadRepository.CommentHeader(parentId, postId, "ACTIVE", false)));
         List<CommentSummaryDto> rows = List.of(dto(UUID.randomUUID(), postId, Instant.now()));
-        when(repository.findRepliesForParent(eq(parentId), isNull(), isNull(), eq(21)))
+        when(repository.findRepliesForParent(eq(parentId), isNull(), isNull(), isNull(), eq(21)))
             .thenReturn(rows);
 
         CursorPage<CommentSummaryDto> page = service.list(postId, null, parentId, null, 20);
@@ -76,7 +76,7 @@ class CommentReadServiceTest {
     void list_whenParentMissing_throwsNotFound() throws Exception {
         UUID postId = UUID.randomUUID();
         UUID parentId = UUID.randomUUID();
-        when(repository.findCommentHeader(parentId)).thenReturn(Optional.empty());
+        when(repository.findCommentHeader(parentId, null)).thenReturn(Optional.empty());
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.list(postId, null, parentId, null, 20));
@@ -88,7 +88,7 @@ class CommentReadServiceTest {
     void list_whenParentBelongsToDifferentPost_throwsNotFound() throws Exception {
         UUID postId = UUID.randomUUID();
         UUID parentId = UUID.randomUUID();
-        when(repository.findCommentHeader(parentId))
+        when(repository.findCommentHeader(parentId, null))
             .thenReturn(Optional.of(
                 new CommentReadRepository.CommentHeader(parentId, UUID.randomUUID(), "ACTIVE", false)));
 
@@ -102,11 +102,11 @@ class CommentReadServiceTest {
     void list_whenParentDeleted_stillReturnsRepliesToPreserveThread() throws Exception {
         UUID postId = UUID.randomUUID();
         UUID parentId = UUID.randomUUID();
-        when(repository.findCommentHeader(parentId))
+        when(repository.findCommentHeader(parentId, null))
             .thenReturn(Optional.of(
                 new CommentReadRepository.CommentHeader(parentId, postId, "DELETED", true)));
         List<CommentSummaryDto> rows = List.of(dto(UUID.randomUUID(), postId, Instant.now()));
-        when(repository.findRepliesForParent(eq(parentId), isNull(), isNull(), eq(21)))
+        when(repository.findRepliesForParent(eq(parentId), isNull(), isNull(), isNull(), eq(21)))
             .thenReturn(rows);
 
         CursorPage<CommentSummaryDto> page = service.list(postId, null, parentId, null, 20);
@@ -124,13 +124,38 @@ class CommentReadServiceTest {
     @Test
     void list_whenLimitOutOfRange_clampsTo1To100() throws Exception {
         UUID postId = UUID.randomUUID();
-        when(repository.findRootCommentsForPost(eq(postId), isNull(), isNull(), anyInt()))
+        when(repository.findRootCommentsForPost(eq(postId), isNull(), isNull(), isNull(), anyInt()))
             .thenReturn(List.of());
 
         service.list(postId, null, null, null, 0);
-        verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), eq(21));
+        verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), isNull(), eq(21));
 
         service.list(postId, null, null, null, 500);
-        verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), eq(101));
+        verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), isNull(), eq(101));
+    }
+
+    @Test
+    void list_checksThePostAndThreadsForTheViewer() throws Exception {
+        UUID postId = UUID.randomUUID();
+        UUID viewer = UUID.randomUUID();
+        when(repository.findRootCommentsForPost(eq(postId), eq(viewer), isNull(), isNull(), anyInt())).thenReturn(List.of());
+
+        service.list(postId, viewer, null, null, 20);
+
+        verify(repository).ensurePostVisible(postId, viewer);
+        verify(repository).findRootCommentsForPost(eq(postId), eq(viewer), isNull(), isNull(), eq(21));
+    }
+
+    @Test
+    void list_whenParentHiddenFromTheViewer_throwsNotFound() throws Exception {
+        UUID postId = UUID.randomUUID();
+        UUID parentId = UUID.randomUUID();
+        UUID viewer = UUID.randomUUID();
+        when(repository.findCommentHeader(parentId, viewer)).thenReturn(Optional.empty());
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> service.list(postId, viewer, parentId, null, 20));
+
+        assertTrue(ex.getMessage().toLowerCase().contains("not found"));
     }
 }

@@ -1,5 +1,6 @@
 package com.coolture.user.repository;
 
+import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
 
 import java.sql.Connection;
@@ -67,6 +68,12 @@ public class InterestRepository {
                 }
                 return keys;
             }
+        }
+    }
+
+    public boolean isBlockedPair(UUID userId, UUID otherUserId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Blocks.between(conn, userId, otherUserId);
         }
     }
 

@@ -5,7 +5,9 @@ info:
   description: >
     Accounts, profiles, the home area, interests, follows and blocks: everything the user Lambda serves. A route under
     /users/{userId} that changes or reads private data works only on the caller's own id and answers 403 for anyone
-    else's. Change this file first, in its own pull request or commit, then the code; ContractTest checks the handler's
+    else's. A block works both ways: when either of two users blocked the other, neither finds the other in search,
+    followers or following, and each gets 404 for the other's interests, followers and following. Whoever was blocked
+    also gets 404 for the blocker's profile, as if the account didn't exist. Change this file first, in its own pull request or commit, then the code; ContractTest checks the handler's
     responses against it.
 servers:
   - url: http://localhost:3000
@@ -78,6 +80,9 @@ paths:
       tags: [Profiles]
       operationId: getUser
       summary: A public profile
+      description: >
+        For someone the caller blocked, a slim profile: id, username, names, photo and isBlocked true, so the page can
+        offer Odblokuj. 404 when this user blocked the caller.
       security: [{}, {bearerAuth: []}]
       responses:
         '200':
@@ -85,19 +90,30 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UserProfile'}
-              example:
-                id: 00000000-0000-0000-0000-000000000003
-                username: jan_demo
-                firstName: Jan
-                lastName: Demo
-                followersCount: 1
-                followingCount: 1
-                bio: Teatr, stand-up i kino autorskie
-                createdAt: '2026-11-15T17:00:00Z'
-                isFollowing: true
-                isBlocked: false
-                followsYou: true
-                interests: [theatre, stand_up, cinema]
+              examples:
+                friend:
+                  value:
+                    id: 00000000-0000-0000-0000-000000000003
+                    username: jan_demo
+                    firstName: Jan
+                    lastName: Demo
+                    followersCount: 1
+                    followingCount: 1
+                    bio: Teatr, stand-up i kino autorskie
+                    createdAt: '2026-11-15T17:00:00Z'
+                    isFollowing: true
+                    isBlocked: false
+                    followsYou: true
+                    interests: [theatre, stand_up, cinema]
+                blockedByCaller:
+                  value:
+                    id: 00000000-0000-0000-0000-000000000003
+                    username: jan_demo
+                    firstName: Jan
+                    lastName: Demo
+                    isFollowing: false
+                    isBlocked: true
+                    followsYou: false
         '404': {$ref: '#/components/responses/NotFound'}
     patch:
       tags: [Profiles]
@@ -123,6 +139,7 @@ paths:
       tags: [Profiles]
       operationId: getUserByUsername
       summary: A public profile, by its handle
+      description: The same answers as getUser, the slim profile and 404 included.
       security: [{}, {bearerAuth: []}]
       parameters:
         - name: username
@@ -221,7 +238,7 @@ paths:
       operationId: getUserInterests
       summary: Someone's picked interests
       description: >
-        Any signed-in user can read anyone's, for their profile. A block doesn't hide them, as it doesn't hide the profile.
+        Any signed-in user can read anyone's, for their profile, except across a block (404).
       responses:
         '200':
           description: Interest keys
@@ -335,6 +352,8 @@ paths:
       tags: [Relations]
       operationId: block
       summary: The caller blocks this user, which ends follows both ways
+      description: >
+        Unblocking doesn't bring the follows back. A block by the other user stays, so two people can block each other.
       responses:
         '204': {description: Blocked}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -403,7 +422,10 @@ components:
     UserProfile:
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests]
+      description: >
+        followersCount, followingCount, bio, createdAt and interests are left out of a blocker's slim profile, and only
+        there.
+      required: [id, username, isFollowing, isBlocked, followsYou]
       properties:
         id: {type: string, format: uuid}
         username: {type: string, maxLength: 32}

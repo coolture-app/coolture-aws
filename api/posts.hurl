@@ -293,3 +293,31 @@ GET {{api}}/posts/{{post}}/friends
 X-User-Id: {{jan}}
 X-User-Name: jan_demo
 HTTP 404
+
+# The start can't move to the past, but an edit may send an unchanged start back, as the edit form always does. (Once
+# an event has ended, Interesuje mnie and Biorę udział are refused too; PostWriteDbTest shows it, since a post can't be
+# created in the past.)
+POST {{api}}/posts
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Koncert w Ergo", "description": "Wieczór z jazzem.", "startsAt": "2030-03-01T19:00:00Z", "type": "ONLINE" }
+HTTP 201
+[Captures]
+dated: jsonpath "$.id"
+
+PATCH {{api}}/posts/{{dated}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Koncert w Ergo Arenie", "startsAt": "2030-03-01T19:00:00Z" }
+HTTP 200
+
+PATCH {{api}}/posts/{{dated}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "startsAt": "2020-03-01T19:00:00Z" }
+HTTP 400
+
+DELETE {{api}}/posts/{{dated}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 204

@@ -82,6 +82,13 @@ FROM (VALUES ('00000000-0000-0000-0000-000000000002'), ('00000000-0000-0000-0000
              ('00000000-0000-0000-0000-000000000004')) AS viewer (id)
 ON CONFLICT DO NOTHING;
 
+-- A block made in the app ends follows both ways, so the follows above don't come back between a blocked pair.
+DELETE FROM user_relations follow
+USING user_relations blk
+WHERE follow.type = 'FOLLOW' AND blk.type = 'BLOCK'
+  AND ((blk.source_user_id = follow.source_user_id AND blk.target_user_id = follow.target_user_id)
+    OR (blk.source_user_id = follow.target_user_id AND blk.target_user_id = follow.source_user_id));
+
 -- Jan lives in Gdynia, so his feed shows the home fallback when the browser gives no position. Only while he has none:
 -- a home changed in the app survives the next `make up`, and a removed one comes back.
 UPDATE users

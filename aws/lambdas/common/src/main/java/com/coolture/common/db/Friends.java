@@ -17,8 +17,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Friends are mutual follows. Following needs no approval, so one-way follows reveal nothing. A block replaces the
- * blocker's follow (one row per pair), so it ends a friendship too.
+ * Friends are mutual follows. Following needs no approval, so one-way follows reveal nothing. A block deletes the follows
+ * both ways, so it ends a friendship too.
  */
 public final class Friends {
 

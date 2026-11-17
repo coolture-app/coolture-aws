@@ -654,6 +654,16 @@ class PostReadDbTest {
     }
 
     @Test
+    void thePostPage_andItsFriendsList_areNotFound_acrossABlock_eitherWay() throws SQLException {
+        for (String title : List.of("by_i_blocked", "by_blocked_me")) {
+            assertTrue(postRepository.findById(postTitled(title), ME).isEmpty(), title);
+            assertTrue(postRepository.findFriends(postTitled(title), ME).isEmpty(), title);
+            assertTrue(postRepository.findById(postTitled(title), null).isPresent(), title + " for a guest");
+            assertTrue(postRepository.findFriends(postTitled(title), null).isPresent(), title + " for a guest");
+        }
+    }
+
+    @Test
     void aStance_isntShownToTheOneWhoTookIt_orToAStranger() throws SQLException {
         UUID friend = UUID.fromString("a0000000-0000-0000-0000-000000000006");
         UUID stranger = UUID.fromString("a0000000-0000-0000-0000-000000000002");

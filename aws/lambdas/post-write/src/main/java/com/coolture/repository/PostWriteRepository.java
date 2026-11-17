@@ -491,7 +491,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!PostQueries.isPostVisible(conn, postId)) {
+                if (!PostQueries.isPostVisible(conn, postId, userId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 if (findReaction(conn, postId, userId).isEmpty()) {
@@ -513,7 +513,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!PostQueries.isPostVisible(conn, postId)) {
+                if (!PostQueries.exists(conn, postId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 if (findReaction(conn, postId, userId).isPresent()) {
@@ -529,7 +529,8 @@ public class PostWriteRepository {
     }
 
     /**
-     * "Nie dla mnie" isn't counted as a participant, and takes back the viewer's like. A changed stance starts its time
+     * "Nie dla mnie" isn't counted as a participant, and takes back the viewer's like. Only it can be set once the event
+     * has ended, since interested and going mean nothing then. A changed stance starts its time
      * again, because the feed reads stances up to a session's start and a changed one must not act on the session it was
      * changed in.
      */
@@ -537,8 +538,11 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!PostQueries.isPostVisible(conn, postId)) {
+                if (!PostQueries.isPostVisible(conn, postId, userId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
+                }
+                if (counted(newType) && PostQueries.hasEnded(conn, postId)) {
+                    throw new IllegalArgumentException("The event has ended");
                 }
                 Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
                 if (oldTypeOpt.isEmpty()) {
@@ -564,7 +568,7 @@ public class PostWriteRepository {
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                if (!PostQueries.isPostVisible(conn, postId)) {
+                if (!PostQueries.exists(conn, postId)) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
                 Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);

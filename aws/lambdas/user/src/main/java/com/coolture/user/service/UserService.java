@@ -66,14 +66,38 @@ public class UserService {
         UserEntity user = userRepository.findById(targetId)
                 .orElseThrow(() -> new IllegalArgumentException("User " + targetId + " not found"));
 
-        return toProfileDto(user, callerId);
+        return profileFor(user, callerId, targetId.toString());
     }
 
     public UserProfileDto getByUsernameForCaller(String username, UUID callerId) throws SQLException {
         UserEntity user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalArgumentException("User " + username + " not found"));
 
+        return profileFor(user, callerId, username);
+    }
+
+    /**
+     * The blocker gets a slim profile so its Odblokuj keeps working; whoever was blocked gets what a missing account
+     * gives. In a mutual block both are blockers.
+     */
+    private UserProfileDto profileFor(UserEntity user, UUID callerId, String asked) throws SQLException {
+        if (callerId != null && !callerId.equals(user.id())) {
+            if (userRepository.isBlocked(callerId, user.id())) {
+                return new UserProfileDto(user.id(), user.username(), user.firstName(), user.lastName(), avatarOf(user.id()),
+                    null, null, null, null, false, true, false, null);
+            }
+            if (userRepository.isBlocked(user.id(), callerId)) {
+                throw new IllegalArgumentException("User " + asked + " not found");
+            }
+        }
         return toProfileDto(user, callerId);
+    }
+
+    /** Someone's followers, following and interests are as hidden across a block as their profile. */
+    private void requireNoBlock(UUID targetUserId, UUID callerId) throws SQLException {
+        if (userRepository.isBlockedEitherDirection(callerId, targetUserId)) {
+            throw new IllegalArgumentException("User " + targetUserId + " not found");
+        }
     }
 
     public UserProfileDto update(UUID targetId, UUID callerId, UserProfileUpdateRequest request) throws SQLException {
@@ -172,6 +196,7 @@ public class UserService {
         if (!userRepository.existsById(targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
         }
+        requireNoBlock(targetUserId, callerId);
         Optional<CursorPayload> payload = CursorCodec.decode(cursor);
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
@@ -187,6 +212,7 @@ public class UserService {
         if (!userRepository.existsById(targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
         }
+        requireNoBlock(targetUserId, callerId);
         Optional<CursorPayload> payload = CursorCodec.decode(cursor);
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
@@ -258,8 +284,9 @@ public class UserService {
         if (userRepository.isBlocked(callerId, targetUserId)) {
             throw new IllegalStateException("Already blocking this user");
         }
+        // One row per direction: the caller's follow gives way to the block, and the other's block, if any, stays.
         userRepository.deleteRelationAny(callerId, targetUserId);
-        userRepository.deleteRelationAny(targetUserId, callerId);
+        userRepository.deleteRelation(targetUserId, callerId, "FOLLOW");
         userRepository.insertRelation(callerId, targetUserId, "BLOCK", Instant.now());
     }
 
@@ -319,23 +346,26 @@ public class UserService {
         return new UserListItemDto(summary, followsYou);
     }
 
-    private UserProfileDto toProfileDto(UserEntity user, UUID callerId) throws SQLException {
-        MediaResourceDto avatar = null;
-        Optional<AvatarRecord> avatarOpt = userRepository.findActiveAvatar(user.id(), false);
-        if (avatarOpt.isPresent()) {
-            AvatarRecord record = avatarOpt.get();
-            String url = s3StorageService.presignGet(record.objectKey());
-            avatar = new MediaResourceDto(
-                    record.id(),
-                    record.purpose(),
-                    record.mimeType(),
-                    record.sizeBytes(),
-                    record.status(),
-                    url,
-                    record.createdAt(),
-                    record.deletedAt()
-            );
+    private MediaResourceDto avatarOf(UUID userId) throws SQLException {
+        Optional<AvatarRecord> avatarOpt = userRepository.findActiveAvatar(userId, false);
+        if (avatarOpt.isEmpty()) {
+            return null;
         }
+        AvatarRecord record = avatarOpt.get();
+        return new MediaResourceDto(
+                record.id(),
+                record.purpose(),
+                record.mimeType(),
+                record.sizeBytes(),
+                record.status(),
+                s3StorageService.presignGet(record.objectKey()),
+                record.createdAt(),
+                record.deletedAt()
+        );
+    }
+
+    private UserProfileDto toProfileDto(UserEntity user, UUID callerId) throws SQLException {
+        MediaResourceDto avatar = avatarOf(user.id());
 
         int followersCount = userRepository.countFollowers(user.id());
         int followingCount = userRepository.countFollowing(user.id());

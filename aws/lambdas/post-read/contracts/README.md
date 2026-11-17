@@ -32,8 +32,10 @@ ended. `POST /posts` and `PATCH /posts/{id}` take `openEnded`; `PATCH` follows m
 the end.
 
 `GET /posts/map` takes the same filters as `/posts`, plus the map bounds (`leftUpper.latitude`, `leftUpper.longitude`,
-`rightBottom.latitude`, `rightBottom.longitude`), and `excludeMine=true` to leave out what the feed leaves out. `GET /posts/{id}`
-doesn't change.
+`rightBottom.latitude`, `rightBottom.longitude`), and `excludeMine=true` to leave out what the feed leaves out.
+
+**One post:** `GET /posts/{id}` and `GET /posts/{postId}/friends` answer 404 when the viewer and the author are a blocked pair,
+the same as for a deleted post, so nothing tells either who blocked whom.
 
 **Friends:** a card's `friendStances` names at most 2 friends per stance and counts the rest. `GET /posts/{postId}/friends`
 lists them all, for the list behind the card's friends line.
