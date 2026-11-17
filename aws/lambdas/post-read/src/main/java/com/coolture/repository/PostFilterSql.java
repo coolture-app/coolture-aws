@@ -1,5 +1,6 @@
 package com.coolture.repository;
 
+import com.coolture.common.db.EventTime;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.dto.PostFeedFilters;
@@ -34,8 +35,8 @@ public final class PostFilterSql {
                           AND """ + Friends.sharingFriend("fs.user_id") + """
         ))
           AND (?::varchar IS NULL OR p.type = ?::varchar)
-          AND (?::timestamptz IS NULL OR p.starts_at >= ?::timestamptz)
-          AND (?::timestamptz IS NULL OR p.starts_at <= ?::timestamptz)
+          AND """ + EventTime.OVERLAPS + """
+
           AND (?::double precision IS NULL
                OR (el.coordinates IS NOT NULL AND ST_DWithin(el.coordinates, """ + POINT + """
         , ?::double precision)))""";
@@ -56,8 +57,7 @@ public final class PostFilterSql {
          .bindNullableUUID(viewer);
 
         b.bindStringFilterPair(f.type() != null ? f.type().name() : null);
-        b.bindTimestampFilterPair(f.startsFrom());
-        b.bindTimestampFilterPair(f.startsTo());
+        EventTime.bindOverlap(b, f.from(), f.to());
 
         boolean radius = hasRadius(f);
         Double meters = radius ? f.radiusKm() * 1000.0 : null;

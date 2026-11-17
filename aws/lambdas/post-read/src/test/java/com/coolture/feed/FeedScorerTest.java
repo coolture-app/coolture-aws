@@ -1,5 +1,6 @@
 package com.coolture.feed;
 
+import com.coolture.common.db.EventTime;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -152,12 +153,53 @@ class FeedScorerTest {
         assertEquals(Math.exp(-1), DEFAULT.score(ended, AS_OF, 7).time(), 1e-12);
     }
 
+    /** As FeedRepository builds the facts of a dated run. */
+    private static FeedScorer.Facts run(Instant start, Instant end, Double similarity) {
+        return new FeedScorer.Facts(UUID.randomUUID(), start, end, 0, similarity, null, 0,
+            EventTime.isStanding(start, end, false));
+    }
+
     @Test
-    void score_whenEventRunsAtAsOf_timeIsAtItsMaximumEvenWithAnEnd() {
-        FeedScorer.Facts running = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.minus(Duration.ofDays(30)),
-            AS_OF.plus(Duration.ofDays(30)), 0, null, null);
+    void score_aThreeWeekRun_runningAtAsOf_hasTheMaximumTime() {
+        FeedScorer.Facts running = run(AS_OF.minus(Duration.ofDays(10)), AS_OF.plus(Duration.ofDays(11)), null);
 
         assertEquals(1.0, DEFAULT.score(running, AS_OF, 7).time());
+    }
+
+    @Test
+    void score_a31DayRun_runningAtAsOf_isCappedAsStanding() {
+        FeedScorer.Facts running = run(AS_OF.minus(Duration.ofDays(1)), AS_OF.plus(Duration.ofDays(30)), null);
+
+        assertEquals(FeedConfig.STANDING_TIME_CAP, DEFAULT.score(running, AS_OF, 7).time());
+    }
+
+    @Test
+    void score_aPostWithNoEndDate_isCapped_whileRunningAndBefore() {
+        Instant start = AS_OF.minus(Duration.ofDays(400));
+        FeedScorer.Facts standing = new FeedScorer.Facts(UUID.randomUUID(), start, null, 0, null, null, 0, true);
+        FeedScorer.Facts tomorrow = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(1)), null, 0,
+            null, null, 0, true);
+
+        assertEquals(FeedConfig.STANDING_TIME_CAP, DEFAULT.score(standing, AS_OF, 7).time());
+        assertEquals(FeedConfig.STANDING_TIME_CAP, DEFAULT.score(tomorrow, AS_OF, 7).time());
+    }
+
+    @Test
+    void score_aStandingEventFarAhead_keepsItsLowerTime() {
+        Instant start = AS_OF.plus(Duration.ofDays(60));
+        FeedScorer.Facts far = new FeedScorer.Facts(UUID.randomUUID(), start, null, 0, null, null, 0, true);
+
+        assertEquals(Math.exp(-2), DEFAULT.score(far, AS_OF, 7).time(), 1e-12);
+    }
+
+    @Test
+    void score_theCapIsSoft_aStrongMatchStillLeads() {
+        FeedScorer scorer = new FeedScorer(NO_JITTER);
+        FeedScorer.Facts exhibition = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.minus(Duration.ofDays(100)), null, 0,
+            FeedConfig.AFFINITY_HIGH, null, 0, true);
+        FeedScorer.Facts concertTonight = run(AS_OF.plus(Duration.ofHours(2)), null, 0.0);
+
+        assertTrue(scorer.score(exhibition, AS_OF, 7).total() > scorer.score(concertTonight, AS_OF, 7).total());
     }
 
     @Test

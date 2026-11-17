@@ -1,5 +1,9 @@
 package com.coolture.feed;
 
+import com.coolture.repository.Upcoming;
+
+import com.coolture.common.pagination.CursorCodec;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -43,12 +47,29 @@ class FeedCursorTest {
 
     @Test
     void upcoming_roundTrips() {
-        FeedCursor cursor = FeedCursor.upcoming(AS_OF, Instant.parse("2026-11-05T19:00:00.654321Z"), ID);
+        Upcoming.Position at = new Upcoming.Position(AS_OF, Instant.parse("2026-11-05T19:00:00.654321Z"), ID,
+            Instant.parse("2026-11-06T22:00:00Z"), UUID.randomUUID(), 7);
+        FeedCursor cursor = FeedCursor.upcoming(at);
 
         FeedCursor decoded = FeedCursor.decode(cursor.encode()).orElseThrow();
 
         assertEquals(cursor, decoded);
+        assertEquals(at, decoded.position());
         assertFalse(decoded.ranked());
+    }
+
+    @Test
+    void upcoming_keepsARunningPostWithNoEndDate_andAStreamThatGaveNothingYet() {
+        Upcoming.Position at = new Upcoming.Position(AS_OF, null, null, null, ID, 5);
+
+        assertEquals(at, FeedCursor.decode(FeedCursor.upcoming(at).encode()).orElseThrow().position());
+    }
+
+    @Test
+    void upcoming_withoutACount_isRejected() {
+        String raw = CursorCodec.encode(new FeedCursor(1, "U", AS_OF, null, null, ID, null, null, AS_OF, null, null, null));
+
+        assertThrows(IllegalArgumentException.class, () -> FeedCursor.decode(raw));
     }
 
     @Test

@@ -11,6 +11,7 @@ import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.repository.PostFilterSql;
 import com.coolture.repository.PostSql;
+import com.coolture.repository.Upcoming;
 
 import java.sql.Array;
 import java.sql.Connection;
@@ -59,7 +60,8 @@ public class FeedRepository {
         )
         SELECT p.id,
                p.starts_at,
-        """ + "       " + EventTime.END + " AS ends_at,\n" + """
+               p.ends_at,
+               p.open_ended,
                COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0) AS engagement,
                1 - (c.centred <=> ?::vector) AS similarity,
                (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
@@ -250,14 +252,18 @@ public class FeedRepository {
             List<FeedScorer.Facts> candidates = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
+                    Instant startsAt = ResultSetMappers.mapInstant(rs, "starts_at");
+                    Instant endsAt = ResultSetMappers.mapInstant(rs, "ends_at");
+                    boolean openEnded = rs.getBoolean("open_ended");
                     candidates.add(new FeedScorer.Facts(
                         (UUID) rs.getObject("id"),
-                        ResultSetMappers.mapInstant(rs, "starts_at"),
-                        ResultSetMappers.mapInstant(rs, "ends_at"),
+                        startsAt,
+                        EventTime.end(startsAt, endsAt, openEnded),
                         rs.getInt("engagement"),
                         (Double) rs.getObject("similarity"),
                         (Double) rs.getObject("meters"),
-                        nearMark((Double) rs.getObject("near_mark"))
+                        nearMark((Double) rs.getObject("near_mark")),
+                        EventTime.isStanding(startsAt, endsAt, openEnded)
                     ));
                 }
             }
@@ -270,30 +276,38 @@ public class FeedRepository {
         return value == null || value.isNaN() ? 0 : value;
     }
 
-    /** The fallback order: soonest first, continuing after the given start time and id when they're set. */
-    public List<PostCardDto> findUpcoming(UUID viewer, Instant asOf, PostFeedFilters filters,
-                                          Instant afterStartsAt, UUID afterId, int limit) throws SQLException {
-        boolean continues = afterStartsAt != null;
+    /** The fallback order, Nadchodzące's (Upcoming), from the given position. */
+    public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            List<PostCardDto> dated = findUpcomingStream(conn, viewer, filters, Upcoming.Stream.DATED, at, limit + 1);
+            List<PostCardDto> running = findUpcomingStream(conn, viewer, filters, Upcoming.Stream.RUNNING, at, limit + 1);
+            Upcoming.Page page = Upcoming.merge(dated, running, at, limit);
+            return page.withItems(Friends.withFriendStances(conn, viewer, MediaQueries.withPhotos(conn, page.items())));
+        }
+    }
+
+    private static List<PostCardDto> findUpcomingStream(Connection conn, UUID viewer, PostFeedFilters filters,
+                                                        Upcoming.Stream stream, Upcoming.Position at, int limit) throws SQLException {
         String sql = PostSql.CARD_SELECT
             + "WHERE " + feedRules(false)
-            + (continues ? "  AND (p.starts_at, p.id) > (?::timestamptz, ?::uuid)\n" : "")
-            + "ORDER BY p.starts_at ASC, p.id ASC\n"
+            + stream.sql(at)
             + "LIMIT ?";
 
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             ParamBinder b = new ParamBinder(stmt, conn);
             b.bindNullableUUID(viewer)
              .bindNullableUUID(viewer);
-            bindRules(b, viewer, asOf, filters);
-            if (continues) {
-                b.bindTimestamp(afterStartsAt)
-                 .bindUUID(afterId);
-            }
+            bindRules(b, viewer, at.asOf(), filters);
+            stream.bind(b, at, filters.from());
             b.bindInt(limit);
 
-            return readCards(stmt, viewer);
+            List<PostCardDto> cards = new ArrayList<>();
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    cards.add(ResultSetMappers.mapPostCard(rs));
+                }
+            }
+            return cards;
         }
     }
 

@@ -69,7 +69,7 @@ class ContractTest {
         return new PostCardDto(
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, Instant.now(), 0, 0),
-            null, "Koncert", null, null, Instant.now(), null, List.of(),
+            null, "Koncert", null, null, Instant.now(), null, false, List.of(),
             0, 0, 0, 0, 0, PostType.ONLINE, PostStatus.ACTIVE,
             Instant.now(), null, null, null, null, null, null, null
         );
@@ -86,7 +86,7 @@ class ContractTest {
         return new PostCardDto(
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", "Anna", "Nowak", avatar, now, 1, 2),
-            location, "Koncert", "Opis", "https://example.com", now, now.plusSeconds(60), List.of("jazz"),
+            location, "Koncert", "Opis", "https://example.com", now, now.plusSeconds(60), false, List.of("jazz"),
             1, 3, 2, 1, 4, PostType.OFFLINE, PostStatus.EDITED,
             now, now, null, cover, ReactionType.LIKE, ParticipationType.TAKES_PART, List.of(cover), friendStances()
         );
@@ -147,9 +147,9 @@ class ContractTest {
     void postMap_matches() throws Exception {
         when(posts.getMapMarks(any(), any(), any(), anyBoolean())).thenReturn(List.of(
             new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"),
-                Instant.parse("2026-12-01T21:00:00Z"), "http://localhost/c.png", "Koncert w hali.", 3, 7, 5, new GeoPointDto(54.35, 18.65),
+                Instant.parse("2026-12-01T21:00:00Z"), false, "http://localhost/c.png", "Koncert w hali.", 3, 7, 5, new GeoPointDto(54.35, 18.65),
                 "Hala", "Gdańsk", ReactionType.LIKE, ParticipationType.INTERESTED, friendStances()),
-            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"), null, null, null, 0, 0, 0, new GeoPointDto(54.35, 18.65), null, null, null, null, null)));
+            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"), null, false, null, null, 0, 0, 0, new GeoPointDto(54.35, 18.65), null, null, null, null, null)));
 
         assertMatches(responseReport("/posts/map", ApiGatewayEvents.get("/posts/map", Map.of(
             "leftUpper.latitude", "54.5", "leftUpper.longitude", "18.0",

@@ -9,11 +9,15 @@ import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.pagination.CursorCodec;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.CursorPayload;
+import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.repository.PostReadRepository;
 import com.coolture.repository.PostSort;
 import com.coolture.repository.PostsCursor;
+import com.coolture.repository.Upcoming;
 
 import java.sql.SQLException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -48,6 +52,14 @@ public class PostReadService {
         PostsCursor keyset = PostsCursor.decode(cursor, sort).orElse(null);
 
         int effectiveLimit = clampLimit(limit);
+        if (sort == PostSort.UPCOMING) {
+            Upcoming.Position at = keyset != null
+                ? keyset.position()
+                : Upcoming.Position.start(Instant.now().truncatedTo(ChronoUnit.MILLIS));
+            Upcoming.Page page = repository.findUpcoming(filters, callerId, at, effectiveLimit);
+            String next = page.hasMore() ? PostsCursor.upcoming(page.next()) : null;
+            return new CursorPage<>(page.items(), new PaginationMeta(effectiveLimit, page.hasMore(), next));
+        }
         List<PostCardDto> rows = repository.findFeed(filters, sort, callerId, keyset, effectiveLimit + 1);
 
         return CursorPage.of(rows, effectiveLimit, card -> PostsCursor.after(sort, card));

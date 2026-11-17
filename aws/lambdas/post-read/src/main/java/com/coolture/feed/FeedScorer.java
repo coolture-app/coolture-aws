@@ -16,12 +16,17 @@ public final class FeedScorer {
 
     /**
      * Null similarity means no vector for the viewer or the post, or vectors of different models. Null meters means no
-     * location or an online post. endsAt is the event's end (its own, or the default length); null means not ended.
-     * nearMark is 0 to 1: how far past NOT_FOR_ME_FROM the post is to its closest "Nie dla mnie" mark, that mark's fade
-     * included (FeedRepository).
+     * location or an online post. endsAt is the event's end (EventTime.end); null means it never ends. nearMark is 0 to
+     * 1: how far past NOT_FOR_ME_FROM the post is to its closest "Nie dla mnie" mark, that mark's fade included
+     * (FeedRepository). standing is EventTime.isStanding.
      */
     public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
-                        double nearMark) {
+                        double nearMark, boolean standing) {
+
+        public Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
+                     double nearMark) {
+            this(id, startsAt, endsAt, engagement, similarity, meters, nearMark, false);
+        }
 
         public Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters) {
             this(id, startsAt, endsAt, engagement, similarity, meters, 0);
@@ -50,6 +55,9 @@ public final class FeedScorer {
             ? FeedConfig.NEUTRAL
             : StrictMath.exp(-facts.meters() / FeedConfig.PROXIMITY_SCALE_METERS);
         double time = time(facts.startsAt(), facts.endsAt(), asOf);
+        if (facts.standing()) {
+            time = StrictMath.min(time, FeedConfig.STANDING_TIME_CAP);
+        }
         double popularity = StrictMath.min(StrictMath.log(1.0 + StrictMath.max(facts.engagement(), 0)) / POPULARITY_SCALE, 1.0);
         double jitter = jitter(facts.id(), seed);
 
