@@ -361,14 +361,15 @@ class UserServiceTest {
     }
 
     @Test
-    void block_clearsRelationsBothWays_andInsertsBlock() throws SQLException {
+    void block_endsFollowsBothWays_keepsTheOthersBlock_andInsertsBlock() throws SQLException {
         when(repository.existsById(USER_ID)).thenReturn(true);
         when(repository.isBlocked(CALLER_ID, USER_ID)).thenReturn(false);
 
         service.block(CALLER_ID, USER_ID);
 
         verify(repository).deleteRelationAny(CALLER_ID, USER_ID);
-        verify(repository).deleteRelationAny(USER_ID, CALLER_ID);
+        verify(repository).deleteRelation(USER_ID, CALLER_ID, "FOLLOW");
+        verify(repository, never()).deleteRelationAny(USER_ID, CALLER_ID);
         verify(repository).insertRelation(eq(CALLER_ID), eq(USER_ID), eq("BLOCK"), any());
     }
 
@@ -379,5 +380,45 @@ class UserServiceTest {
 
         assertThrows(IllegalArgumentException.class, () -> service.unblock(CALLER_ID, USER_ID));
     }
-}
 
+    @Test
+    void getByIdForCaller_givesTheBlockerASlimProfile() throws SQLException {
+        var user = new UserEntity(USER_ID, "testuser", "Jan", "Kowalski", "Bio", Instant.now());
+        when(repository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(repository.isBlocked(CALLER_ID, USER_ID)).thenReturn(true);
+        when(repository.findActiveAvatar(USER_ID, false)).thenReturn(Optional.empty());
+
+        UserProfileDto profile = service.getByIdForCaller(USER_ID, CALLER_ID);
+
+        assertTrue(profile.isBlocked());
+        assertEquals("testuser", profile.username());
+        assertEquals("Jan", profile.firstName());
+        assertNull(profile.followersCount());
+        assertNull(profile.followingCount());
+        assertNull(profile.bio());
+        assertNull(profile.interests());
+        verify(repository, never()).findInterestKeys(any());
+    }
+
+    @Test
+    void getByUsernameForCaller_isNotFound_forWhoeverWasBlocked() throws SQLException {
+        var user = new UserEntity(USER_ID, "testuser", "Jan", "Kowalski", "Bio", Instant.now());
+        when(repository.findByUsername("testuser")).thenReturn(Optional.of(user));
+        when(repository.isBlocked(USER_ID, CALLER_ID)).thenReturn(true);
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> service.getByUsernameForCaller("testuser", CALLER_ID));
+
+        assertTrue(e.getMessage().contains("not found"));
+    }
+
+    @Test
+    void getFollowersAndFollowing_areNotFound_acrossABlock() throws SQLException {
+        when(repository.existsById(USER_ID)).thenReturn(true);
+        when(repository.isBlockedEitherDirection(CALLER_ID, USER_ID)).thenReturn(true);
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFollowers(USER_ID, CALLER_ID, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFollowing(USER_ID, CALLER_ID, null, 20));
+        verify(repository, never()).findFollowers(any(), any(), any(), any(), anyInt());
+    }
+}
