@@ -205,7 +205,7 @@ class PostReadServiceTest {
         assertEquals(new PostsCursor(sort, last.id(),
             sort == PostSort.RECENT ? last.createdAt() : null,
             sort == PostSort.POPULAR ? last.positiveReactionCount() : null,
-            null, null, null, null, null), cursor.getValue());
+            null), cursor.getValue());
     }
 
     @Test

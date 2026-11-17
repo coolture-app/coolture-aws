@@ -278,36 +278,13 @@ public class FeedRepository {
 
     /** The fallback order, Nadchodzące's (Upcoming), from the given position. */
     public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            List<PostCardDto> dated = findUpcomingStream(conn, viewer, filters, Upcoming.Stream.DATED, at, limit + 1);
-            List<PostCardDto> running = findUpcomingStream(conn, viewer, filters, Upcoming.Stream.RUNNING, at, limit + 1);
-            Upcoming.Page page = Upcoming.merge(dated, running, at, limit);
-            return page.withItems(Friends.withFriendStances(conn, viewer, MediaQueries.withPhotos(conn, page.items())));
-        }
-    }
-
-    private static List<PostCardDto> findUpcomingStream(Connection conn, UUID viewer, PostFeedFilters filters,
-                                                        Upcoming.Stream stream, Upcoming.Position at, int limit) throws SQLException {
-        String sql = PostSql.CARD_SELECT
-            + "WHERE " + feedRules(false)
-            + stream.sql(at)
-            + "LIMIT ?";
-
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ParamBinder b = new ParamBinder(stmt, conn);
+        Upcoming.Query query = new Upcoming.Query(PostSql.CARD_SELECT + "WHERE " + feedRules(false), b -> {
             b.bindNullableUUID(viewer)
              .bindNullableUUID(viewer);
             bindRules(b, viewer, at.asOf(), filters);
-            stream.bind(b, at, filters.from());
-            b.bindInt(limit);
-
-            List<PostCardDto> cards = new ArrayList<>();
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    cards.add(ResultSetMappers.mapPostCard(rs));
-                }
-            }
-            return cards;
+        });
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Upcoming.find(conn, query, viewer, filters.from(), at, limit);
         }
     }
 

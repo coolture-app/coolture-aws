@@ -54,7 +54,7 @@ public class PostReadService {
         int effectiveLimit = clampLimit(limit);
         if (sort == PostSort.UPCOMING) {
             Upcoming.Position at = keyset != null
-                ? keyset.position()
+                ? keyset.upcoming()
                 : Upcoming.Position.start(Instant.now().truncatedTo(ChronoUnit.MILLIS));
             Upcoming.Page page = repository.findUpcoming(filters, callerId, at, effectiveLimit);
             String next = page.hasMore() ? PostsCursor.upcoming(page.next()) : null;

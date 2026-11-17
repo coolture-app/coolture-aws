@@ -66,8 +66,8 @@ class FeedCursorTest {
     }
 
     @Test
-    void upcoming_withoutACount_isRejected() {
-        String raw = CursorCodec.encode(new FeedCursor(1, "U", AS_OF, null, null, ID, null, null, AS_OF, null, null, null));
+    void upcoming_withoutAPosition_isRejected() {
+        String raw = CursorCodec.encode(new FeedCursor(1, "U", AS_OF, null, null, ID, null, null, null));
 
         assertThrows(IllegalArgumentException.class, () -> FeedCursor.decode(raw));
     }

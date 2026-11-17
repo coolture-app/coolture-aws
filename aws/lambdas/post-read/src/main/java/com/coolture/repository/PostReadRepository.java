@@ -87,39 +87,22 @@ public class PostReadRepository {
 
     /** Nadchodzące. Never an ended event, even with includePast or a date. */
     public Upcoming.Page findUpcoming(PostFeedFilters f, UUID callerId, Upcoming.Position at, int limit) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            List<PostCardDto> dated = findUpcomingStream(conn, f, callerId, Upcoming.Stream.DATED, at, limit + 1);
-            List<PostCardDto> running = findUpcomingStream(conn, f, callerId, Upcoming.Stream.RUNNING, at, limit + 1);
-            Upcoming.Page page = Upcoming.merge(dated, running, at, limit);
-            return page.withItems(Friends.withFriendStances(conn, callerId, MediaQueries.withPhotos(conn, page.items())));
-        }
-    }
-
-    private List<PostCardDto> findUpcomingStream(Connection conn, PostFeedFilters f, UUID callerId, Upcoming.Stream stream,
-                                                 Upcoming.Position at, int limit) throws SQLException {
         String sql = PostSql.CARD_SELECT
             + "WHERE p.deleted_at IS NULL\n"
             + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + PostSql.NOT_ENDED + "\n"
-            + "  AND " + PARTICIPATION_AND_REACTION + "\n"
-            + stream.sql(at)
-            + "LIMIT ?";
-
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            ParamBinder b = new ParamBinder(stmt, conn);
+            + "  AND " + PARTICIPATION_AND_REACTION + "\n";
+        Upcoming.Query query = new Upcoming.Query(sql, b -> {
             b.bindUUID(callerId)
              .bindUUID(callerId);
             PostFilterSql.bind(b, f, callerId);
             b.bindNullableUUID(callerId)
              .bindNullableUUID(callerId);
             bindParticipationAndReaction(b, f, callerId);
-            stream.bind(b, at, f.from());
-            b.bindInt(limit);
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                return mapPostCardList(rs);
-            }
+        });
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Upcoming.find(conn, query, callerId, f.from(), at, limit);
         }
     }
 
