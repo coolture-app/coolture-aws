@@ -119,17 +119,23 @@ class PostWriteDbTest {
         execute("UPDATE posts SET ends_at = starts_at + interval '2 hours', event_url = 'https://example.com' WHERE id = '" + POST + "'");
         UpdatePostRequest title = new UpdatePostRequest("still a stance test", null, null, null, null, null, null, null, null, null, null);
 
-        PostDetailDto standing = repository.updatePost(POST, AUTHOR, repository.findById(POST).orElseThrow(), title,
-            new PostWriteRepository.Removable(null, null, true));
+        PostWriteRepository.ExistingPost existing = repository.findById(POST).orElseThrow();
+        PostDetailDto standing = repository.updatePost(POST, AUTHOR, existing, title, ending(existing, null, true));
         assertTrue(standing.openEnded());
         assertNull(standing.endsAt());
         assertNull(standing.eventUrl());
 
         Instant end = Instant.parse("2040-01-01T21:00:00Z");
-        PostDetailDto dated = repository.updatePost(POST, AUTHOR, repository.findById(POST).orElseThrow(), title,
-            new PostWriteRepository.Removable(null, end, false));
+        existing = repository.findById(POST).orElseThrow();
+        PostDetailDto dated = repository.updatePost(POST, AUTHOR, existing, title, ending(existing, end, false));
         assertFalse(dated.openEnded());
         assertEquals(end, dated.endsAt());
+    }
+
+    /** The saved post with no link and the given end. */
+    private static PostWriteRepository.Fields ending(PostWriteRepository.ExistingPost post, Instant endsAt, boolean openEnded) {
+        return new PostWriteRepository.Fields(post.title(), post.description(), null, post.type(), post.startsAt(), endsAt,
+            openEnded);
     }
 
     private static String stance() throws SQLException {

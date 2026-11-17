@@ -202,7 +202,7 @@ class PostWriteServiceTest {
             "New Title", null, null, null, null, null, null, null, null, null, null
         );
 
-        SecurityException ex = assertThrows(SecurityException.class, () -> service.updatePost(postId, otherUser, req));
+        SecurityException ex = assertThrows(SecurityException.class, () -> service.updatePost(postId, otherUser, req, Set.of()));
         assertTrue(ex.getMessage().contains("Only the author can modify this post"));
     }
 
@@ -222,7 +222,7 @@ class PostWriteServiceTest {
             "New Title", null, null, null, null, null, null, null, null, null, null
         );
 
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req, Set.of()));
         assertTrue(ex.getMessage().contains("Post not found"));
     }
 
@@ -359,7 +359,7 @@ class PostWriteServiceTest {
         when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
             .thenReturn(mock(com.coolture.common.dto.PostDetailDto.class));
 
-        var result = service.updatePost(postId, authorId, req);
+        var result = service.updatePost(postId, authorId, req, Set.of());
 
         assertNotNull(result);
         verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any());
@@ -386,7 +386,7 @@ class PostWriteServiceTest {
         when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
             .thenReturn(mock(com.coolture.common.dto.PostDetailDto.class));
 
-        service.updatePost(postId, authorId, req);
+        service.updatePost(postId, authorId, req, Set.of());
 
         verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any());
     }
@@ -401,7 +401,7 @@ class PostWriteServiceTest {
             null, null, null, null, null, null, null, PostType.ONLINE, existing.location(), null, null
         );
 
-        assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req));
+        assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req, Set.of()));
     }
 
     @Test
@@ -449,7 +449,7 @@ class PostWriteServiceTest {
         PostDetailDto updated = postDetail(postId, "New Title", "Desc", List.of());
         when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
 
-        service.updatePost(postId, authorId, req);
+        service.updatePost(postId, authorId, req, Set.of());
 
         verify(embeddingPublisher).requestPost(postId);
     }
@@ -467,7 +467,7 @@ class PostWriteServiceTest {
         PostDetailDto updated = postDetail(postId, "Title", "Desc", null);
         when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
 
-        service.updatePost(postId, authorId, req);
+        service.updatePost(postId, authorId, req, Set.of());
 
         verifyNoInteractions(embeddingPublisher);
     }
@@ -491,15 +491,18 @@ class PostWriteServiceTest {
 
     // ===== No end date and merge-patch =====
 
-    private PostWriteRepository.Removable savedEnd(UUID postId, UUID authorId, PostWriteRepository.ExistingPost existing,
-                                                   UpdatePostRequest req, Set<String> removed) throws SQLException {
+    /** What these tests check of the saved fields. */
+    private record End(String eventUrl, Instant endsAt, boolean openEnded) {}
+
+    private End savedEnd(UUID postId, UUID authorId, PostWriteRepository.ExistingPost existing,
+                         UpdatePostRequest req, Set<String> removed) throws SQLException {
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
         when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
             .thenReturn(postDetail(postId, existing.title(), existing.description(), existing.tags()));
         service.updatePost(postId, authorId, req, removed);
-        var saved = org.mockito.ArgumentCaptor.forClass(PostWriteRepository.Removable.class);
+        var saved = org.mockito.ArgumentCaptor.forClass(PostWriteRepository.Fields.class);
         verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), saved.capture());
-        return saved.getValue();
+        return new End(saved.getValue().eventUrl(), saved.getValue().endsAt(), saved.getValue().openEnded());
     }
 
     private static PostWriteRepository.ExistingPost withEnd(UUID postId, UUID authorId, Instant endsAt, boolean openEnded) {
@@ -527,7 +530,7 @@ class PostWriteServiceTest {
         when(repository.findById(postId)).thenReturn(Optional.of(withEnd(postId, authorId, null, false)));
 
         assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId,
-            patch(null, Instant.parse("2030-01-15T21:00:00Z"), true)));
+            patch(null, Instant.parse("2030-01-15T21:00:00Z"), true), Set.of()));
     }
 
     @Test
@@ -536,10 +539,10 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         Instant end = Instant.parse("2030-01-15T21:00:00Z");
 
-        PostWriteRepository.Removable saved = savedEnd(postId, authorId, withEnd(postId, authorId, end, false),
+        End saved = savedEnd(postId, authorId, withEnd(postId, authorId, end, false),
             patch(null, null, null), Set.of());
 
-        assertEquals(new PostWriteRepository.Removable("https://example.com", end, false), saved);
+        assertEquals(new End("https://example.com", end, false), saved);
     }
 
     @Test
@@ -547,11 +550,11 @@ class PostWriteServiceTest {
         UUID postId = UUID.randomUUID();
         UUID authorId = UUID.randomUUID();
 
-        PostWriteRepository.Removable saved = savedEnd(postId, authorId,
+        End saved = savedEnd(postId, authorId,
             withEnd(postId, authorId, Instant.parse("2030-01-15T21:00:00Z"), false),
             patch(null, null, null), Set.of("endsAt", "eventUrl"));
 
-        assertEquals(new PostWriteRepository.Removable(null, null, false), saved);
+        assertEquals(new End(null, null, false), saved);
     }
 
     @Test
@@ -559,11 +562,11 @@ class PostWriteServiceTest {
         UUID postId = UUID.randomUUID();
         UUID authorId = UUID.randomUUID();
 
-        PostWriteRepository.Removable saved = savedEnd(postId, authorId,
+        End saved = savedEnd(postId, authorId,
             withEnd(postId, authorId, Instant.parse("2030-01-15T21:00:00Z"), false),
             patch(null, null, true), Set.of());
 
-        assertEquals(new PostWriteRepository.Removable("https://example.com", null, true), saved);
+        assertEquals(new End("https://example.com", null, true), saved);
     }
 
     @Test
@@ -572,10 +575,10 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         Instant end = Instant.parse("2030-01-16T21:00:00Z");
 
-        PostWriteRepository.Removable saved = savedEnd(postId, authorId, withEnd(postId, authorId, null, true),
+        End saved = savedEnd(postId, authorId, withEnd(postId, authorId, null, true),
             patch(null, end, null), Set.of());
 
-        assertEquals(new PostWriteRepository.Removable("https://example.com", end, false), saved);
+        assertEquals(new End("https://example.com", end, false), saved);
     }
 
     @Test
@@ -583,9 +586,9 @@ class PostWriteServiceTest {
         UUID postId = UUID.randomUUID();
         UUID authorId = UUID.randomUUID();
 
-        PostWriteRepository.Removable saved = savedEnd(postId, authorId, withEnd(postId, authorId, null, true),
+        End saved = savedEnd(postId, authorId, withEnd(postId, authorId, null, true),
             patch("https://new.example.com", null, null), Set.of());
 
-        assertEquals(new PostWriteRepository.Removable("https://new.example.com", null, true), saved);
+        assertEquals(new End("https://new.example.com", null, true), saved);
     }
 }

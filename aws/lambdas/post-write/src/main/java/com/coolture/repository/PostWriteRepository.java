@@ -198,20 +198,21 @@ public class PostWriteRepository {
         }
     }
 
-    /** The fields a PATCH can remove, as the service resolved them from the request and the saved post. */
-    public record Removable(String eventUrl, Instant endsAt, boolean openEnded) {}
+    /** A post's fields after an edit, as the service resolved them from the request and the saved post. */
+    public record Fields(String title, String description, String eventUrl, PostType type, Instant startsAt,
+                         Instant endsAt, boolean openEnded) {}
 
+    /** The place and photos come from the request; every other field from fields. */
     public PostDetailDto updatePost(UUID postId, UUID callerId, ExistingPost existing, UpdatePostRequest req,
-                                    Removable removable) throws SQLException {
+                                    Fields fields) throws SQLException {
         Instant now = Instant.now();
-        PostType newType = req.type() != null ? req.type() : existing.type();
         UUID effectiveLocationId = existing.eventLocationId();
 
         try (Connection conn = DatabaseConfig.getConnection()) {
             conn.setAutoCommit(false);
             try {
                 // 1. Handle Location updates
-                if (newType == PostType.ONLINE) {
+                if (fields.type() == PostType.ONLINE) {
                     effectiveLocationId = null;
                 } else if (req.location() != null) {
                     if (existing.eventLocationId() == null) {
@@ -250,9 +251,9 @@ public class PostWriteRepository {
                 """;
                 try (PreparedStatement stmt = conn.prepareStatement(updatePostSql)) {
                     ParamBinder b = new ParamBinder(stmt, conn);
-                    b.bindString(req.title() != null ? req.title() : existing.title())
-                     .bindString(req.description() != null ? req.description() : existing.description())
-                     .bindString(removable.eventUrl());
+                    b.bindString(fields.title())
+                     .bindString(fields.description())
+                     .bindString(fields.eventUrl());
 
                     List<String> effectiveTags = req.tags() != null ? req.tags() : existing.tags();
                     if (effectiveTags != null && !effectiveTags.isEmpty()) {
@@ -261,11 +262,11 @@ public class PostWriteRepository {
                         b.bindVarcharArray(null);
                     }
 
-                    b.bindString(newType.name())
+                    b.bindString(fields.type().name())
                      .bindObject(effectiveLocationId)
-                     .bindTimestamp(req.startsAt() != null ? req.startsAt() : existing.startsAt())
-                     .bindTimestamp(removable.endsAt())
-                     .bindBoolean(removable.openEnded())
+                     .bindTimestamp(fields.startsAt())
+                     .bindTimestamp(fields.endsAt())
+                     .bindBoolean(fields.openEnded())
                      .bindTimestamp(now)
                      .bindUUID(postId);
                     stmt.executeUpdate();

@@ -54,10 +54,6 @@ public class PostWriteService {
         return created;
     }
 
-    public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req) throws SQLException {
-        return updatePost(postId, callerId, req, Set.of());
-    }
-
     /**
      * Merge-patch: a field left out of the request keeps its value, and one in removed (sent as null) loses it. Only
      * endsAt and eventUrl can be removed; a null in any other field keeps it.
@@ -103,8 +99,11 @@ public class PostWriteService {
             }
         }
 
-        PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave,
-            new PostWriteRepository.Removable(newEventUrl, newEndsAt, openEnded));
+        PostWriteRepository.Fields fields = new PostWriteRepository.Fields(
+            req.title() != null ? req.title() : existing.title(),
+            req.description() != null ? req.description() : existing.description(),
+            newEventUrl, newType, newStartsAt, newEndsAt, openEnded);
+        PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave, fields);
         if (embeddedContentChanged(existing, updated)) {
             embeddingPublisher.requestPost(updated.id());
         }
