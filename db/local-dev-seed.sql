@@ -44,11 +44,19 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = picks.user_id::uuid);
 
 -- Anna and Jan follow each other, so they're friends and see each other's stances. Ola and Jan follow one way.
-INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
-    ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003', 'FOLLOW'),
-    ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000002', 'FOLLOW'),
-    ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000004', 'FOLLOW'),
-    ('00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000002', 'FOLLOW')
+-- A block made in the app ends follows both ways, so the follows here and below leave out a blocked pair.
+INSERT INTO user_relations (source_user_id, target_user_id, type)
+SELECT follow.source_user_id, follow.target_user_id, 'FOLLOW'
+FROM (VALUES
+    ('00000000-0000-0000-0000-000000000002'::uuid, '00000000-0000-0000-0000-000000000003'::uuid),
+    ('00000000-0000-0000-0000-000000000003'::uuid, '00000000-0000-0000-0000-000000000002'::uuid),
+    ('00000000-0000-0000-0000-000000000003'::uuid, '00000000-0000-0000-0000-000000000004'::uuid),
+    ('00000000-0000-0000-0000-000000000004'::uuid, '00000000-0000-0000-0000-000000000002'::uuid)
+) AS follow (source_user_id, target_user_id)
+WHERE NOT EXISTS (SELECT 1 FROM user_relations blk
+                  WHERE blk.type = 'BLOCK'
+                    AND ((blk.source_user_id = follow.source_user_id AND blk.target_user_id = follow.target_user_id)
+                      OR (blk.source_user_id = follow.target_user_id AND blk.target_user_id = follow.source_user_id)))
 ON CONFLICT DO NOTHING;
 
 -- Friends for Anna, Jan and Ola, so a card's friends line can be seen in every shape. `make seed-friends` gives them
@@ -67,7 +75,9 @@ INSERT INTO users (id, username, first_name, last_name, share_stances) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO user_relations (source_user_id, target_user_id, type)
-SELECT pair.source_user_id::uuid, pair.target_user_id::uuid, 'FOLLOW'
+SELECT source_user_id, target_user_id, 'FOLLOW'
+FROM (
+SELECT pair.source_user_id::uuid AS source_user_id, pair.target_user_id::uuid AS target_user_id
 FROM (VALUES ('00000000-0000-0000-0000-000000000002'), ('00000000-0000-0000-0000-000000000003'),
              ('00000000-0000-0000-0000-000000000004')) AS viewer (id)
 CROSS JOIN (VALUES ('00000000-0000-0000-0000-000000000005'), ('00000000-0000-0000-0000-000000000006'),
@@ -77,9 +87,14 @@ CROSS JOIN (VALUES ('00000000-0000-0000-0000-000000000005'), ('00000000-0000-000
     AS friend (id)
 CROSS JOIN LATERAL (VALUES (viewer.id, friend.id), (friend.id, viewer.id)) AS pair (source_user_id, target_user_id)
 UNION ALL
-SELECT '00000000-0000-0000-0000-000000000013'::uuid, viewer.id::uuid, 'FOLLOW'
+SELECT '00000000-0000-0000-0000-000000000013'::uuid, viewer.id::uuid
 FROM (VALUES ('00000000-0000-0000-0000-000000000002'), ('00000000-0000-0000-0000-000000000003'),
              ('00000000-0000-0000-0000-000000000004')) AS viewer (id)
+) AS follow
+WHERE NOT EXISTS (SELECT 1 FROM user_relations blk
+                  WHERE blk.type = 'BLOCK'
+                    AND ((blk.source_user_id = follow.source_user_id AND blk.target_user_id = follow.target_user_id)
+                      OR (blk.source_user_id = follow.target_user_id AND blk.target_user_id = follow.source_user_id)))
 ON CONFLICT DO NOTHING;
 
 -- Jan lives in Gdynia, so his feed shows the home fallback when the browser gives no position. Only while he has none:
