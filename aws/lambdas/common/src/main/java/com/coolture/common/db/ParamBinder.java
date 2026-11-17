@@ -116,16 +116,6 @@ public class ParamBinder {
     }
 
     /**
-     * Binds the same varchar array twice — for the pattern:
-     * (?::varchar[] IS NULL OR column && ?::varchar[])
-     */
-    public ParamBinder bindVarcharArrayFilterPair(String[] values) throws SQLException {
-        bindVarcharArray(values);
-        bindVarcharArray(values);
-        return this;
-    }
-
-    /**
      * Binds the same UUID twice — for the pattern:
      * (?::uuid IS NULL OR column = ?::uuid)
      */
