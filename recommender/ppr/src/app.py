@@ -134,24 +134,19 @@ def _hidden(user_index: dict[UUID, int], event_index: dict[UUID, int], authors: 
 
 
 def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | None:
-    """What the app knew at as_of, the database's now by default. None when there are no events or no interests with
-    vectors of EMBEDDING_MODEL. An earlier as_of is approximate: interest picks have no time, a changed stance keeps
-    only its latest time, and removed stances, follows and edited posts leave no trace."""
+    """What the app knew at as_of, the database's now by default. None when no event has a vector of EMBEDDING_MODEL.
+    An earlier as_of is approximate: a changed stance keeps only its latest time, and removed stances, follows and
+    edited posts leave no trace."""
     if as_of is None:
         (as_of,) = conn.execute("SELECT now()").fetchone()
     assert as_of.tzinfo, "a naive as_of would be read in the session's time zone"
     at = {"as_of": as_of, "model": EMBEDDING_MODEL, "max_age_days": STANCE_MAX_AGE_DAYS, "types": list(STANCE_WEIGHTS)}
     (average,) = conn.execute(POST_AVERAGE, at).fetchone()
     events = conn.execute(EVENTS, at).fetchall()
-    interests = conn.execute(
-        "SELECT interest_key, vector_send(embedding) FROM interest_embeddings WHERE model = %s ORDER BY interest_key",
-        (EMBEDDING_MODEL,)).fetchall()
-    if average is None or not events or not interests:
+    if average is None or not events:
         return None
     event_ids, event_vectors, not_ended, authors, venues = zip(*events)
-    interest_keys, interest_vectors = zip(*interests)
 
-    picks = conn.execute("SELECT user_id, interest_key FROM user_interests").fetchall()
     stances = conn.execute(STANCES, at).fetchall()
     relations = conn.execute(RELATIONS, at).fetchall()
     sharing = {u for (u,) in conn.execute("SELECT id FROM users WHERE share_stances")}
@@ -168,8 +163,7 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
     friends = sorted((a, b) for a, b in following if (b, a) in following and b in sharing)
 
     event_index = _positions(event_ids)
-    interest_index = _positions(interest_keys)
-    user_ids = sorted({u for u, _ in picks} | {u for u, _, _, _ in stances} | {u for pair in friends for u in pair})
+    user_ids = sorted({u for u, _, _, _ in stances} | {u for pair in friends for u in pair})
     user_index = _positions(user_ids)
 
     return Inputs(
@@ -178,9 +172,7 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
         not_ended=np.array(not_ended, dtype=bool),
         venues=list(venues),
         post_average=np.array(average, dtype=float),
-        interest_vectors=_matrix(interest_vectors),
         user_ids=user_ids,
-        picks=[(user_index[u], interest_index[k]) for u, k in picks if k in interest_index],
         stances=[(user_index[u], event_index[p], _stance_weight(kind, age_days))
                  for u, p, kind, age_days in stances if p in event_index],
         friends=[(user_index[a], user_index[b]) for a, b in friends],
@@ -211,11 +203,11 @@ def lambda_handler(_event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.info("connected in %.1f s", time.monotonic() - started)
         inputs = load(conn)
         if inputs is None:
-            logger.info("nothing to score: no events or no interests with %s vectors", EMBEDDING_MODEL)
+            logger.info("nothing to score: no events with %s vectors", EMBEDDING_MODEL)
             return {"run": None, "rows": 0}
         loaded = time.monotonic()
-        logger.info("loaded %d events (%d not ended), %d interests, %d users in %.1f s", len(inputs.event_ids),
-                    inputs.not_ended.sum(), len(inputs.interest_vectors), len(inputs.user_ids), loaded - started)
+        logger.info("loaded %d events (%d not ended), %d users, %d friendships in %.1f s", len(inputs.event_ids),
+                    inputs.not_ended.sum(), len(inputs.user_ids), len(inputs.friends), loaded - started)
         # The database ends the run's transaction itself, before Lambda stops this process. 0 would mean no limit.
         timeout_ms = max(context.get_remaining_time_in_millis() - 15_000, 1_000)
         conn.execute("SELECT set_config('statement_timeout', %s, false)", (f"{timeout_ms}ms",))
