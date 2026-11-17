@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import ppr
-from ppr import Inputs, adjacency, scores, similar_events
+from ppr import Inputs, adjacency, scores, seeds, similar_events
 
 DIM, GROUPS, PER_GROUP = 12, 6, 4
 # Each group of events sits along its own axis, with seeded noise so no two events are alike.
@@ -157,10 +157,19 @@ def test_similar_events_dont_depend_on_the_block_size(monkeypatch, block):
 
 def test_the_walk_keeps_all_its_mass():
     graph = adjacency(inputs(**FRIENDS))
-    seed = np.zeros((graph.shape[0], 1))
-    seed[graph.shape[0] - 2 * len(FRIENDS["user_ids"])] = 1
+    seed = seeds(inputs(**FRIENDS), graph.shape[0])[:, [0]].toarray()
     mass = ppr.walk(ppr.transition(graph), seed)
     assert np.isfinite(mass).all() and (mass >= 0).all() and mass.sum() == pytest.approx(1)
+
+
+def test_a_start_splits_friends_by_square_root_and_a_friends_events_by_weight():
+    # u1 marked 4 in all, u2 1, u3 nothing: u1 gets 2/3 of u0's start, u2 1/3. u0's own stance starts nothing.
+    start = seeds(inputs(user_ids=["u0", "u1", "u2", "u3"], friends=[(0, 1), (0, 2), (0, 3)],
+                         stances=[(1, 0, 3.0), (1, 1, 1.0), (2, 1, 1.0), (0, 5, 2.0)]), N).toarray()
+    want = np.zeros(N)
+    want[0], want[1] = 2 / 3 * 3 / 4, 2 / 3 * 1 / 4 + 1 / 3
+    assert start[:, 0] == pytest.approx(want)
+    assert not start[:, 1:].any()
 
 
 def test_events_the_walk_cant_reach_tie_at_the_bottom():
@@ -192,6 +201,8 @@ def test_matches_a_walk_over_edges_written_by_hand():
     for a, b in [("e0", "hall"), ("e3", "hall"), ("e0", "e1"), ("e0", "e2"), ("e1", "e2")]:
         edges.setdefault(a, {})[b] = 1
         edges.setdefault(b, {})[a] = 1
+    # The user and what their friend shows are nodes here. No edge leads into either, so this is the code's walk, which
+    # starts on the friend's events, scaled by 0.7 squared, with the same ranks.
     edges["u0"] = {"u1 shown": 1}
     edges["u1 shown"] = {"e3": 2, "e1": 1.5}
 

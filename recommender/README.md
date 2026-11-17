@@ -119,18 +119,23 @@ weights and the decay are in `FeedConfig`.
 ## Personalised PageRank
 
 The thesis's graph signal: where a user's friends go, and events like those. `PprFunction` runs personalised
-PageRank from every user over one graph:
+PageRank for every user over one graph of events and venues, the same for everyone:
 
 | Edges | From |
 |---|---|
-| User → a friend's stances | Friends: mutual follows, no block, who share their stances. By the square root of the friend's faded stances: fresh ones count more, and an active friend gets more say but less on each event |
-| Friend's stances → event | Their interested and going, weighed and faded as the feed weighs and fades them. Not likes |
 | Event–event | Each event to its nearest events by content (`EVENT_NEIGHBOURS` in `ppr.py`), among events that haven't ended |
 | Event–venue | `event_locations`, by lower-cased name and city |
 
-A user's own picks and stances aren't in the graph: the feed's affinity holds them. A walk reaches a friend's
-interested and going, as the cards show them, and nothing past them: not their friends, not strangers. A block ends
-the friendship. A user whose friends marked nothing gets no scores.
+A user's walk starts, and restarts, on their friends' events:
+
+| Start | From |
+|---|---|
+| A friend's share | Friends: mutual follows, no block, who share their stances. By the square root of the friend's faded stances: fresh ones count more, and an active friend gets more say but less on each event |
+| An event's share of that | The friend's interested and going, weighed and faded as the feed weighs and fades them. Not likes |
+
+A user's own picks and stances start no walk: the feed's affinity holds them. No user is a node, so a walk reaches a
+friend's interested and going, as the cards show them, and nothing past them: not their friends, not strangers. A block
+ends the friendship. A user whose friends marked nothing gets no scores.
 
 Each user's candidates, the posts the feed may show them as new, get the walk's mass as a rank from 0 to 1. The feed
 reads the latest run finished `PPR_RUN_MARGIN_SECONDS` before the session's `asOf`, so a run landing mid-scroll doesn't
