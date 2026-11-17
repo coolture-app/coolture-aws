@@ -34,8 +34,8 @@ paths:
         - $ref: '#/components/parameters/Status'
         - $ref: '#/components/parameters/Followed'
         - $ref: '#/components/parameters/Type'
-        - $ref: '#/components/parameters/StartsFrom'
-        - $ref: '#/components/parameters/StartsTo'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
         - $ref: '#/components/parameters/RadiusKm'
       responses:
         '200':
@@ -77,7 +77,8 @@ paths:
             default: RECENT
           description: >
             NEAREST needs latitude and longitude, and shows only posts with a place. STANCE_NEWEST needs participationTypes
-            and puts the viewer's newest of those stances first.
+            and puts the viewer's newest of those stances first. UPCOMING mixes events already running into the events
+            to come, every 5th card (README.md).
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/Q'
         - $ref: '#/components/parameters/Tags'
@@ -85,8 +86,8 @@ paths:
         - $ref: '#/components/parameters/Status'
         - $ref: '#/components/parameters/Followed'
         - $ref: '#/components/parameters/Type'
-        - $ref: '#/components/parameters/StartsFrom'
-        - $ref: '#/components/parameters/StartsTo'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
         - $ref: '#/components/parameters/Latitude'
         - $ref: '#/components/parameters/Longitude'
         - $ref: '#/components/parameters/RadiusKm'
@@ -227,15 +228,19 @@ components:
       name: type
       in: query
       schema: {$ref: '#/components/schemas/PostType'}
-    StartsFrom:
-      name: startsFrom
+    From:
+      name: from
       in: query
-      description: Setting this turns the past-events window off.
+      description: >
+        Only events running at some moment from this time on: their end is at or after it. Setting this turns the
+        past-events window off.
       schema: {type: string, format: date-time}
-    StartsTo:
-      name: startsTo
+    To:
+      name: to
       in: query
-      description: Setting this turns the past-events window off.
+      description: >
+        Only events running at some moment up to this time: their start is at or before it. Setting this turns the
+        past-events window off.
       schema: {type: string, format: date-time}
     IncludePast:
       name: includePast
@@ -297,6 +302,7 @@ components:
         - author
         - title
         - startsAt
+        - openEnded
         - tags
         - positiveReactionCount
         - participantCount
@@ -315,6 +321,7 @@ components:
         eventUrl: {type: string}
         startsAt: {type: string, format: date-time}
         endsAt: {type: string, format: date-time}
+        openEnded: {type: boolean, description: No end date. Such a post never has endsAt and never ends.}
         tags: {type: array, items: {type: string}}
         positiveReactionCount: {type: integer}
         participantCount: {type: integer, description: interestedCount and goingCount together.}
@@ -344,12 +351,13 @@ components:
         What a pin and its preview need. Only the description's start: the map loads every post in view at once, and
         whole descriptions were over half of the answer. The viewer's own reaction and stance are left out for a guest
         or when there's none.
-      required: [id, title, startsAt, positiveReactionCount, interestedCount, goingCount, coordinates]
+      required: [id, title, startsAt, openEnded, positiveReactionCount, interestedCount, goingCount, coordinates]
       properties:
         id: {type: string, format: uuid}
         title: {type: string}
         startsAt: {type: string, format: date-time}
         endsAt: {type: string, format: date-time}
+        openEnded: {type: boolean, description: No end date. Such a post never has endsAt and never ends.}
         coverMediaUrl: {type: string}
         excerpt:
           type: string

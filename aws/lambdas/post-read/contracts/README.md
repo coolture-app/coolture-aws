@@ -20,8 +20,16 @@ This folder is inside `post-read` because that Lambda serves everything describe
 | **Contains** | Posts new to this viewer, ranked, narrowed by the filters | Everything visible, minus old events by default |
 | **Order** | Score, or upcoming if ranking fails | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST` |
 
-**The filters mean the same everywhere:** `q`, `tags`, `authorId`, `status`, `followed`, `type`, `startsFrom`, `startsTo`,
+**The filters mean the same everywhere:** `q`, `tags`, `authorId`, `status`, `followed`, `type`, `from`, `to`,
 `includePast`, and `radiusKm` around `latitude`/`longitude`. One piece of SQL applies them to `/feed`, `/posts` and `/posts/map`.
+
+**Dates match by overlap.** A post matches `from` and `to` if it runs at any moment between them: `starts_at <= to` and its
+end `>= from`, either side optional. An exhibition running all month matches a weekend's dates.
+
+**An event's end** is `ends_at`, or `starts_at + 3 hours` when there's none, or never when `openEnded` is true (no end date,
+"do odwołania"). Everywhere in this document. A post with `openEnded` has no `endsAt`. *Running* means started and not
+ended. `POST /posts` and `PATCH /posts/{id}` take `openEnded`; `PATCH` follows merge-patch rules, so `"endsAt": null` removes
+the end.
 
 `GET /posts/map` takes the same filters as `/posts`, plus the map bounds (`leftUpper.latitude`, `leftUpper.longitude`,
 `rightBottom.latitude`, `rightBottom.longitude`), and `excludeMine=true` to leave out what the feed leaves out. `GET /posts/{id}`
@@ -59,18 +67,16 @@ GET /feed?limit=20&cursor=eyJ2Ijox...                 every later page
   the position again, as the radius's centre. With no position, a signed-in viewer's home (`PUT /users/{userId}/home` in the
   users contract) takes its place in the cursor; a guest or someone with no home gets neutral proximity.
 - **Filters** are sent with every page, like `/posts`, and narrow which posts are ranked. They never show what the rules below
-  hide, except that `includePast`, `startsFrom` or `startsTo` let ended events in.
+  hide, except that `includePast`, `from` or `to` let ended events in.
 
 ### What the feed may show
 
 The fallback order uses exactly the same rules.
 
-An event's end is `COALESCE(ends_at, starts_at + 3 hours)`, everywhere in this document.
-
 | A post appears in `/feed` only if | Signed in | Guest |
 |---|---|---|
 | Not deleted | Yes | Yes |
-| Event hasn't ended, checked against the real time on every page, unless `includePast`, `startsFrom` or `startsTo` is set | Yes | Yes |
+| Event hasn't ended, checked against the real time on every page, unless `includePast`, `from` or `to` is set | Yes | Yes |
 | Created at or before the session's `asOf` | Yes | Yes |
 | Public | Yes | Yes |
 | Or friends-only, and the viewer follows the author | Yes | No |
@@ -87,7 +93,7 @@ Commenting doesn't hide a post. A post liked during a session stays where it is,
 | User or post has no vector, or their vectors come from different embedding models | `RANKED`, similarity is neutral |
 | No location, or an online post | `RANKED`, distance is neutral |
 | Guest | `RANKED`, on time, popularity and location |
-| Ranking query fails or takes over 5 seconds, or scoring throws | `200` with `mode: UPCOMING`, and a server log line with the reason |
+| Ranking query fails or takes over 5 seconds, or scoring throws | `200` with `mode: UPCOMING` in the order of `sortBy=UPCOMING` below, and a server log line with the reason |
 | The upcoming query also fails, or the database is down | `500` |
 
 ## `GET /posts` and `GET /posts/map`
@@ -100,7 +106,7 @@ All existing parameters keep their meaning. What's specific to this contract:
 | `sortBy` | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST`. Anything else, including `RECOMMENDED`, returns `400` |
 | `NEAREST` | Needs `latitude` and `longitude`, else `400`. Only posts with a place |
 | `cursor` | Continues the sort it was created for. Using it with a different sort returns `400` |
-| Order | `RECENT`: `created_at, id` descending. `POPULAR`: likes, `id` descending. `UPCOMING`: `starts_at, id` ascending. `NEAREST`: metres from the position, `id` ascending |
+| Order | `RECENT`: `created_at, id` descending. `POPULAR`: likes, `id` descending. `UPCOMING`: below. `NEAREST`: metres from the position, `id` ascending |
 
 ### Past events
 
@@ -108,11 +114,24 @@ All existing parameters keep their meaning. What's specific to this contract:
 |---|---|
 | Default, any filter or search | Events not ended, or ended up to 12 hours ago |
 | `includePast=true` | All visible events |
-| `startsFrom` or `startsTo` set | All visible events matching those dates, because a chosen date is explicit |
+| `from` or `to` set | All visible events running in that window, because a chosen date is explicit |
 | `sortBy=UPCOMING` | Never an ended event, even with `includePast=true` or a date filter |
 | My Events | The frontend sends `includePast=true`, so attended events stay |
 
 Blocks apply here too, in both directions, for signed-in viewers. A guest has no blocks.
+
+### `sortBy=UPCOMING`
+
+Two streams, merged in a steady rhythm. The moment `m` is the later of the list's `asOf` (the first page's time, kept in the
+cursor) and `from`.
+
+| Stream | Holds | Order |
+|---|---|---|
+| Dated | Events starting at or after `m` | `starts_at, id` ascending |
+| Running | Events started before `m` and not ended at `m` | End ascending, `id` ascending; no end date last |
+
+Every 5th card (the 5th, 10th, ...) comes from the running stream, the others from the dated stream. When one stream runs
+out, the other continues alone. The filters apply to both. `/feed`'s `UPCOMING` fallback uses the same merge.
 
 ## Paging
 
@@ -146,7 +165,7 @@ Each sort pages on its own key, and the key is in the cursor:
 |---|---|
 | `RECENT` | `(created_at, id)` below the cursor |
 | `POPULAR` | `(likes, id)` below the cursor |
-| `UPCOMING` | `(starts_at, id)` above the cursor |
+| `UPCOMING` | `asOf`, both streams' last keys and how many cards came so far |
 | `NEAREST` | `(metres, id)` above the cursor's post, whose distance is measured again from the request's position |
 
 Other lists, such as comments and followers, keep their own cursors. The rule about `hasMore` is the same.
