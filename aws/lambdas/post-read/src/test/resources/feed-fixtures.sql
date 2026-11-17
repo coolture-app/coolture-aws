@@ -206,16 +206,16 @@ FROM (VALUES
   ('time_no_end_date_after',     '2040-07-01 10:00Z',         NULL,                 true)
 ) AS t(title, starts, ends, open_ended);
 
--- Nadchodzące's two streams, relative to now: nine dated events a day apart, and three already running. The tag marks
--- the dated ones and the running one that ends first.
+-- Nadchodzące's two streams, relative to now: nine dated events a day apart, and three already running. The description
+-- "rytm" marks the dated ones and the running one that ends first.
 INSERT INTO users (id, username) VALUES ('a0000000-0000-0000-0000-000000000012', 'rhythm');
 
-INSERT INTO posts (author_id, title, starts_at, ends_at, type, tags)
-SELECT 'a0000000-0000-0000-0000-000000000012', 'rhythm_dated_' || g, date_trunc('minute', now()) + (g || ' days')::interval,
-       NULL, 'ONLINE', ARRAY['rhythm_tag']
+INSERT INTO posts (author_id, title, description, starts_at, ends_at, type)
+SELECT 'a0000000-0000-0000-0000-000000000012', 'rhythm_dated_' || g, 'rytm', date_trunc('minute', now()) + (g || ' days')::interval,
+       NULL, 'ONLINE'
 FROM generate_series(1, 9) g;
 
-INSERT INTO posts (author_id, title, starts_at, ends_at, open_ended, type, tags) VALUES
-  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_1',    now() - interval '1 day',   now() + interval '1 day',  false, 'ONLINE', ARRAY['rhythm_tag']),
-  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_2',    now() - interval '1 day',   now() + interval '2 days', false, 'ONLINE', NULL),
-  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_open', now() - interval '10 days', NULL,                      true,  'ONLINE', NULL);
+INSERT INTO posts (author_id, title, description, starts_at, ends_at, open_ended, type) VALUES
+  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_1',    'rytm', now() - interval '1 day',   now() + interval '1 day',  false, 'ONLINE'),
+  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_2',    NULL,   now() - interval '1 day',   now() + interval '2 days', false, 'ONLINE'),
+  ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_open', NULL,   now() - interval '10 days', NULL,                      true,  'ONLINE');

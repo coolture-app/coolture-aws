@@ -883,8 +883,8 @@ class PostReadDbTest {
     private static final Instant WINDOW_FROM = Instant.parse("2040-06-06T00:00:00Z");
     private static final Instant WINDOW_TO = Instant.parse("2040-06-07T23:59:59.999Z");
 
-    private static PostFeedFilters by(UUID author, String sortBy, Instant from, Instant to, List<String> tags) {
-        return new PostFeedFilters(null, tags, author, null, null, null, from, to, null, null, null,
+    private static PostFeedFilters by(UUID author, String sortBy, Instant from, Instant to, String q) {
+        return new PostFeedFilters(q, null, author, null, null, null, from, to, null, null, null,
             null, null, null, 100, sortBy, false);
     }
 
@@ -954,7 +954,7 @@ class PostReadDbTest {
     void upcoming_whenTheRunningStreamRunsOut_theDatedOneContinues(int pageSize) throws SQLException {
         assertEquals(List.of("rhythm_dated_1", "rhythm_dated_2", "rhythm_dated_3", "rhythm_dated_4", "rhythm_running_1",
                 "rhythm_dated_5", "rhythm_dated_6", "rhythm_dated_7", "rhythm_dated_8", "rhythm_dated_9"),
-            upcomingTitles(by(RHYTHM, "UPCOMING", null, null, List.of("rhythm_tag")), pageSize));
+            upcomingTitles(by(RHYTHM, "UPCOMING", null, null, "rytm"), pageSize));
     }
 
     @Test
