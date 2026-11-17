@@ -412,13 +412,14 @@ class PostWriteServiceTest {
         PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
         UpdatePostRequest req = new UpdatePostRequest(
-            null, null, null, Instant.now().minus(Duration.ofDays(1)), null, null, null, null, null, null
+            null, null, null, Instant.now().minus(Duration.ofDays(1)), null, null, null, null, null, null, null
         );
 
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> service.updatePost(postId, authorId, req, Set.of()));
 
         assertTrue(ex.getMessage().contains("past"));
-        verify(repository, never()).updatePost(any(), any(), any(), any());
+        verify(repository, never()).updatePost(any(), any(), any(), any(), any());
     }
 
     @Test

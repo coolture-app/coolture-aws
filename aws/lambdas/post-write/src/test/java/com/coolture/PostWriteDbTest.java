@@ -161,6 +161,15 @@ class PostWriteDbTest {
         assertEquals("TAKES_PART", stance());
     }
 
+    @Test
+    void aPostWithNoEndDate_neverEnds_soItStillTakesAStance() throws SQLException {
+        execute("UPDATE posts SET starts_at = now() - interval '30 days', ends_at = NULL, open_ended = true WHERE id = '" + POST + "'");
+
+        repository.upsertParticipation(POST, VIEWER, ParticipationType.INTERESTED);
+
+        assertEquals("INTERESTED", stance());
+    }
+
     private static void assertNotFound(org.junit.jupiter.api.function.Executable call) {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, call);
         assertTrue(e.getMessage().toLowerCase().contains("not found"), e.getMessage());
