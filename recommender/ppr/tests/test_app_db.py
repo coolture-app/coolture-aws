@@ -35,8 +35,7 @@ def test_a_run_leaves_out_what_the_feed_wont_show(conn):
            WHERE p.deleted_at IS NULL ORDER BY p.id LIMIT 6""", (app.EMBEDDING_MODEL,))]
     conn.execute("UPDATE posts SET deleted_at = now() WHERE id = %s", (deleted,))
     conn.execute("UPDATE posts SET starts_at = now() - interval '2 days', ends_at = now() - interval '1 day' "
-                 "WHERE id = %s",
-                 (ended,))
+                 "WHERE id = %s", (ended,))
     for post, author in ((own, user), (by_blocked, blocked), (by_blocker, blocker)):
         conn.execute("UPDATE posts SET author_id = %s WHERE id = %s", (author, post))
     relate(conn, user, blocked, "BLOCK")
