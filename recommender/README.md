@@ -126,7 +126,7 @@ The thesis's graph signal. `PprFunction` runs personalised PageRank from every u
 | Event–interest | Each event's nearest interests (`INTERESTS_PER_EVENT` in `ppr.py`), both sides centred as in the feed |
 | Event–event | Each event to its nearest events (`EVENT_NEIGHBOURS`), among events that haven't ended |
 | User–interest | `user_interests` |
-| User–event | Likes, interested and going, weighed and faded as the feed weighs and fades them |
+| User–event | Interested and going, weighed and faded as the feed weighs and fades them. Not likes: friends see only interested and going on the cards |
 | User → user | Friends (mutual follows, no block) who share their stances: a one-way follow reveals nothing. All of a user's friends together weigh like one interest pick |
 
 A user who doesn't share their stances has no edges leading in, so their picks and stances move only their own scores.

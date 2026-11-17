@@ -19,6 +19,8 @@ logger.setLevel(logging.INFO)
 # The feed's own rules, from FeedConfig and PostSql. tests/test_feed_constants.py checks they agree.
 EMBEDDING_MODEL = "sdadas/mmlw-roberta-base"
 STANCE_WEIGHTS = {"LIKE": 1.0, "INTERESTED": 1.5, "TAKES_PART": 2.0}
+# Not likes: friends see only interested and going on the cards, and through the graph a like would reach them.
+GRAPH_STANCES = ["INTERESTED", "TAKES_PART"]
 STANCE_HALF_LIFE_DAYS = 14
 STANCE_MAX_AGE_DAYS = 112
 DEFAULT_EVENT_HOURS = 3
@@ -53,7 +55,19 @@ SELECT user_id, post_id, type, floor(extract(epoch FROM %(as_of)s - created_at) 
 FROM (SELECT user_id, post_id, type, created_at FROM post_reactions
       UNION ALL
       SELECT user_id, post_id, type, created_at FROM post_participations) s
-WHERE type = ANY(%(types)s) AND created_at <= %(as_of)s AND created_at > %(as_of)s - make_interval(days => %(max_age_days)s)
+WHERE type = ANY(%(types)s)
+  AND created_at <= %(as_of)s AND created_at > %(as_of)s - make_interval(days => %(max_age_days)s)
+"""
+
+# A row with no time counts as always there, so a block is never dropped.
+RELATIONS = """
+SELECT source_user_id, target_user_id, type FROM user_relations WHERE COALESCE(created_at, '-infinity') <= %(as_of)s
+"""
+
+REACTED = """
+SELECT user_id, post_id FROM post_reactions WHERE COALESCE(created_at, '-infinity') <= %(as_of)s
+UNION
+SELECT user_id, post_id FROM post_participations WHERE COALESCE(created_at, '-infinity') <= %(as_of)s
 """
 
 # Runs older than the newest one finished over a day ago, which no session still reads.
@@ -92,8 +106,7 @@ def _db_credentials() -> dict[str, str]:
 
 
 def _matrix(sent: Sequence[bytes]) -> np.ndarray:
-    # pgvector's binary form: dimensions and an unused int16, then big-endian float4. Several times faster and smaller
-    # than text arrays.
+    # pgvector's binary form: dimensions and an unused int16, then big-endian float4. Far lighter than text arrays.
     return np.array([np.frombuffer(v, dtype=">f4", offset=4) for v in sent], dtype=float)
 
 
@@ -127,7 +140,7 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
     only its latest time, and removed stances, follows and edited posts leave no trace."""
     if as_of is None:
         (as_of,) = conn.execute("SELECT now()").fetchone()
-    at = {"as_of": as_of, "model": EMBEDDING_MODEL, "max_age_days": STANCE_MAX_AGE_DAYS, "types": list(STANCE_WEIGHTS)}
+    at = {"as_of": as_of, "model": EMBEDDING_MODEL, "max_age_days": STANCE_MAX_AGE_DAYS, "types": GRAPH_STANCES}
     (average,) = conn.execute(POST_AVERAGE, at).fetchone()
     events = conn.execute(EVENTS, at).fetchall()
     interests = conn.execute(
@@ -140,17 +153,12 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
 
     picks = conn.execute("SELECT user_id, interest_key FROM user_interests").fetchall()
     stances = conn.execute(STANCES, at).fetchall()
-    # A row with no time counts as always there, so a block is never dropped.
-    relations = conn.execute("""SELECT source_user_id, target_user_id, type FROM user_relations
-                                WHERE COALESCE(created_at, '-infinity') <= %(as_of)s""", at).fetchall()
+    relations = conn.execute(RELATIONS, at).fetchall()
     sharing = {u for (u,) in conn.execute("SELECT id FROM users WHERE share_stances")}
-    reacted = conn.execute("""SELECT user_id, post_id FROM post_reactions WHERE COALESCE(created_at, '-infinity') <= %(as_of)s
-                              UNION
-                              SELECT user_id, post_id FROM post_participations
-                              WHERE COALESCE(created_at, '-infinity') <= %(as_of)s""", at).fetchall()
+    reacted = conn.execute(REACTED, at).fetchall()
 
     following = {(a, b) for a, b, kind in relations if kind == "FOLLOW"}
-    unseen = defaultdict(set)  # user: the people on the other side of their blocks
+    unseen = defaultdict(set)
     for a, b, kind in relations:
         if kind == "BLOCK":
             unseen[a].add(b)

@@ -34,7 +34,8 @@ def test_a_run_leaves_out_what_the_feed_wont_show(conn):
         """SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
            WHERE p.deleted_at IS NULL ORDER BY p.id LIMIT 6""", (app.EMBEDDING_MODEL,))]
     conn.execute("UPDATE posts SET deleted_at = now() WHERE id = %s", (deleted,))
-    conn.execute("UPDATE posts SET starts_at = now() - interval '2 days', ends_at = now() - interval '1 day' WHERE id = %s",
+    conn.execute("UPDATE posts SET starts_at = now() - interval '2 days', ends_at = now() - interval '1 day' "
+                 "WHERE id = %s",
                  (ended,))
     for post, author in ((own, user), (by_blocked, blocked), (by_blocker, blocker)):
         conn.execute("UPDATE posts SET author_id = %s WHERE id = %s", (author, post))
@@ -66,7 +67,7 @@ def test_the_rows_written_are_the_walks_scores(conn):
     assert all(abs(written[k] - s) < 1e-6 for k, s in expected.items())
 
 
-def test_stances_fade_and_age_out_and_nie_dla_mnie_is_no_edge(conn):
+def test_stances_fade_and_age_out_and_neither_a_like_nor_nie_dla_mnie_is_an_edge(conn):
     (user,) = users(conn, 1)
     fresh, old, too_old, marked = [p for (p,) in conn.execute(
         """SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
@@ -76,12 +77,18 @@ def test_stances_fade_and_age_out_and_nie_dla_mnie_is_no_edge(conn):
                              (fresh, "TAKES_PART", 0)):
         conn.execute("""INSERT INTO post_participations (post_id, user_id, type, created_at)
                         VALUES (%s, %s, %s, now() - make_interval(days => %s))""", (post, user, kind, days))
+    (liked,) = conn.execute("""SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
+                               WHERE p.deleted_at IS NULL AND p.id NOT IN (%s, %s, %s, %s) ORDER BY p.id LIMIT 1""",
+                            (app.EMBEDDING_MODEL, fresh, old, too_old, marked)).fetchone()
+    conn.execute("""INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (%s, %s, 'LIKE', now())
+                    ON CONFLICT DO NOTHING""", (liked, user))
 
     inputs = app.load(conn)
     u = inputs.user_ids.index(user)
     weights = {inputs.event_ids[e]: w for v, e, w in inputs.stances if v == u}
     assert weights[fresh] == 2.0 and abs(weights[old] - 1.5 * 0.25) < 1e-9
-    assert too_old not in weights and marked not in weights
+    assert too_old not in weights and marked not in weights and liked not in weights
+    assert inputs.event_ids.index(liked) in inputs.hidden[u]
 
 
 def test_follows_count_only_between_friends_who_share_their_stances(conn):
@@ -130,8 +137,8 @@ def test_the_job_and_the_feed_have_their_grants(conn):
 
 def test_a_run_as_of_an_earlier_time_leaves_out_what_came_after(conn):
     user, friend = users(conn, 2)
-    post, fresh = [p for (p,) in conn.execute("SELECT post_id FROM post_embeddings WHERE model = %s ORDER BY post_id LIMIT 2",
-                                              (app.EMBEDDING_MODEL,))]
+    post, fresh = [p for (p,) in conn.execute(
+        "SELECT post_id FROM post_embeddings WHERE model = %s ORDER BY post_id LIMIT 2", (app.EMBEDDING_MODEL,))]
     conn.execute("UPDATE posts SET created_at = now() - interval '1 day'")
     conn.execute("UPDATE posts SET created_at = now() WHERE id = %s", (fresh,))
     conn.execute("DELETE FROM post_reactions WHERE user_id = %s", (user,))

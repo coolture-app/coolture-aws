@@ -178,7 +178,8 @@ def test_matches_a_walk_over_edges_written_by_hand():
     # event 3 has ended and shares a venue with event 0. u0 picked interest 0, is going to event 3 and is friends
     # with u1, who likes event 1.
     rng = np.random.default_rng(3)
-    small = Inputs(event_ids=["e0", "e1", "e2", "e3"], event_vectors=np.array([unit(v) for v in rng.normal(size=(4, 5))]),
+    small = Inputs(event_ids=["e0", "e1", "e2", "e3"],
+                   event_vectors=np.array([unit(v) for v in rng.normal(size=(4, 5))]),
                    not_ended=np.array([True, True, True, False]), venues=["hall", None, None, "hall"],
                    post_average=np.zeros(5), interest_vectors=np.array([unit(v) for v in rng.normal(size=(2, 5))]),
                    user_ids=["u0", "u1"], picks=[(0, 0)], stances=[(0, 3, 2.0), (1, 1, 1.0)],

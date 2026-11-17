@@ -10,7 +10,7 @@ from scipy.stats import rankdata
 INTERESTS_PER_EVENT = 2
 EVENT_NEIGHBOURS = 5
 RESTART_PROBABILITY = 0.3
-# (1 - RESTART_PROBABILITY) ** ITERATIONS < 1e-9: what the walk would still move is too little to swap two ranks.
+# Enough that (1 - RESTART_PROBABILITY) ** ITERATIONS, what the walk would still move, can't swap two ranks.
 ITERATIONS = 60
 USERS_PER_BATCH = 256
 EVENTS_PER_BLOCK = 1024
@@ -61,7 +61,7 @@ def nearest_interests(events: np.ndarray, interests: np.ndarray, linked: np.ndar
 
 
 def nearest_events(events: np.ndarray, linked: np.ndarray) -> Pairs:
-    """Only among events that haven't ended, as measured; ended ones keep their other edges. Each pair once."""
+    """Each pair once. Only events that haven't ended are anyone's neighbour."""
     k = min(EVENT_NEIGHBOURS, len(linked) - 1)
     if k < 1:
         return []
@@ -70,7 +70,7 @@ def nearest_events(events: np.ndarray, linked: np.ndarray) -> Pairs:
     for start in range(0, len(linked), EVENTS_PER_BLOCK):
         block = np.arange(start, min(start + EVENTS_PER_BLOCK, len(linked)))
         similarity = events[linked[block]] @ events[linked].T
-        similarity[np.arange(len(block)), block] = -np.inf  # an event isn't its own neighbour
+        similarity[np.arange(len(block)), block] = -np.inf
         for row, neighbours in zip(block, np.argpartition(similarity, -k, axis=1)[:, -k:]):
             pairs.update(tuple(sorted((int(linked[row]), int(linked[n])))) for n in neighbours)
     return sorted(pairs)
@@ -128,16 +128,9 @@ def walk(step: sparse.csr_matrix, seed: np.ndarray) -> np.ndarray:
     return mass
 
 
-def candidates(inputs: Inputs, user: int) -> np.ndarray:
-    allowed = inputs.not_ended.copy()
-    allowed[list(inputs.hidden.get(user, ()))] = False
-    return np.flatnonzero(allowed)
-
-
 def transition(graph: sparse.csr_matrix) -> sparse.csr_matrix:
-    """Column j spreads node j's mass over its edges by weight. Mass that reaches a node with none, which only a
-    private or blocked user's edges lead to, is lost; sending it back to the start instead would scale every score of
-    that walk alike and change no rank."""
+    """Column j spreads node j's mass over its edges by weight. Mass reaching a node with no edges out is lost, which
+    scales a walk without changing its ranks."""
     out_weight = np.asarray(graph.sum(axis=1)).ravel()
     out_weight[out_weight == 0] = 1
     return (sparse.diags(1 / out_weight) @ graph).T.tocsr()
@@ -148,31 +141,28 @@ def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
     them apart gets no rows, which the feed reads as NEUTRAL for all."""
     graph = adjacency(inputs)
     first_user = graph.shape[0] - len(inputs.user_ids)
-    users_with_edges = np.flatnonzero(np.diff(graph.indptr)[first_user:]).tolist()
-    unblocked = [u for u in users_with_edges if u not in inputs.blocked]
+    with_edges = np.flatnonzero(np.diff(graph.indptr)[first_user:]).tolist()
+    unblocked = [u for u in with_edges if u not in inputs.blocked]
     step = transition(graph)
     for start in range(0, len(unblocked), USERS_PER_BATCH):
-        batch = unblocked[start:start + USERS_PER_BATCH]
-        yield from ranked(inputs, batch, walk(step, starts(graph.shape[0], [first_user + u for u in batch])))
+        yield from ranked(inputs, step, first_user, unblocked[start:start + USERS_PER_BATCH])
 
-    # Each over a graph without the people on the other side of their blocks, whose stances would otherwise still
-    # reach them through a shared event. Few users block anyone, so walking them one by one costs little.
-    for u in sorted(set(users_with_edges) & inputs.blocked.keys()):
+    # Without the people on the other side of their blocks, whose stances would still reach them through a shared event.
+    for u in sorted(set(with_edges) & inputs.blocked.keys()):
         keep = np.ones(graph.shape[0])
         keep[[first_user + other for other in inputs.blocked[u]]] = 0
-        without = sparse.diags(keep) @ graph @ sparse.diags(keep)
-        yield from ranked(inputs, [u], walk(transition(without.tocsr()), starts(graph.shape[0], [first_user + u])))
+        yield from ranked(inputs, transition(sparse.diags(keep) @ graph @ sparse.diags(keep)), first_user, [u])
 
 
-def starts(size: int, nodes: list[int]) -> np.ndarray:
-    seed = np.zeros((size, len(nodes)))
-    seed[nodes, range(len(nodes))] = 1
-    return seed
-
-
-def ranked(inputs: Inputs, users: list[int], mass: np.ndarray) -> Iterator[tuple[int, int, float]]:
+def ranked(inputs: Inputs, step: sparse.csr_matrix, first_user: int,
+           users: list[int]) -> Iterator[tuple[int, int, float]]:
+    seed = np.zeros((step.shape[0], len(users)))
+    seed[[first_user + u for u in users], range(len(users))] = 1
+    mass = walk(step, seed)
     for column, u in enumerate(users):
-        events = candidates(inputs, u)
+        allowed = inputs.not_ended.copy()
+        allowed[list(inputs.hidden.get(u, ()))] = False
+        events = np.flatnonzero(allowed)
         values = mass[events, column]
         if len(events) < 2 or values.min() == values.max():
             continue
