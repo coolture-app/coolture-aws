@@ -1,6 +1,7 @@
 package com.coolture.feed;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.EventTime;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
@@ -58,7 +59,7 @@ public class FeedRepository {
         )
         SELECT p.id,
                p.starts_at,
-        """ + "       " + PostSql.EVENT_END + " AS ends_at,\n" + """
+        """ + "       " + EventTime.END + " AS ends_at,\n" + """
                COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0) AS engagement,
                1 - (c.centred <=> ?::vector) AS similarity,
                (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))

@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+/** The counts, createdAt and interests are null only in a blocker's slim profile, which leaves out the bio too. */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record UserProfileDto(
     UUID id,
@@ -13,8 +14,8 @@ public record UserProfileDto(
     String firstName,
     String lastName,
     MediaResourceDto avatar,
-    int followersCount,
-    int followingCount,
+    Integer followersCount,
+    Integer followingCount,
     String bio,
     Instant createdAt,
     boolean isFollowing,

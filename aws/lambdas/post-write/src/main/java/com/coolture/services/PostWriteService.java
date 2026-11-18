@@ -15,6 +15,7 @@ import com.coolture.common.validation.PostLimits;
 
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +75,7 @@ public class PostWriteService {
         Instant newStartsAt = req.startsAt() != null ? req.startsAt() : existing.startsAt();
         Instant newEndsAt = req.endsAt() != null ? req.endsAt() : existing.endsAt();
         validateDateRange(newStartsAt, newEndsAt);
+        refuseStartMovedToPast(existing.startsAt(), req.startsAt(), Instant.now());
 
         UpdatePostRequest toSave = req;
         if (req.mediaIds() != null) {
@@ -174,6 +176,19 @@ public class PostWriteService {
     private void validateDateRange(Instant startsAt, Instant endsAt) {
         if (endsAt != null && startsAt != null && !endsAt.isAfter(startsAt)) {
             throw new IllegalArgumentException("endsAt must be strictly after startsAt");
+        }
+    }
+
+    /**
+     * The form sends startsAt on every save, without seconds, so a start that is the same to the minute is unchanged.
+     * That keeps a running or ended event editable.
+     */
+    static void refuseStartMovedToPast(Instant oldStart, Instant newStart, Instant now) {
+        if (newStart == null) return;
+        Instant newMinute = newStart.truncatedTo(ChronoUnit.MINUTES);
+        if (oldStart != null && newMinute.equals(oldStart.truncatedTo(ChronoUnit.MINUTES))) return;
+        if (newMinute.isBefore(now.truncatedTo(ChronoUnit.MINUTES))) {
+            throw new IllegalArgumentException("startsAt can't be moved to the past");
         }
     }
 

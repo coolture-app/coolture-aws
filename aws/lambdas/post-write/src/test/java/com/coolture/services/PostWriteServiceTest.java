@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -401,6 +402,39 @@ class PostWriteServiceTest {
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req));
+    }
+
+    @Test
+    void updatePost_movingTheStartToThePast_throwsIllegalArgumentException() throws SQLException {
+        UUID postId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
+        when(repository.findById(postId)).thenReturn(Optional.of(existing));
+        UpdatePostRequest req = new UpdatePostRequest(
+            null, null, null, Instant.now().minus(Duration.ofDays(1)), null, null, null, null, null, null
+        );
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.updatePost(postId, authorId, req));
+
+        assertTrue(ex.getMessage().contains("past"));
+        verify(repository, never()).updatePost(any(), any(), any(), any());
+    }
+
+    @Test
+    void startMovedToPast_isRefused_onlyWhenItChangedAtTheMinute() {
+        Instant now = Instant.parse("2026-11-17T12:00:30Z");
+        Instant oldStart = Instant.parse("2026-11-10T18:00:00Z");
+
+        // The form sends the unchanged start without seconds.
+        assertDoesNotThrow(() -> PostWriteService.refuseStartMovedToPast(oldStart.plusSeconds(42), oldStart, now));
+        assertDoesNotThrow(() -> PostWriteService.refuseStartMovedToPast(oldStart, null, now));
+        assertDoesNotThrow(() -> PostWriteService.refuseStartMovedToPast(oldStart, Instant.parse("2026-11-17T12:00:00Z"), now));
+        assertDoesNotThrow(() -> PostWriteService.refuseStartMovedToPast(oldStart, Instant.parse("2026-11-20T18:00:00Z"), now));
+
+        assertThrows(IllegalArgumentException.class,
+            () -> PostWriteService.refuseStartMovedToPast(oldStart, Instant.parse("2026-11-17T11:59:00Z"), now));
+        assertThrows(IllegalArgumentException.class,
+            () -> PostWriteService.refuseStartMovedToPast(oldStart, oldStart.plus(Duration.ofHours(1)), now));
     }
 
     @Test
