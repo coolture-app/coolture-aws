@@ -9,7 +9,8 @@ from scipy.stats import rankdata
 
 EVENT_NEIGHBOURS = 5
 RESTART_PROBABILITY = 0.3
-# Enough that (1 - RESTART_PROBABILITY) ** ITERATIONS, what the walk would still move, can't swap two ranks.
+# Enough that the mass ends within about (1 - RESTART_PROBABILITY) ** ITERATIONS of the exact walk's, so only events
+# that near-tie, closer than that, can swap ranks.
 ITERATIONS = 60
 USERS_PER_BATCH = 256
 EVENTS_PER_BLOCK = 1024
