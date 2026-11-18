@@ -21,22 +21,7 @@ public final class FeedScorer {
      * (FeedRepository). standing is EventTime.isStanding. Null ppr means no PageRank score for this viewer and post.
      */
     public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
-                        double nearMark, boolean standing, Double ppr) {
-
-        public Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
-                     double nearMark) {
-            this(id, startsAt, endsAt, engagement, similarity, meters, nearMark, false, null);
-        }
-
-        public Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters) {
-            this(id, startsAt, endsAt, engagement, similarity, meters, 0);
-        }
-
-        /** An event that hasn't ended, as every event in the plain feed. */
-        public Facts(UUID id, Instant startsAt, int engagement, Double similarity, Double meters) {
-            this(id, startsAt, null, engagement, similarity, meters);
-        }
-    }
+                        double nearMark, boolean standing, Double ppr) {}
 
     /** The parts before weighting, kept so that explanations can be added later, and the weighted total. */
     public record Score(double affinity, double notForMe, double proximity, double time, double popularity, double jitter,

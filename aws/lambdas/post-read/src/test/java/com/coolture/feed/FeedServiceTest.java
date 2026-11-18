@@ -77,7 +77,7 @@ class FeedServiceTest {
             asOfs.add(at.asOf());
             if (upcomingFailure != null) throw upcomingFailure;
             Comparator<FeedScorer.Facts> soonest = Comparator.comparing(FeedScorer.Facts::startsAt).thenComparing(FeedScorer.Facts::id);
-            FeedScorer.Facts after = at.datedId() == null ? null : new FeedScorer.Facts(at.datedId(), at.datedStart(), 0, null, null);
+            FeedScorer.Facts after = at.datedId() == null ? null : TestFacts.startingAt(at.datedStart()).id(at.datedId()).build();
             List<PostCardDto> dated = candidates.stream()
                 .filter(f -> after == null || soonest.compare(f, after) > 0)
                 .sorted(soonest)
@@ -102,7 +102,7 @@ class FeedServiceTest {
     private static List<FeedScorer.Facts> posts(int count) {
         // Few distinct start times and likes, so ties on everything but jitter are common.
         return IntStream.range(0, count)
-            .mapToObj(i -> new FeedScorer.Facts(UUID.randomUUID(), START.plus(Duration.ofDays(i % 3)), i % 2, null, null))
+            .mapToObj(i -> TestFacts.startingAt(START.plus(Duration.ofDays(i % 3))).engagement(i % 2).build())
             .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
     }
 
@@ -365,7 +365,7 @@ class FeedServiceTest {
             @Override
             public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
                                                          Double latitude, Double longitude, PostFeedFilters filters) {
-                return List.of(new FeedScorer.Facts(UUID.randomUUID(), null, 0, null, null));
+                return List.of(TestFacts.startingAt(null).build());
             }
         };
         broken.candidates = all;

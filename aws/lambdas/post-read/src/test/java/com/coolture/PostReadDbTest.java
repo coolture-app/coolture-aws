@@ -20,6 +20,7 @@ import com.coolture.feed.FeedPage;
 import com.coolture.feed.FeedRepository;
 import com.coolture.feed.FeedScorer;
 import com.coolture.feed.FeedService;
+import com.coolture.feed.TestFacts;
 import com.coolture.feed.UserVector;
 import com.coolture.repository.PostReadRepository;
 import com.coolture.repository.PostSort;
@@ -469,8 +470,7 @@ class PostReadDbTest {
             FeedConfig d = FeedConfig.DEFAULTS;
             FeedScorer scorer = new FeedScorer(new FeedConfig(d.affinity(), d.proximity(), d.time(), d.popularity(), 0, d.notForMe(), d.ppr()));
             FeedScorer.Facts twinFacts = candidates(next).stream().filter(f -> f.id().equals(twin)).findFirst().orElseThrow();
-            FeedScorer.Facts unmarked = new FeedScorer.Facts(twinFacts.id(), twinFacts.startsAt(), twinFacts.endsAt(),
-                twinFacts.engagement(), twinFacts.similarity(), twinFacts.meters());
+            FeedScorer.Facts unmarked = TestFacts.copyOf(twinFacts).nearMark(0).build();
             assertTrue(scorer.score(twinFacts, next, 1).total() < scorer.score(unmarked, next, 1).total());
         } finally {
             unmark(marked);
