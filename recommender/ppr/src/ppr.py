@@ -13,6 +13,9 @@ RESTART_PROBABILITY = 0.3
 # that near-tie, closer than that, can swap ranks.
 ITERATIONS = 60
 USERS_PER_BATCH = 256
+# The feed reads an event with no row as NEUTRAL, so the walk lifts the events nearest friends' marks and pushes no event
+# below where the feed without PageRank puts it. Ranking every event cost the most when friends' taste differs.
+SCORES_PER_USER = 50
 EVENTS_PER_BLOCK = 1024
 
 Pairs = list[tuple[int, int]]
@@ -115,9 +118,10 @@ def transition(graph: sparse.csr_matrix) -> sparse.csr_matrix:
 
 
 def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
-    """(user, event, score): the walk's mass ranked among every event that hasn't ended, 0 to 1. The feed alone leaves
-    out a user's own, reacted and blocked posts, so its rules have one copy. A user whose walk can't tell
-    the events apart, such as one whose friends marked nothing, gets no rows, which the feed reads as NEUTRAL for all."""
+    """(user, event, score): the walk's mass ranked among every event that hasn't ended, 0 to 1, for the
+    SCORES_PER_USER events with the most. The feed alone leaves out a user's own, reacted and blocked posts, so its
+    rules have one copy. A user whose walk can't tell the events apart, such as one whose friends marked nothing, gets
+    no rows, which the feed reads as NEUTRAL for all."""
     step = transition(adjacency(inputs))
     seed = seeds(inputs, step.shape[0])
     with_friends = np.flatnonzero(np.diff(seed.indptr))
@@ -134,4 +138,5 @@ def ranked(inputs: Inputs, user: int, mass: np.ndarray) -> Iterator[tuple[int, i
     if len(events) < 2 or values.min() == values.max():
         return
     ranks = (rankdata(values) - 1) / (len(events) - 1)
-    yield from ((user, int(e), float(r)) for e, r in zip(events, ranks))
+    kept = np.lexsort((events, -values))[:SCORES_PER_USER]
+    yield from ((user, int(events[i]), float(ranks[i])) for i in kept)

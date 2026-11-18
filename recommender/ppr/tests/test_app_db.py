@@ -5,6 +5,7 @@ import psycopg
 import pytest
 
 import app
+import ppr
 
 pytestmark = pytest.mark.skipif(os.environ.get("DB_TEST") != "true", reason="needs make up and make seed; DB_TEST=true")
 
@@ -37,7 +38,8 @@ def befriend(conn, user, friend, going):
                  (going, friend))
 
 
-def test_a_post_with_no_end_date_that_started_long_ago_gets_a_score(conn):
+def test_a_post_with_no_end_date_that_started_long_ago_gets_a_score(conn, monkeypatch):
+    monkeypatch.setattr(ppr, "SCORES_PER_USER", 10**6)
     user, friend = users(conn, 2)
     going, standing = [p for (p,) in conn.execute(
         """SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
@@ -54,7 +56,8 @@ def test_a_post_with_no_end_date_that_started_long_ago_gets_a_score(conn):
                         (run, user, standing)).fetchone()
 
 
-def test_a_run_scores_every_event_that_hasnt_ended_and_nothing_else(conn):
+def test_a_run_scores_every_event_that_hasnt_ended_and_nothing_else(conn, monkeypatch):
+    monkeypatch.setattr(ppr, "SCORES_PER_USER", 10**6)
     # The feed alone leaves out a user's own, reacted and blocked posts.
     user, friend, blocked = users(conn, 3)
     going, deleted, ended, own, by_blocked, reacted = [p for (p,) in conn.execute(

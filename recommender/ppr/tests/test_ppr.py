@@ -62,6 +62,12 @@ def test_ended_events_get_no_score():
     assert set(got) == set(range(N)) - {5}
 
 
+def test_only_the_events_with_the_most_mass_get_rows_with_their_rank_among_all(monkeypatch):
+    every = by_event(scores(inputs(**FRIENDS)))
+    monkeypatch.setattr(ppr, "SCORES_PER_USER", 5)
+    assert by_event(scores(inputs(**FRIENDS))) == {e: every[e] for e in sorted(every, key=every.get)[-5:]}
+
+
 def test_a_user_whose_friends_marked_nothing_gets_no_rows():
     rows = list(scores(inputs(**FRIENDS)))
     assert by_event(rows, user=0) and not by_event(rows, user=1)

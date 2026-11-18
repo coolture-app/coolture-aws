@@ -137,8 +137,9 @@ A user's own picks and stances start no walk: the feed's affinity holds them. No
 friend's interested and going, as the cards show them, and nothing past them: not their friends, not strangers. A block
 ends the friendship. A user whose friends marked nothing gets no scores.
 
-Every event that hasn't ended gets the walk's mass as a rank from 0 to 1, for each user. The feed alone leaves out a
-user's own, reacted and blocked posts, so its rules have one copy. The feed reads the latest run finished
+The walk's mass is ranked from 0 to 1 among every event that hasn't ended, and each user's `SCORES_PER_USER` events
+with the most get a row. The feed reads the rest as `NEUTRAL`, so PageRank lifts events and pushes none down. The feed
+alone leaves out a user's own, reacted and blocked posts, so its rules have one copy. The feed reads the latest run finished
 `PPR_RUN_MARGIN_SECONDS` before the session's `asOf`, so a run landing mid-scroll doesn't move its pages, and ignores a
 run older than `PPR_RUN_MAX_AGE_HOURS`, whose friendships may have changed since. A post with no score gets `NEUTRAL`
 (weight `ppr` in `FeedConfig`), so locally PageRank's effect goes after a day unless `make ppr` runs again. The next
