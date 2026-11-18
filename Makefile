@@ -21,7 +21,7 @@ PYTHON ?= $(if $(filter Windows_NT,$(OS)),python,python3)
 # One virtual environment for the scripts and the Python tests, made on first use.
 VENV_PY := .venv/$(if $(filter Windows_NT,$(OS)),Scripts/python.exe,bin/python)
 PY_REQUIREMENTS := scraper/requirements-dev.txt aws/lambdas/migrations/requirements-dev.txt \
-	aws/lambdas/authorizer/requirements-dev.txt recommender/embedding-workers/post-embedding/requirements-dev.txt \
+	aws/lambdas/authorizer/requirements-dev.txt recommender/post-embedding/requirements-dev.txt \
 	recommender/ppr/requirements-dev.txt
 
 # The local Garage keys, the defaults in docker-compose.yml. Without them every upload and photo URL gets a 403.
@@ -37,7 +37,7 @@ SAM_LOCAL_ARGS := --template-file .aws-sam/build/template.yaml --skip-pull-image
 LAMBDA_IMAGES := public.ecr.aws/lambda/java:21-rapid-x86_64 public.ecr.aws/lambda/python:3.13-rapid-x86_64 \
 	postembeddingfunction:rapid-x86_64
 EMBEDDINGS_TEMPLATE := .aws-sam/embeddings/template.yaml
-# The post-embedding worker's image, which sam build tags from DockerTag in recommender/embedding-workers/template.yaml.
+# The post-embedding worker's image, which sam build tags from DockerTag in recommender/template.yaml.
 EMBEDDINGS_IMAGE := postembeddingfunction:python3.13-v1
 SNAPSHOT_DIR := scraper/snapshot
 
@@ -123,7 +123,7 @@ build: build-common ## Build backend lambdas
 	sam build --template-file aws/backend.yaml --parallel --cached && echo "$$sum" > .aws-sam/common.sha1
 
 test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding worker, PageRank, migrations, authorizer, geocoder proxy
-	@for dir in recommender/embedding-workers/post-embedding recommender/ppr \
+	@for dir in recommender/post-embedding recommender/ppr \
 			aws/lambdas/migrations aws/lambdas/authorizer aws/lambdas/geo-proxy; do \
 		echo "$$dir"; (cd $$dir && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests) || exit 1; \
 	done
@@ -187,8 +187,8 @@ embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/s
 invoke-worker = out="$$(echo '$(2)' | sam local invoke $(1) --template-file $(EMBEDDINGS_TEMPLATE) --skip-pull-image --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
 
 # Built on first use, when its image was removed, or when the template or either function's code changed.
-RECOMMENDER_SOURCES := recommender/embedding-workers/template.yaml recommender/embedding-workers/post-embedding/Dockerfile \
-	recommender/embedding-workers/post-embedding/src recommender/ppr/src
+RECOMMENDER_SOURCES := recommender/template.yaml recommender/post-embedding/Dockerfile \
+	recommender/post-embedding/src recommender/ppr/src
 require-embeddings-build:
 	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] \
 		|| [ -n "$$(find $(RECOMMENDER_SOURCES) -type f -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] \
@@ -212,7 +212,7 @@ validate: ## Validate SAM templates
 	@sam validate --template-file aws/backend.yaml
 	@sam validate --template-file aws/frontend.yaml
 	@sam validate --template-file aws/auth.yaml
-	@sam validate --template-file recommender/embedding-workers/template.yaml
+	@sam validate --template-file recommender/template.yaml
 
 deploy-backend: ## Deploy backend to AWS (dev, arm64; FEED_WEIGHTS=ppr=0 sets the feed's weights) - needs mgmt-stack-networking (management stack) + auth deployed
 	@scripts/deploy.sh dev backend
@@ -224,7 +224,7 @@ deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
 	@scripts/deploy.sh dev auth
 
 build-embeddings: ## Build the embedding worker and PageRank for local runs (x86_64; needs Docker and Python 3.13)
-	@sam build --template-file recommender/embedding-workers/template.yaml --build-dir .aws-sam/embeddings
+	@sam build --template-file recommender/template.yaml --build-dir .aws-sam/embeddings
 
 deploy-embeddings: ## Deploy the embedding worker and PageRank to AWS (dev, arm64; PPR_SCHEDULE=true turns PageRank's schedule on) - needs mgmt-stack-networking + backend deployed
 	@scripts/deploy.sh dev embeddings

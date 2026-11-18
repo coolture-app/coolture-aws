@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = "scripts/embed-posts.sh"
 # The full path, because on Windows a bare "bash" runs WSL's from System32, whatever PATH says.
 BASH = shutil.which("bash")

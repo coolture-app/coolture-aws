@@ -3,7 +3,7 @@ set -euo pipefail
 
 TEMPLATE="${TEMPLATE:-.aws-sam/embeddings/template.yaml}"
 BATCH_SIZE="${BATCH_SIZE:-50}"
-DOCKERFILE=recommender/embedding-workers/post-embedding/Dockerfile
+DOCKERFILE=recommender/post-embedding/Dockerfile
 
 psql_query() {
     docker compose exec -T postgres psql -U coolture_admin -d coolture -At -v ON_ERROR_STOP=1 -c "$1"

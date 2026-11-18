@@ -181,7 +181,7 @@ Deploy in this order, because later stacks import earlier ones' exports, and del
 |---|---|---|
 | `coolture-auth-<env>` | `aws/auth.yaml` | |
 | `coolture-backend-<env>` | `aws/backend.yaml` | networking (VPC, subnets), auth (authorizers, Cognito) |
-| `coolture-embeddings-<env>` | `recommender/embedding-workers/template.yaml` | networking, backend (queue ARN, DB endpoint, security group) |
+| `coolture-embeddings-<env>` | `recommender/template.yaml` | networking, backend (queue ARN, DB endpoint, security group) |
 | `coolture-geocoder-<env>` | `aws/geocoder.yaml` | networking (VPC, subnets) |
 | `coolture-scraper-<env>` | `aws/scraper.yaml` | backend (API domain), geocoder (proxy URL), auth (pool and client ids, passed by `deploy.sh`) |
 | `coolture-waf-<env>` (us-east-1) | `aws/waf.yaml` | |

@@ -56,7 +56,7 @@ template_for() {
     case "$1" in
         auth) echo aws/auth.yaml ;;
         backend) echo aws/backend.yaml ;;
-        embeddings) echo recommender/embedding-workers/template.yaml ;;
+        embeddings) echo recommender/template.yaml ;;
         geocoder) echo aws/geocoder.yaml ;;
         scraper) echo aws/scraper.yaml ;;
         waf) echo aws/waf.yaml ;;

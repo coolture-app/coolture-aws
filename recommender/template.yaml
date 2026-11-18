@@ -111,7 +111,7 @@ Resources:
       FunctionName: !Sub 'coolture-${Environment}-ppr'
       LoggingConfig:
         LogGroup: !Ref PprLogGroup
-      CodeUri: ../ppr/src/
+      CodeUri: ppr/src/
       Handler: app.lambda_handler
       Runtime: python3.13
       # One full vCPU: the walk and the copy into the database run on one thread.

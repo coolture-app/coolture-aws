@@ -9,9 +9,9 @@ in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post
 
 | Path | What it does |
 |---|---|
-| `embedding-workers/post-embedding/` | Container image: embeds a post's title and description, and interests, with `mmlw-roberta-base` |
+| `post-embedding/` | Container image: embeds a post's title and description, and interests, with `mmlw-roberta-base` |
 | `ppr/` | Zip function: personalised PageRank for every user, into `rec_ppr_scores` |
-| `embedding-workers/template.yaml` | Both functions' stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
+| `template.yaml` | Both functions' stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
 
 All commands below run from the repository root.
 
@@ -52,7 +52,7 @@ and exits non-zero if any fails. `make test-python` runs the worker's unit tests
 
 ### Changing the model
 
-The model is `sdadas/mmlw-roberta-base`, pinned to a revision in `embedding-workers/post-embedding/Dockerfile`.
+The model is `sdadas/mmlw-roberta-base`, pinned to a revision in `post-embedding/Dockerfile`.
 Vectors of different models are never compared: the feed builds the viewer's vector from the vectors of
 `FeedConfig.EMBEDDING_MODEL` only, and gives a post of another model a neutral affinity of `0.5`, as for a post with no
 vector.
