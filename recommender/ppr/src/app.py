@@ -1,10 +1,8 @@
 import logging
 import time
-from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
-from uuid import UUID
 
 import numpy as np
 import psycopg
@@ -39,7 +37,6 @@ EVENTS = f"""
 SELECT p.id,
        vector_send(pe.embedding) AS vector,
        {EVENT_END} >= %(as_of)s AS not_ended,
-       p.author_id,
        CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
             THEN lower(btrim(el.venue_name)) || ' | ' || lower(btrim(coalesce(el.city, ''))) END AS venue
 FROM posts p
@@ -57,15 +54,10 @@ WHERE type = ANY(%(types)s)
   AND created_at <= %(as_of)s AND created_at > %(as_of)s - make_interval(days => %(max_age_days)s)
 """
 
-# A row with no time counts as always there, so a block is never dropped.
-RELATIONS = """
-SELECT source_user_id, target_user_id, type FROM user_relations WHERE COALESCE(created_at, '-infinity') <= %(as_of)s
-"""
-
-REACTED = """
-SELECT user_id, post_id FROM post_reactions WHERE COALESCE(created_at, '-infinity') <= %(as_of)s
-UNION
-SELECT user_id, post_id FROM post_participations WHERE COALESCE(created_at, '-infinity') <= %(as_of)s
+# A row with no time counts as always there.
+FOLLOWS = """
+SELECT source_user_id, target_user_id FROM user_relations
+WHERE type = 'FOLLOW' AND COALESCE(created_at, '-infinity') <= %(as_of)s
 """
 
 # Runs older than the newest one finished over a day ago, which no session still reads.
@@ -116,22 +108,6 @@ def _stance_weight(kind: str, age_days: int) -> float:
     return STANCE_WEIGHTS[kind] * 0.5 ** (age_days / STANCE_HALF_LIFE_DAYS)
 
 
-def _hidden(user_index: dict[UUID, int], event_index: dict[UUID, int], authors: Sequence[UUID],
-            reacted: list[tuple[UUID, UUID]], blocked: dict[UUID, set[UUID]]) -> dict[int, set[int]]:
-    """What the feed never shows a user as new: PostSql's NOT_MINE and NOT_BLOCKED."""
-    events_by_author = defaultdict(list)
-    for e, author in enumerate(authors):
-        events_by_author[author].append(e)
-
-    hidden = {}
-    for user, u in user_index.items():
-        hidden[u] = {e for author in {user} | blocked[user] for e in events_by_author[author]}
-    for user, post in reacted:
-        if user in user_index and post in event_index:
-            hidden[user_index[user]].add(event_index[post])
-    return hidden
-
-
 def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | None:
     """What the app knew at as_of, the database's now by default. None when no event has a vector of EMBEDDING_MODEL.
     An earlier as_of is approximate: a changed stance keeps only its latest time, and removed stances, follows and
@@ -144,21 +120,13 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
     events = conn.execute(EVENTS, at).fetchall()
     if average is None or not events:
         return None
-    event_ids, event_vectors, not_ended, authors, venues = zip(*events)
+    event_ids, event_vectors, not_ended, venues = zip(*events)
 
     stances = conn.execute(STANCES, at).fetchall()
-    relations = conn.execute(RELATIONS, at).fetchall()
+    following = set(conn.execute(FOLLOWS, at).fetchall())
     sharing = {u for (u,) in conn.execute("SELECT id FROM users WHERE share_stances")}
-    reacted = conn.execute(REACTED, at).fetchall()
-
-    following = {(a, b) for a, b, kind in relations if kind == "FOLLOW"}
-    blocked = defaultdict(set)
-    for a, b, kind in relations:
-        if kind == "BLOCK":
-            blocked[a].add(b)
-            blocked[b].add(a)
-    # Friends.sharingFriend's rule, the people whose stances the cards show. A block replaces the blocker's follow, so
-    # friends never block each other.
+    # Friends.sharingFriend's rule, the people whose stances the cards show. A block deletes the follows both ways, so
+    # it needs no check of its own.
     friends = sorted((a, b) for a, b in following if (b, a) in following and b in sharing)
 
     event_index = _positions(event_ids)
@@ -175,7 +143,6 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
         stances=[(user_index[u], event_index[p], _stance_weight(kind, age_days))
                  for u, p, kind, age_days in stances if p in event_index],
         friends=[(user_index[a], user_index[b]) for a, b in friends],
-        hidden=_hidden(user_index, event_index, authors, reacted, blocked),
     )
 
 

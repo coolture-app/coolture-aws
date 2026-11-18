@@ -30,7 +30,6 @@ class Inputs:
     user_ids: list[UUID]
     stances: list[tuple[int, int, float]]  # (user, event, weight)
     friends: Pairs  # (user, friend who shares their stances)
-    hidden: dict[int, set[int]]  # user: events the feed never shows them as new
 
 
 def centred_and_normalised(vectors: np.ndarray, average: np.ndarray) -> np.ndarray:
@@ -115,8 +114,9 @@ def transition(graph: sparse.csr_matrix) -> sparse.csr_matrix:
 
 
 def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
-    """(user, event, score): the walk's mass ranked among the user's candidates, 0 to 1. A user whose walk can't tell
-    them apart, such as one whose friends marked nothing, gets no rows, which the feed reads as NEUTRAL for all."""
+    """(user, event, score): the walk's mass ranked among every event that hasn't ended, 0 to 1. The feed alone leaves
+    out a user's own, reacted and blocked posts, so its rules have one copy. A user whose walk can't tell
+    the events apart, such as one whose friends marked nothing, gets no rows, which the feed reads as NEUTRAL for all."""
     step = transition(adjacency(inputs))
     seed = seeds(inputs, step.shape[0])
     with_friends = np.flatnonzero(np.diff(seed.indptr))
@@ -128,9 +128,7 @@ def scores(inputs: Inputs) -> Iterator[tuple[int, int, float]]:
 
 
 def ranked(inputs: Inputs, user: int, mass: np.ndarray) -> Iterator[tuple[int, int, float]]:
-    allowed = inputs.not_ended.copy()
-    allowed[list(inputs.hidden.get(user, ()))] = False
-    events = np.flatnonzero(allowed)
+    events = np.flatnonzero(inputs.not_ended)
     values = mass[events]
     if len(events) < 2 or values.min() == values.max():
         return

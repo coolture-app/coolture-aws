@@ -28,28 +28,6 @@ def relate(conn, source, target, kind):
                  (source, target, kind))
 
 
-def test_a_run_leaves_out_what_the_feed_wont_show(conn):
-    user, blocked, blocker = users(conn, 3)
-    deleted, ended, own, by_blocked, by_blocker, reacted = [p for (p,) in conn.execute(
-        """SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
-           WHERE p.deleted_at IS NULL ORDER BY p.id LIMIT 6""", (app.EMBEDDING_MODEL,))]
-    conn.execute("UPDATE posts SET deleted_at = now() WHERE id = %s", (deleted,))
-    conn.execute("UPDATE posts SET starts_at = now() - interval '2 days', ends_at = now() - interval '1 day' "
-                 "WHERE id = %s", (ended,))
-    for post, author in ((own, user), (by_blocked, blocked), (by_blocker, blocker)):
-        conn.execute("UPDATE posts SET author_id = %s WHERE id = %s", (author, post))
-    relate(conn, user, blocked, "BLOCK")
-    relate(conn, blocker, user, "BLOCK")
-    conn.execute("""INSERT INTO post_participations (post_id, user_id, type) VALUES (%s, %s, 'NOT_INTERESTED')
-                    ON CONFLICT DO NOTHING""", (reacted, user))
-
-    run, _ = app.write(conn, app.load(conn))
-
-    scored = {p for (p,) in conn.execute("SELECT post_id FROM rec_ppr_scores WHERE run_number = %s AND user_id = %s",
-                                         (run, user))}
-    assert scored and not scored & {deleted, ended, own, by_blocked, by_blocker, reacted}
-
-
 def befriend(conn, user, friend, going):
     for a, b in ((user, friend), (friend, user)):
         relate(conn, a, b, "FOLLOW")
@@ -74,6 +52,31 @@ def test_a_post_with_no_end_date_that_started_long_ago_gets_a_score(conn):
 
     assert conn.execute("SELECT 1 FROM rec_ppr_scores WHERE run_number = %s AND user_id = %s AND post_id = %s",
                         (run, user, standing)).fetchone()
+
+
+def test_a_run_scores_every_event_that_hasnt_ended_and_nothing_else(conn):
+    # The feed alone leaves out a user's own, reacted and blocked posts.
+    user, friend, blocked = users(conn, 3)
+    going, deleted, ended, own, by_blocked, reacted = [p for (p,) in conn.execute(
+        """SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
+           WHERE p.deleted_at IS NULL ORDER BY p.id LIMIT 6""", (app.EMBEDDING_MODEL,))]
+    conn.execute("UPDATE posts SET starts_at = now() + interval '1 day', ends_at = NULL, open_ended = false "
+                 "WHERE id IN (%s, %s, %s, %s, %s)", (going, deleted, own, by_blocked, reacted))
+    conn.execute("UPDATE posts SET deleted_at = now() WHERE id = %s", (deleted,))
+    conn.execute("UPDATE posts SET starts_at = now() - interval '2 days', ends_at = now() - interval '1 day', "
+                 "open_ended = false WHERE id = %s", (ended,))
+    conn.execute("UPDATE posts SET author_id = %s WHERE id = %s", (user, own))
+    conn.execute("UPDATE posts SET author_id = %s WHERE id = %s", (blocked, by_blocked))
+    relate(conn, user, blocked, "BLOCK")
+    conn.execute("""INSERT INTO post_participations (post_id, user_id, type) VALUES (%s, %s, 'NOT_INTERESTED')
+                    ON CONFLICT DO NOTHING""", (reacted, user))
+    befriend(conn, user, friend, going)
+
+    run, _ = app.write(conn, app.load(conn))
+
+    scored = {p for (p,) in conn.execute("SELECT post_id FROM rec_ppr_scores WHERE run_number = %s AND user_id = %s",
+                                         (run, user))}
+    assert {going, own, by_blocked, reacted} <= scored and not scored & {deleted, ended}
 
 
 def test_the_rows_written_are_the_walks_scores(conn):
@@ -109,7 +112,6 @@ def test_stances_fade_and_age_out_and_neither_a_like_nor_nie_dla_mnie_is_an_edge
     weights = {inputs.event_ids[e]: w for v, e, w in inputs.stances if v == u}
     assert weights[fresh] == 2.0 and abs(weights[old] - 1.5 * 0.25) < 1e-9
     assert too_old not in weights and marked not in weights and liked not in weights
-    assert inputs.event_ids.index(liked) in inputs.hidden[u]
 
 
 def test_friends_are_mutual_follows_who_share_their_stances(conn):
@@ -155,37 +157,31 @@ def test_the_job_and_the_feed_have_their_grants(conn):
 
 
 def test_a_run_as_of_an_earlier_time_leaves_out_what_came_after(conn):
-    user, friend, blocked = users(conn, 3)
-    going, fresh, deleted, liked, by_blocked = [p for (p,) in conn.execute(
-        "SELECT post_id FROM post_embeddings WHERE model = %s ORDER BY post_id LIMIT 5", (app.EMBEDDING_MODEL,))]
+    user, friend, old_friend = users(conn, 3)
+    going, fresh, deleted = [p for (p,) in conn.execute(
+        "SELECT post_id FROM post_embeddings WHERE model = %s ORDER BY post_id LIMIT 3", (app.EMBEDDING_MODEL,))]
     conn.execute("UPDATE posts SET created_at = now() - interval '1 day', deleted_at = NULL")
     conn.execute("UPDATE posts SET created_at = now() WHERE id = %s", (fresh,))
     conn.execute("UPDATE posts SET deleted_at = now() WHERE id = %s", (deleted,))
-    conn.execute("UPDATE posts SET author_id = %s WHERE id = %s", (blocked, by_blocked))
-    conn.execute("DELETE FROM post_reactions WHERE user_id = %s", (user,))
     conn.execute("DELETE FROM post_participations WHERE user_id = %s", (user,))
     conn.execute("INSERT INTO post_participations (post_id, user_id, type, created_at) "
                  "VALUES (%s, %s, 'TAKES_PART', now())", (going, user))
-    conn.execute("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (%s, %s, 'LIKE', NULL)",
-                 (liked, user))
-    for a, b in ((user, friend), (friend, user)):
-        relate(conn, a, b, "FOLLOW")
+    for other in (friend, old_friend):
+        for a, b in ((user, other), (other, user)):
+            relate(conn, a, b, "FOLLOW")
     conn.execute("UPDATE user_relations SET created_at = now() WHERE source_user_id = %s AND target_user_id = %s",
                  (user, friend))
-    conn.execute("UPDATE users SET share_stances = true WHERE id IN (%s, %s)", (user, friend))
-    relate(conn, user, blocked, "BLOCK")
-    conn.execute("UPDATE user_relations SET created_at = NULL WHERE source_user_id = %s AND target_user_id = %s",
-                 (user, blocked))
+    conn.execute("UPDATE user_relations SET created_at = NULL WHERE %s IN (source_user_id, target_user_id) "
+                 "AND %s IN (source_user_id, target_user_id)", (user, old_friend))
+    conn.execute("UPDATE users SET share_stances = true WHERE id IN (%s, %s, %s)", (user, friend, old_friend))
     (now,) = conn.execute("SELECT now()").fetchone()
 
     earlier = app.load(conn, now - timedelta(minutes=30))
-    u, f = earlier.user_ids.index(user), earlier.user_ids.index(friend)
-    position = earlier.event_ids.index
-    assert not any(s == u for s, _, _ in earlier.stances) and position(going) not in earlier.hidden[u]
+    u, f, o = (earlier.user_ids.index(x) for x in (user, friend, old_friend))
+    assert not any(s == u for s, _, _ in earlier.stances)
     assert (u, f) not in earlier.friends, "friends only since now"
+    assert (u, o) in earlier.friends, "rows with no time count as always there"
     assert fresh not in earlier.event_ids and deleted in earlier.event_ids
-    # Rows with no time count as always there.
-    assert position(liked) in earlier.hidden[u] and position(by_blocked) in earlier.hidden[u]
 
 
 def test_a_run_that_fails_while_writing_leaves_no_trace_but_still_deletes_old_runs(conn, monkeypatch):

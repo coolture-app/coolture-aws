@@ -34,7 +34,6 @@ def inputs(**kw):
         user_ids=["u0"],
         stances=[],
         friends=[],
-        hidden={},
     )
     base.update(kw)
     return Inputs(**base)
@@ -56,11 +55,11 @@ def test_scores_are_ranks_from_0_to_1():
     assert len(got) == N and min(got.values()) == 0 and max(got.values()) == 1
 
 
-def test_hidden_and_ended_events_get_no_score():
+def test_ended_events_get_no_score():
     not_ended = np.ones(N, dtype=bool)
     not_ended[5] = False
-    got = by_event(scores(inputs(**FRIENDS, not_ended=not_ended, hidden={0: {1}})))
-    assert set(got) == set(range(N)) - {1, 5}
+    got = by_event(scores(inputs(**FRIENDS, not_ended=not_ended)))
+    assert set(got) == set(range(N)) - {5}
 
 
 def test_a_user_whose_friends_marked_nothing_gets_no_rows():
@@ -196,7 +195,7 @@ def test_matches_a_walk_over_edges_written_by_hand():
                    event_vectors=np.array([unit(v) for v in np.random.default_rng(3).normal(size=(4, 5))]),
                    not_ended=np.array([True, True, True, False]), venues=["hall", None, None, "hall"],
                    post_average=np.zeros(5), user_ids=["u0", "u1"], stances=[(1, 3, 2.0), (1, 1, 1.5)],
-                   friends=[(0, 1), (1, 0)], hidden={})
+                   friends=[(0, 1), (1, 0)])
     edges = {}
     for a, b in [("e0", "hall"), ("e3", "hall"), ("e0", "e1"), ("e0", "e2"), ("e1", "e2")]:
         edges.setdefault(a, {})[b] = 1
