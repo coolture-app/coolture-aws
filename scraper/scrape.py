@@ -64,7 +64,7 @@ class DryRun:
     def existing_event_urls(self) -> set[str]:
         return set()
 
-    def create_post(self, post: dict, images: Iterable[Image] = ()) -> Outcome:
+    def create_post(self, post: dict, images: Iterable[Image] = (), category: str | None = None) -> Outcome:
         uploads = [{'fileName': image.file_name, 'mimeType': image.mime_type, 'sizeBytes': len(image.content),
                     'width': image.width, 'height': image.height} for image in islice(images, MAX_PHOTOS)]
         print(json.dumps({**post, 'images': uploads} if uploads else post, ensure_ascii=False))
@@ -145,7 +145,7 @@ def import_item(item: ListingItem, site: Site, geocoder: Geocoder, sink: Cooltur
     stats['online' if event.online else 'exact_location' if place.exact else 'city_location'] += 1
     # Downloaded one at a time as the sink asks, so it stops at the API's limit without fetching the rest.
     images = (image for image in map(site.image, event.image_urls) if image is not None)
-    outcome = sink.create_post(post, images)
+    outcome = sink.create_post(post, images, category=event.category)
     if outcome.failure:
         stats['rejected'] += 1
         log.warning('Rejected url=%s reason=%s', item.url, outcome.failure)

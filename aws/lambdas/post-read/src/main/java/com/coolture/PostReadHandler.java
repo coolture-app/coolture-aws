@@ -138,7 +138,6 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
 
     private PostFeedFilters parseFeedFilters(Map<String, String> qp) {
         String q = qp.get("q");
-        List<String> tags = parseList(qp.get("tags"));
         UUID authorId = qp.get("authorId") != null ? UUID.fromString(qp.get("authorId")) : null;
         PostStatus status = qp.get("status") != null ? PostStatus.valueOf(qp.get("status").toUpperCase()) : null;
         Boolean followed = parseBoolean(qp.get("followed"), "followed") ? true : null;
@@ -160,7 +159,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         boolean includePast = parseIncludePast(qp.get("includePast"));
 
         return new PostFeedFilters(
-            q, tags, authorId, status, followed, type,
+            q, authorId, status, followed, type,
             from, to, lat, lng, radiusKm,
             partTypes, reactionType, cursor, limit, sortBy, includePast
         );

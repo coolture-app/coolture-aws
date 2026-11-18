@@ -75,7 +75,6 @@ class PostReadHandlerTest {
 
         Map<String, String> query = Map.of(
             "q", "jazz",
-            "tags", "music,outdoor",
             "limit", "10",
             "cursor", "abc123"
         );
@@ -115,7 +114,6 @@ class PostReadHandlerTest {
         PostFeedFilters filters = filtersCaptor.getValue();
 
         assertEquals("jazz", filters.q());
-        assertEquals(List.of("music", "outdoor"), filters.tags());
     }
 
     @Test

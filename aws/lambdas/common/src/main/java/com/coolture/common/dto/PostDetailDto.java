@@ -22,7 +22,6 @@ public record PostDetailDto(
     Instant endsAt,
     /** No end date: endsAt is null and the event never ends (EventTime). */
     boolean openEnded,
-    List<String> tags,
     int positiveReactionCount,
     int participantCount,
     int interestedCount,

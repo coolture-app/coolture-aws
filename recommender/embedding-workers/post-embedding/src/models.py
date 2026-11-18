@@ -7,12 +7,10 @@ from pydantic import BaseModel
 class PostContent(BaseModel):
     title: str
     description: Optional[str] = None
-    tags: Optional[list[str]] = None
 
     @property
     def text(self) -> str:
-        tags_str = " ".join(self.tags or [])
-        return f"{self.title} {self.description or ''} {tags_str}".strip()
+        return f"{self.title} {self.description or ''}".strip()
 
 
 class PostEmbeddingRecord(BaseModel):

@@ -1,3 +1,4 @@
+import json
 from collections import Counter
 from datetime import date, datetime, time, timezone
 
@@ -50,17 +51,29 @@ def test_category_is_the_first_part_of_the_sites_label():
 
 def test_snapshot_keeps_the_post_and_its_photos(tmp_path):
     snapshot = Snapshot(tmp_path, clock=lambda: NOW)
-    post = {'title': 'Koncert', 'eventUrl': 'https://site.test/1', 'startsAt': '2026-11-05T18:00:00Z', 'tags': ['koncerty']}
+    post = {'title': 'Koncert', 'eventUrl': 'https://site.test/1', 'startsAt': '2026-11-05T18:00:00Z'}
 
-    outcome = snapshot.create_post(post, [Image(b'one', 'image/webp', 'a.webp', 4, 3), Image(b'two', 'image/jpeg', 'b.jpg')])
+    outcome = snapshot.create_post(post, [Image(b'one', 'image/webp', 'a.webp', 4, 3), Image(b'two', 'image/jpeg', 'b.jpg')],
+                                   category='koncerty')
 
     [entry] = read(tmp_path)
     assert outcome.photos == 2
     assert entry.post == post
+    assert entry.category == 'koncerty'
     assert entry.scraped_at == NOW
     assert [(image.content, image.mime_type, image.file_name, image.width) for image in load_images(tmp_path, entry)] == [
         (b'one', 'image/webp', 'a.webp', 4), (b'two', 'image/jpeg', 'b.jpg', None)]
     assert snapshot.existing_event_urls() == {'https://site.test/1'}
+
+
+def test_a_snapshot_saved_with_tags_gives_them_as_its_category(tmp_path):
+    line = {'scrapedAt': NOW.isoformat(), 'images': [],
+            'post': {'eventUrl': 'https://site.test/1', 'tags': ['wystawy', 'spotkania']}}
+    (tmp_path / 'posts.jsonl').write_text(json.dumps(line) + '\n', encoding='utf-8')
+
+    [entry] = read(tmp_path)
+
+    assert entry.category == 'wystawy, spotkania'
 
 
 def test_snapshot_run_samples_every_category_and_marks_it_complete(tmp_path):
@@ -70,7 +83,7 @@ def test_snapshot_run_samples_every_category_and_marks_it_complete(tmp_path):
     run_snapshot(FakeSite(items), FakeGeocoder(), Snapshot(tmp_path), stats, size=6, clock=lambda: NOW)
 
     # The square roots of 10 and 2 split six as 4 and 2.
-    assert Counter(entry.post['tags'][0] for entry in read(tmp_path)) == {'koncerty': 4, 'kulinaria': 2}
+    assert Counter(entry.category for entry in read(tmp_path)) == {'koncerty': 4, 'kulinaria': 2}
     assert is_complete(tmp_path)
     assert stats['listed'] == 12
 

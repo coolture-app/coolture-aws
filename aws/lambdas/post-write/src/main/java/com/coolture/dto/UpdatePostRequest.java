@@ -26,9 +26,6 @@ public record UpdatePostRequest(
     /** No end date ("do odwołania"). Can't come with an endsAt. */
     Boolean openEnded,
 
-    @Size(max = 10, message = "Maximum 10 tags allowed")
-    List<@Size(max = 32, message = "Tag length cannot exceed 32 characters") String> tags,
-
     PostType type,
 
     @Valid
@@ -39,7 +36,7 @@ public record UpdatePostRequest(
     UUID coverMediaId
 ) {
     public UpdatePostRequest withMediaIds(List<UUID> ordered) {
-        return new UpdatePostRequest(title, description, eventUrl, startsAt, endsAt, openEnded, tags, type, location,
+        return new UpdatePostRequest(title, description, eventUrl, startsAt, endsAt, openEnded, type, location,
             ordered, coverMediaId);
     }
 }

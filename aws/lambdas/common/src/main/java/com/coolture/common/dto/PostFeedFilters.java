@@ -9,7 +9,6 @@ import java.util.UUID;
 
 public record PostFeedFilters(
     String q,
-    List<String> tags,
     UUID authorId,
     PostStatus status,
     /** Only posts by people the viewer follows, or that a friend is interested in or goes to. Null means off. */
@@ -31,17 +30,17 @@ public record PostFeedFilters(
 ) {
 
     public PostFeedFilters(
-        String q, List<String> tags, UUID authorId, PostStatus status, Boolean followed, PostType type,
+        String q, UUID authorId, PostStatus status, Boolean followed, PostType type,
         Instant from, Instant to, Double latitude, Double longitude, Double radiusKm,
         List<String> participationTypes, String reactionType, String cursor, int limit, String sortBy
     ) {
-        this(q, tags, authorId, status, followed, type, from, to, latitude, longitude, radiusKm,
+        this(q, authorId, status, followed, type, from, to, latitude, longitude, radiusKm,
             participationTypes, reactionType, cursor, limit, sortBy, false);
     }
 
     /** No filter at all, as the plain home feed. */
     public static PostFeedFilters none() {
-        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null, null,
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
             null, null, null, 20, null, false);
     }
 

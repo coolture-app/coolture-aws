@@ -175,12 +175,7 @@ public class PostWriteService {
 
     private boolean embeddedContentChanged(PostWriteRepository.ExistingPost existing, PostDetailDto updated) {
         return !Objects.equals(existing.title(), updated.title())
-            || !Objects.equals(existing.description(), updated.description())
-            || !Objects.equals(normalizeTags(existing.tags()), normalizeTags(updated.tags()));
-    }
-
-    private List<String> normalizeTags(List<String> tags) {
-        return tags != null ? tags : List.of();
+            || !Objects.equals(existing.description(), updated.description());
     }
 
     private void validateTypeLocationInvariant(PostType type, EventLocationDto location) {

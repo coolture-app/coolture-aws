@@ -29,7 +29,6 @@ paths:
         - $ref: '#/components/parameters/Longitude'
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/Q'
-        - $ref: '#/components/parameters/Tags'
         - $ref: '#/components/parameters/AuthorId'
         - $ref: '#/components/parameters/Status'
         - $ref: '#/components/parameters/Followed'
@@ -81,7 +80,6 @@ paths:
             to come, every 5th card (README.md).
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/Q'
-        - $ref: '#/components/parameters/Tags'
         - $ref: '#/components/parameters/AuthorId'
         - $ref: '#/components/parameters/Status'
         - $ref: '#/components/parameters/Followed'
@@ -201,13 +199,6 @@ components:
       in: query
       description: Matches a part of the title, the description, the city or the place's name, ignoring case.
       schema: {type: string}
-    Tags:
-      name: tags
-      in: query
-      description: Comma-separated or repeated. A post matches if it has any of them.
-      schema: {type: array, items: {type: string}}
-      style: form
-      explode: true
     AuthorId:
       name: authorId
       in: query
@@ -303,7 +294,6 @@ components:
         - title
         - startsAt
         - openEnded
-        - tags
         - positiveReactionCount
         - participantCount
         - interestedCount
@@ -322,7 +312,6 @@ components:
         startsAt: {type: string, format: date-time}
         endsAt: {type: string, format: date-time}
         openEnded: {type: boolean, description: No end date. Such a post never has endsAt and never ends.}
-        tags: {type: array, items: {type: string}}
         positiveReactionCount: {type: integer}
         participantCount: {type: integer, description: interestedCount and goingCount together.}
         interestedCount: {type: integer, description: People who marked it Interesuje mnie.}

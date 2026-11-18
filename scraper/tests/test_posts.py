@@ -22,7 +22,6 @@ def test_offline_post_matches_create_post_request():
         'description': 'Opis wydarzenia.',
         'eventUrl': 'https://www.trojmiasto.pl/imprezy/x-imp1.html',
         'startsAt': '2026-11-05T18:00:00Z',
-        'tags': ['koncerty'],
         'type': 'OFFLINE',
         'location': {
             'countryCode': 'PL',
@@ -75,12 +74,8 @@ def test_the_post_keeps_the_street_as_published():
     assert to_post(event(street='ul. Morska'), PLACE)['location']['street'] == 'ul. Morska'
 
 
-def test_no_tag_when_there_is_no_category():
-    assert to_post(event(category=None), PLACE)['tags'] == []
-
-
-def test_category_with_a_comma_gives_separate_tags():
-    assert to_post(event(category='sport, rekreacja'), PLACE)['tags'] == ['sport', 'rekreacja']
+def test_the_category_stays_out_of_the_post():
+    assert 'tags' not in to_post(event(category='sport, rekreacja'), PLACE)
 
 
 def test_long_values_stay_within_the_api_limits():
@@ -92,7 +87,6 @@ def test_long_values_stay_within_the_api_limits():
 
     assert len(post['title']) <= 128
     assert len(post['description']) <= DESCRIPTION_MAX
-    assert len(post['tags'][0]) <= 32
     assert len(post['location']['venueName']) <= VENUE_MAX
     assert len(post['location']['street']) <= 128
     assert len(post['location']['city']) <= 128

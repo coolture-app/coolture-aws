@@ -185,7 +185,7 @@ class PostWriteDbTest {
     @Test
     void anEdit_removesTheEndAndTheLink_andSetsNoEndDate_andBack() throws SQLException {
         execute("UPDATE posts SET ends_at = starts_at + interval '2 hours', event_url = 'https://example.com' WHERE id = '" + POST + "'");
-        UpdatePostRequest title = new UpdatePostRequest("still a stance test", null, null, null, null, null, null, null, null, null, null);
+        UpdatePostRequest title = new UpdatePostRequest("still a stance test", null, null, null, null, null, null, null, null, null);
 
         PostWriteRepository.ExistingPost existing = repository.findById(POST).orElseThrow();
         PostDetailDto standing = repository.updatePost(POST, AUTHOR, existing, title, ending(existing, null, true));
