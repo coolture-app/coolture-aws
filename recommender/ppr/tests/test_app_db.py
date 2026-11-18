@@ -50,6 +50,32 @@ def test_a_run_leaves_out_what_the_feed_wont_show(conn):
     assert scored and not scored & {deleted, ended, own, by_blocked, by_blocker, reacted}
 
 
+def befriend(conn, user, friend, going):
+    for a, b in ((user, friend), (friend, user)):
+        relate(conn, a, b, "FOLLOW")
+    conn.execute("UPDATE users SET share_stances = true WHERE id IN (%s, %s)", (user, friend))
+    conn.execute("""INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (%s, %s, 'TAKES_PART', now())
+                    ON CONFLICT (post_id, user_id) DO UPDATE SET type = EXCLUDED.type, created_at = EXCLUDED.created_at""",
+                 (going, friend))
+
+
+def test_a_post_with_no_end_date_that_started_long_ago_gets_a_score(conn):
+    user, friend = users(conn, 2)
+    going, standing = [p for (p,) in conn.execute(
+        """SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
+           WHERE p.deleted_at IS NULL ORDER BY p.id LIMIT 2""", (app.EMBEDDING_MODEL,))]
+    conn.execute("UPDATE posts SET starts_at = now() - interval '200 days', ends_at = NULL, open_ended = true "
+                 "WHERE id = %s", (standing,))
+    conn.execute("UPDATE posts SET starts_at = now() + interval '1 day', ends_at = NULL, open_ended = false "
+                 "WHERE id = %s", (going,))
+    befriend(conn, user, friend, going)
+
+    run, _ = app.write(conn, app.load(conn))
+
+    assert conn.execute("SELECT 1 FROM rec_ppr_scores WHERE run_number = %s AND user_id = %s AND post_id = %s",
+                        (run, user, standing)).fetchone()
+
+
 def test_the_rows_written_are_the_walks_scores(conn):
     inputs = app.load(conn)
     assert inputs is not None, "seed the database first"

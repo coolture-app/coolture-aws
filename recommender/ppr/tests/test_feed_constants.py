@@ -3,12 +3,20 @@ from pathlib import Path
 
 import app
 
-FEED = Path(__file__).resolve().parents[3] / "aws/lambdas/post-read/src/main/java/com/coolture"
-FEED_CONFIG = (FEED / "feed/FeedConfig.java").read_text(encoding="utf-8")
+LAMBDAS = Path(__file__).resolve().parents[3] / "aws/lambdas"
+FEED_CONFIG = (LAMBDAS / "post-read/src/main/java/com/coolture/feed/FeedConfig.java").read_text(encoding="utf-8")
+EVENT_TIME = (LAMBDAS / "common/src/main/java/com/coolture/common/db/EventTime.java").read_text(encoding="utf-8")
 
 
-def java(pattern: str) -> str:
-    return re.search(pattern, FEED_CONFIG).group(1)
+def java(pattern: str, source: str = FEED_CONFIG) -> str:
+    return re.search(pattern, source).group(1)
+
+
+def java_string(name: str, source: str) -> str:
+    """A Java String constant built from literals and int constants of the same class joined by +."""
+    expression = java(rf"String {name} =\s*([^;]+);", source)
+    parts = re.findall(r'"((?:[^"\\]|\\.)*)"|(\w+)', expression)
+    return "".join(literal or java(rf"int {constant} = (\d+);", source) for literal, constant in parts)
 
 
 def test_the_job_reads_stances_and_events_as_the_feed_does():
@@ -17,7 +25,5 @@ def test_the_job_reads_stances_and_events_as_the_feed_does():
     assert app.STANCE_WEIGHTS.items() <= {k: float(v) for k, v in weights}.items()
     assert app.STANCE_HALF_LIFE_DAYS == float(java(r"STANCE_HALF_LIFE_DAYS = ([\d.]+);"))
     assert app.STANCE_MAX_AGE_DAYS == int(java(r"STANCE_MAX_AGE_DAYS = (\d+);"))
-    assert app.DEFAULT_EVENT_HOURS == int(java(r"DEFAULT_EVENT_HOURS = (\d+);"))
-    before, after = re.search(r'EVENT_END =\s*"(.+?)" \+ FeedConfig\.DEFAULT_EVENT_HOURS \+ "(.+?)"',
-                              (FEED / "repository/PostSql.java").read_text(encoding="utf-8")).groups()
-    assert app.EVENT_END == f"{before}{app.DEFAULT_EVENT_HOURS}{after}"
+    assert app.DEFAULT_EVENT_HOURS == int(java(r"DEFAULT_EVENT_HOURS = (\d+);", EVENT_TIME))
+    assert app.EVENT_END == java_string("END", EVENT_TIME)

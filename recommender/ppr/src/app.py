@@ -17,14 +17,15 @@ logger.setLevel(logging.INFO)
 
 EMBEDDING_MODEL = "sdadas/mmlw-roberta-base"
 
-# The feed's own rules, from FeedConfig and PostSql. tests/test_feed_constants.py checks they agree.
+# The feed's own rules, from FeedConfig and EventTime. tests/test_feed_constants.py checks they agree.
 # Not likes: friends see only interested and going on the cards, and through the graph a like would reach them.
 STANCE_WEIGHTS = {"INTERESTED": 1.5, "TAKES_PART": 2.0}
 STANCE_HALF_LIFE_DAYS = 14
 STANCE_MAX_AGE_DAYS = 112
 DEFAULT_EVENT_HOURS = 3
 
-EVENT_END = f"COALESCE(p.ends_at, p.starts_at + interval '{DEFAULT_EVENT_HOURS} hours')"
+EVENT_END = ("CASE WHEN p.open_ended THEN 'infinity'::timestamptz "
+             f"ELSE COALESCE(p.ends_at, p.starts_at + interval '{DEFAULT_EVENT_HOURS} hours') END")
 
 POST_AVERAGE = """
 SELECT avg(pe.embedding)::real[]
