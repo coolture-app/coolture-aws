@@ -27,3 +27,7 @@ def test_the_job_reads_stances_and_events_as_the_feed_does():
     assert app.STANCE_MAX_AGE_DAYS == int(java(r"STANCE_MAX_AGE_DAYS = (\d+);"))
     assert app.DEFAULT_EVENT_HOURS == int(java(r"DEFAULT_EVENT_HOURS = (\d+);", EVENT_TIME))
     assert app.EVENT_END == java_string("END", EVENT_TIME)
+
+
+def test_runs_are_deleted_when_the_feed_stops_reading_them():
+    assert app.RUN_MAX_AGE_HOURS == int(java(r"PPR_RUN_MAX_AGE_HOURS = (\d+);"))

@@ -141,7 +141,7 @@ Every event that hasn't ended gets the walk's mass as a rank from 0 to 1, for ea
 user's own, reacted and blocked posts, so its rules have one copy. The feed reads the latest run finished `PPR_RUN_MARGIN_SECONDS` before the session's `asOf`, so a run landing mid-scroll doesn't
 move its pages, and ignores a run older than `PPR_RUN_MAX_AGE_HOURS`, whose friendships may have changed since. A post
 with no score gets `NEUTRAL` (weight `ppr` in `FeedConfig`), so locally PageRank's effect goes after a day unless
-`make ppr` runs again. A run is deleted once a newer one is over a day old. `FEED_WEIGHTS=ppr=0` on `PostReadFunction`
+`make ppr` runs again. The next run deletes runs the feed no longer reads. `FEED_WEIGHTS=ppr=0` on `PostReadFunction`
 keeps the runs but gives them no say in the feed.
 
 `load()` takes an `as_of` to replay an earlier moment, with the limits its docstring lists.

@@ -132,19 +132,20 @@ def test_friends_are_mutual_follows_who_share_their_stances(conn):
     assert not edge(a, b) and edge(b, a)
 
 
-def test_a_run_keeps_the_newest_run_finished_over_a_day_ago_and_deletes_older_ones(conn):
-    def run_finished(ago):
-        return conn.execute("INSERT INTO rec_ppr_runs (finished_at) VALUES (now() - %s::interval) RETURNING run_number",
-                            (ago,)).fetchone()[0]
+def run_finished(conn, hours_ago):
+    return conn.execute("INSERT INTO rec_ppr_runs (finished_at) VALUES (now() - make_interval(hours => %s)) "
+                        "RETURNING run_number", (hours_ago,)).fetchone()[0]
 
+
+def test_a_run_deletes_the_runs_the_feed_no_longer_reads(conn):
     conn.execute("DELETE FROM rec_ppr_scores")
     conn.execute("DELETE FROM rec_ppr_runs")
-    day_old, oldest, recent = run_finished("2 days"), run_finished("3 days"), run_finished("1 hour")
-    conn.execute("INSERT INTO rec_ppr_scores VALUES (%s, gen_random_uuid(), gen_random_uuid(), 0.5)", (oldest,))
+    too_old, recent = run_finished(conn, app.RUN_MAX_AGE_HOURS + 1), run_finished(conn, app.RUN_MAX_AGE_HOURS - 1)
+    conn.execute("INSERT INTO rec_ppr_scores VALUES (%s, gen_random_uuid(), gen_random_uuid(), 0.5)", (too_old,))
     new, _ = app.write(conn, app.load(conn))
 
-    assert {r for (r,) in conn.execute("SELECT run_number FROM rec_ppr_runs")} == {day_old, recent, new}
-    assert not conn.execute("SELECT 1 FROM rec_ppr_scores WHERE run_number = %s", (oldest,)).fetchone()
+    assert {r for (r,) in conn.execute("SELECT run_number FROM rec_ppr_runs")} == {recent, new}
+    assert not conn.execute("SELECT 1 FROM rec_ppr_scores WHERE run_number = %s", (too_old,)).fetchone()
 
 
 def test_the_job_and_the_feed_have_their_grants(conn):
@@ -188,9 +189,8 @@ def test_a_run_that_fails_while_writing_leaves_no_trace_but_still_deletes_old_ru
     inputs = app.load(conn)
     conn.execute("DELETE FROM rec_ppr_scores")
     conn.execute("DELETE FROM rec_ppr_runs")
-    oldest, day_old = [conn.execute("INSERT INTO rec_ppr_runs (finished_at) VALUES (now() - %s::interval) "
-                                    "RETURNING run_number", (ago,)).fetchone()[0] for ago in ("3 days", "2 days")]
-    conn.execute("INSERT INTO rec_ppr_scores VALUES (%s, gen_random_uuid(), gen_random_uuid(), 0.5)", (oldest,))
+    too_old, recent = run_finished(conn, app.RUN_MAX_AGE_HOURS + 1), run_finished(conn, 1)
+    conn.execute("INSERT INTO rec_ppr_scores VALUES (%s, gen_random_uuid(), gen_random_uuid(), 0.5)", (too_old,))
 
     real_scores = app.scores
 
@@ -203,5 +203,5 @@ def test_a_run_that_fails_while_writing_leaves_no_trace_but_still_deletes_old_ru
     with pytest.raises(MemoryError):
         app.write(conn, inputs)
 
-    assert [r for (r,) in conn.execute("SELECT run_number FROM rec_ppr_runs")] == [day_old]
+    assert [r for (r,) in conn.execute("SELECT run_number FROM rec_ppr_runs")] == [recent]
     assert not conn.execute("SELECT 1 FROM rec_ppr_scores").fetchone()

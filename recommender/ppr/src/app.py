@@ -21,6 +21,7 @@ STANCE_WEIGHTS = {"INTERESTED": 1.5, "TAKES_PART": 2.0}
 STANCE_HALF_LIFE_DAYS = 14
 STANCE_MAX_AGE_DAYS = 112
 DEFAULT_EVENT_HOURS = 3
+RUN_MAX_AGE_HOURS = 24
 
 EVENT_END = ("CASE WHEN p.open_ended THEN 'infinity'::timestamptz "
              f"ELSE COALESCE(p.ends_at, p.starts_at + interval '{DEFAULT_EVENT_HOURS} hours') END")
@@ -60,11 +61,10 @@ SELECT source_user_id, target_user_id FROM user_relations
 WHERE type = 'FOLLOW' AND COALESCE(created_at, '-infinity') <= %(as_of)s
 """
 
-# Runs older than the newest one finished over a day ago, which no session still reads.
+# The feed ignores these runs, whatever the session's asOf.
 DELETE_OLD_RUNS = """
 WITH old AS (
-    DELETE FROM rec_ppr_runs
-    WHERE finished_at < (SELECT max(finished_at) FROM rec_ppr_runs WHERE finished_at < now() - interval '1 day')
+    DELETE FROM rec_ppr_runs WHERE finished_at < now() - make_interval(hours => %(max_age_hours)s)
     RETURNING run_number
 )
 DELETE FROM rec_ppr_scores WHERE run_number IN (SELECT run_number FROM old)
@@ -149,7 +149,7 @@ def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | No
 def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
     """Scores while it copies, so the rows never all sit in memory."""
     # Outside the run's transaction, so old runs go even when this run fails.
-    conn.execute(DELETE_OLD_RUNS)
+    conn.execute(DELETE_OLD_RUNS, {"max_age_hours": RUN_MAX_AGE_HOURS})
     rows = 0
     with conn.transaction():
         (run,) = conn.execute("INSERT INTO rec_ppr_runs DEFAULT VALUES RETURNING run_number").fetchone()
