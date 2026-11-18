@@ -4,6 +4,8 @@ import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.pagination.CursorPage;
+import com.coolture.common.pagination.PaginationMeta;
+import com.coolture.repository.Upcoming;
 
 import java.sql.SQLException;
 import java.time.Clock;
@@ -62,7 +64,7 @@ public class FeedService {
         Optional<FeedCursor> cursor = FeedCursor.decode(rawCursor);
 
         if (cursor.isPresent() && !cursor.get().ranked()) {
-            return upcomingPage(viewer, filters, cursor.get().t(), cursor.get().st(), cursor.get().id(), effectiveLimit);
+            return upcomingPage(viewer, filters, cursor.get().position(), effectiveLimit);
         }
 
         Session session = cursor.isPresent()
@@ -74,7 +76,7 @@ public class FeedService {
             ranked = rank(viewer, session, filters, effectiveLimit + 1);
         } catch (SQLException | RuntimeException e) {
             System.err.println("Feed ranking failed, using the upcoming order: " + e);
-            return upcomingPage(viewer, filters, session.asOf(), null, null, effectiveLimit);
+            return upcomingPage(viewer, filters, Upcoming.Position.start(session.asOf()), effectiveLimit);
         }
 
         CursorPage<Ranked> page = CursorPage.of(ranked, effectiveLimit, last -> FeedCursor
@@ -133,12 +135,10 @@ public class FeedService {
         return ids.stream().filter(cards::containsKey).map(cards::get).toList();
     }
 
-    private FeedPage upcomingPage(UUID viewer, PostFeedFilters filters, Instant asOf, Instant afterStartsAt, UUID afterId,
-                                  int limit) throws SQLException {
-        List<PostCardDto> rows = repository.findUpcoming(viewer, asOf, filters, afterStartsAt, afterId, limit + 1);
-        CursorPage<PostCardDto> page = CursorPage.of(rows, limit,
-            last -> FeedCursor.upcoming(asOf, last.startsAt(), last.id()).encode());
-        return new FeedPage(FeedMode.UPCOMING, page.items(), page.page());
+    private FeedPage upcomingPage(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
+        Upcoming.Page page = repository.findUpcoming(viewer, filters, at, limit);
+        String next = page.hasMore() ? FeedCursor.upcoming(page.next()).encode() : null;
+        return new FeedPage(FeedMode.UPCOMING, page.items(), new PaginationMeta(limit, page.hasMore(), next));
     }
 
     /** About 1.1 km, so a precise position can't reach logs or cursors, whatever the client sent. */

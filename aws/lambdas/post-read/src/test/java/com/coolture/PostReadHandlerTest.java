@@ -146,11 +146,11 @@ class PostReadHandlerTest {
     }
 
     @Test
-    void getFeed_whenStartsFromIsInvalid_thenReturns400() {
+    void getFeed_whenFromIsInvalid_thenReturns400() {
         APIGatewayV2HTTPEvent event =
             ApiGatewayEvents.get(
                 "/posts",
-                Map.of("startsFrom", "not-a-date")
+                Map.of("from", "not-a-date")
             );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {

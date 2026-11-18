@@ -3,6 +3,8 @@ package com.coolture;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.dto.PostDetailDto;
+import com.coolture.dto.UpdatePostRequest;
 import com.coolture.repository.PostWriteRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Stances on the migrated database. Needs `make up`; run it with `make test-db`. Its rows are removed afterwards. */
+/** Stances and edits on the migrated database. Needs `make up`; run it with `make test-db`. Its rows are removed afterwards. */
 @EnabledIfEnvironmentVariable(named = "DB_TEST", matches = "true")
 class PostWriteDbTest {
 
@@ -159,9 +161,49 @@ class PostWriteDbTest {
         assertEquals("TAKES_PART", stance());
     }
 
+    @Test
+    void aPostWithNoEndDate_neverEnds_soItStillTakesAStance() throws SQLException {
+        execute("UPDATE posts SET starts_at = now() - interval '30 days', ends_at = NULL, open_ended = true WHERE id = '" + POST + "'");
+
+        repository.upsertParticipation(POST, VIEWER, ParticipationType.INTERESTED);
+
+        assertEquals("INTERESTED", stance());
+    }
+
     private static void assertNotFound(org.junit.jupiter.api.function.Executable call) {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, call);
         assertTrue(e.getMessage().toLowerCase().contains("not found"), e.getMessage());
+    }
+
+    @Test
+    void aPostWithNoEndDate_cantHaveAnEnd() {
+        SQLException e = assertThrows(SQLException.class, () -> execute(
+            "UPDATE posts SET open_ended = true, ends_at = starts_at + interval '1 day' WHERE id = '" + POST + "'"));
+        assertTrue(e.getMessage().contains("posts_open_ended_has_no_end"), e.getMessage());
+    }
+
+    @Test
+    void anEdit_removesTheEndAndTheLink_andSetsNoEndDate_andBack() throws SQLException {
+        execute("UPDATE posts SET ends_at = starts_at + interval '2 hours', event_url = 'https://example.com' WHERE id = '" + POST + "'");
+        UpdatePostRequest title = new UpdatePostRequest("still a stance test", null, null, null, null, null, null, null, null, null, null);
+
+        PostWriteRepository.ExistingPost existing = repository.findById(POST).orElseThrow();
+        PostDetailDto standing = repository.updatePost(POST, AUTHOR, existing, title, ending(existing, null, true));
+        assertTrue(standing.openEnded());
+        assertNull(standing.endsAt());
+        assertNull(standing.eventUrl());
+
+        Instant end = Instant.parse("2040-01-01T21:00:00Z");
+        existing = repository.findById(POST).orElseThrow();
+        PostDetailDto dated = repository.updatePost(POST, AUTHOR, existing, title, ending(existing, end, false));
+        assertFalse(dated.openEnded());
+        assertEquals(end, dated.endsAt());
+    }
+
+    /** The saved post with no link and the given end. */
+    private static PostWriteRepository.Fields ending(PostWriteRepository.ExistingPost post, Instant endsAt, boolean openEnded) {
+        return new PostWriteRepository.Fields(post.title(), post.description(), null, post.type(), post.startsAt(), endsAt,
+            openEnded);
     }
 
     private static String stance() throws SQLException {

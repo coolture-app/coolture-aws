@@ -1,5 +1,9 @@
 package com.coolture.services;
 
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import com.coolture.repository.Upcoming;
+
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.pagination.CursorCodec;
@@ -151,7 +155,7 @@ class PostReadServiceTest {
 
     private static PostCardDto card(int likes) {
         Instant now = Instant.parse("2026-11-02T12:00:00.123456Z");
-        return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, now.plusSeconds(60), null, List.of(),
+        return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, now.plusSeconds(60), null, false, List.of(),
             likes, 0, 0, 0, 0, null, null, now, null, null, null, null, null, null, null);
     }
 
@@ -181,7 +185,7 @@ class PostReadServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(PostSort.class)
+    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = "UPCOMING")
     void getFeed_nextCursorContinuesTheSameSortFromTheLastItem(PostSort sort) throws SQLException {
         PostFeedFilters filters = sortedBy(sort.name());
         List<PostCardDto> rows = List.of(card(9), card(5), card(1));
@@ -201,7 +205,26 @@ class PostReadServiceTest {
         assertEquals(new PostsCursor(sort, last.id(),
             sort == PostSort.RECENT ? last.createdAt() : null,
             sort == PostSort.POPULAR ? last.positiveReactionCount() : null,
-            sort == PostSort.UPCOMING ? last.startsAt() : null), cursor.getValue());
+            null), cursor.getValue());
+    }
+
+    @Test
+    void getFeed_upcoming_continuesFromThePositionTheMergeReturned() throws SQLException {
+        PostFeedFilters filters = sortedBy("UPCOMING");
+        Upcoming.Position next = new Upcoming.Position(Instant.parse("2026-11-02T12:00:00Z"),
+            Instant.parse("2026-11-03T19:00:00Z"), UUID.randomUUID(), null, UUID.randomUUID(), 2);
+        when(repository.findUpcoming(any(), any(), any(), eq(2)))
+            .thenReturn(new Upcoming.Page(List.of(card(1), card(2)), true, next));
+
+        CursorPage<PostCardDto> page = service.getFeed(null, filters, null, 2);
+        assertTrue(page.page().hasMore());
+        service.getFeed(null, filters, page.page().nextCursor(), 2);
+
+        ArgumentCaptor<Upcoming.Position> at = ArgumentCaptor.forClass(Upcoming.Position.class);
+        verify(repository, times(2)).findUpcoming(any(), any(), at.capture(), eq(2));
+        assertEquals(0, at.getAllValues().getFirst().count());
+        assertNull(at.getAllValues().getFirst().datedId());
+        assertEquals(next, at.getAllValues().getLast());
     }
 
     @Test

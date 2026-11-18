@@ -13,6 +13,8 @@ public record PostMarkDto(
     String title,
     Instant startsAt,
     Instant endsAt,
+    /** No end date: endsAt is null and the event never ends (EventTime). */
+    boolean openEnded,
     String coverMediaUrl,
     /** The description's start for the map's preview, whitespace joined, at most `PostReadRepository.EXCERPT_CHARS`. */
     String excerpt,
@@ -28,7 +30,7 @@ public record PostMarkDto(
     FriendStancesDto friendStances
 ) {
     public PostMarkDto withFriendStances(FriendStancesDto stances) {
-        return new PostMarkDto(id, title, startsAt, endsAt, coverMediaUrl, excerpt, positiveReactionCount, interestedCount,
+        return new PostMarkDto(id, title, startsAt, endsAt, openEnded, coverMediaUrl, excerpt, positiveReactionCount, interestedCount,
             goingCount, coordinates, venueName, city, myReaction, myParticipation, stances);
     }
 }

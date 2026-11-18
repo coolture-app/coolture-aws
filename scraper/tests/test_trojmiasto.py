@@ -8,7 +8,7 @@ import requests
 
 from images import Image
 from posts import cut_description
-from trojmiasto import EventPage, ListingItem, Site, clean_description, merge, parse_event_page, parse_listing
+from trojmiasto import WARSAW, EventPage, ListingItem, Site, clean_description, merge, parse_event_page, parse_listing
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 
@@ -583,3 +583,45 @@ def test_every_site_request_waits_a_second():
     list(Site(session, sleep=pauses.append).listing_items())
 
     assert pauses == [1.0, 1.0, 1.0]
+
+
+def test_an_exhibitions_run_written_in_its_text_gives_the_end():
+    page = read_page(description='Wernisaż: 26 listopada 2026, godz. 18:00\n\n'
+                                 'Wystawa czynna: od 26 listopada 2026 do 28 lutego 2027')
+
+    assert merge(listed(), page).end == datetime(2027, 2, 28, 23, 59, tzinfo=WARSAW)
+    assert merge(listed(), page).open_ended is False
+
+
+def test_a_written_end_without_a_year_is_the_next_such_day():
+    page = read_page(description='Ekspozycja potrwa do 10 stycznia.')
+
+    assert merge(listed(), page).end == datetime(2027, 1, 10, 23, 59, tzinfo=WARSAW)
+
+
+def test_the_pages_own_end_comes_before_the_text():
+    page = read_page(end=datetime(2026, 12, 1), description='Wystawa czynna do 28 lutego 2027')
+
+    assert merge(listed(), page).end == datetime(2026, 12, 1, 23, 59, tzinfo=WARSAW)
+
+
+@pytest.mark.parametrize('text', ['Wystawa stała w Ratuszu.', 'Ekspozycja stała muzeum.', 'Czynne do odwołania.'])
+def test_only_a_standing_phrase_means_no_end_date(text):
+    event = merge(listed(end_hour=time(18, 0), hour=time(10, 0)), read_page(description=text))
+
+    assert event.open_ended is True
+    assert event.end is None
+
+
+def test_a_talk_in_the_exhibitions_category_keeps_the_default_end():
+    event = merge(listed(category='wystawy, spotkania'), read_page(description='Spotkanie autorskie z pisarką.'))
+
+    assert event.open_ended is False
+    assert event.end is None
+
+
+def test_a_standing_phrase_with_an_end_takes_the_end():
+    event = merge(listed(), read_page(description='Wystawa stała. Wystawa czynna do 28 lutego 2027.'))
+
+    assert event.open_ended is False
+    assert event.end == datetime(2027, 2, 28, 23, 59, tzinfo=WARSAW)

@@ -63,6 +63,57 @@ HTTP 200
 [Asserts]
 jsonpath "$.location" not exists
 
+# PATCH follows merge-patch rules: a field left out keeps its value, and null removes it.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "endsAt": null, "eventUrl": null }
+HTTP 200
+[Asserts]
+jsonpath "$.endsAt" not exists
+jsonpath "$.eventUrl" not exists
+jsonpath "$.openEnded" == false
+jsonpath "$.title" == "Wieczór z planszówkami online, edycja zimowa"
+
+# No end date and an end at once is a contradiction.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "openEnded": true, "endsAt": "2030-01-15T21:00:00Z" }
+HTTP 400
+
+# With no end date, the post runs in every later window.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "openEnded": true }
+HTTP 200
+[Asserts]
+jsonpath "$.openEnded" == true
+jsonpath "$.endsAt" not exists
+
+GET {{api}}/posts?authorId={{anna}}&from=2031-06-06T00:00:00Z&to=2031-06-07T23:59:59Z&limit=100
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.items[?(@.id == '{{post}}')].openEnded" == true
+
+# An end turns it off again.
+PATCH {{api}}/posts/{{post}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "endsAt": "2030-01-15T21:00:00Z" }
+HTTP 200
+[Asserts]
+jsonpath "$.openEnded" == false
+jsonpath "$.endsAt" == "2030-01-15T21:00:00Z"
+
+GET {{api}}/posts?authorId={{anna}}&from=2031-06-06T00:00:00Z&to=2031-06-07T23:59:59Z&limit=100
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.items[?(@.id == '{{post}}')]" not exists
+
 # Jan likes it and is interested. PUT replaces his reaction, so sending it twice changes nothing.
 PUT {{api}}/posts/{{post}}/reaction
 X-User-Id: {{jan}}
