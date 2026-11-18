@@ -20,7 +20,8 @@ public record PostCardDto(
     String eventUrl,
     Instant startsAt,
     Instant endsAt,
-    List<String> tags,
+    /** No end date: endsAt is null and the event never ends (EventTime). */
+    boolean openEnded,
     int positiveReactionCount,
     int participantCount,
     int interestedCount,
@@ -39,14 +40,14 @@ public record PostCardDto(
     FriendStancesDto friendStances
 ) {
     public PostCardDto withPhotos(List<MediaResourceDto> newPhotos) {
-        return new PostCardDto(id, author, location, title, description, eventUrl, startsAt, endsAt, tags,
+        return new PostCardDto(id, author, location, title, description, eventUrl, startsAt, endsAt, openEnded,
             positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status,
             createdAt, lastModifiedAt, deletedAt, coverMedia, myReaction, myParticipation,
             newPhotos == null || newPhotos.isEmpty() ? null : newPhotos, friendStances);
     }
 
     public PostCardDto withFriendStances(FriendStancesDto stances) {
-        return new PostCardDto(id, author, location, title, description, eventUrl, startsAt, endsAt, tags,
+        return new PostCardDto(id, author, location, title, description, eventUrl, startsAt, endsAt, openEnded,
             positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status,
             createdAt, lastModifiedAt, deletedAt, coverMedia, myReaction, myParticipation, photos, stances);
     }

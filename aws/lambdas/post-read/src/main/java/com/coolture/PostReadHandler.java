@@ -138,14 +138,13 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
 
     private PostFeedFilters parseFeedFilters(Map<String, String> qp) {
         String q = qp.get("q");
-        List<String> tags = parseList(qp.get("tags"));
         UUID authorId = qp.get("authorId") != null ? UUID.fromString(qp.get("authorId")) : null;
         PostStatus status = qp.get("status") != null ? PostStatus.valueOf(qp.get("status").toUpperCase()) : null;
         Boolean followed = parseBoolean(qp.get("followed"), "followed") ? true : null;
         PostType type = qp.get("type") != null ? PostType.valueOf(qp.get("type").toUpperCase()) : null;
 
-        Instant startsFrom = qp.get("startsFrom") != null ? Instant.parse(qp.get("startsFrom")) : null;
-        Instant startsTo = qp.get("startsTo") != null ? Instant.parse(qp.get("startsTo")) : null;
+        Instant from = qp.get("from") != null ? Instant.parse(qp.get("from")) : null;
+        Instant to = qp.get("to") != null ? Instant.parse(qp.get("to")) : null;
 
         Double lat = parseCoordinate(qp, "latitude", 90);
         Double lng = parseCoordinate(qp, "longitude", 180);
@@ -160,8 +159,8 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         boolean includePast = parseIncludePast(qp.get("includePast"));
 
         return new PostFeedFilters(
-            q, tags, authorId, status, followed, type,
-            startsFrom, startsTo, lat, lng, radiusKm,
+            q, authorId, status, followed, type,
+            from, to, lat, lng, radiusKm,
             partTypes, reactionType, cursor, limit, sortBy, includePast
         );
     }

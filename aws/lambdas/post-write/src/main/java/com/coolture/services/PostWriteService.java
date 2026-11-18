@@ -15,10 +15,12 @@ import com.coolture.common.validation.PostLimits;
 
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -43,6 +45,7 @@ public class PostWriteService {
     public PostDetailDto createPost(UUID authorId, CreatePostRequest req) throws SQLException {
         validateTypeLocationInvariant(req.type(), req.location());
         validateDateRange(req.startsAt(), req.endsAt());
+        validateEnd(req.openEnded(), req.endsAt());
         validateMedia(req.mediaIds(), req.coverMediaId());
 
         requireEventPhotos(repository.validateMediaOwnership(authorId, req.mediaIds()));
@@ -52,7 +55,11 @@ public class PostWriteService {
         return created;
     }
 
-    public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req) throws SQLException {
+    /**
+     * Merge-patch: a field left out of the request keeps its value, and one in removed (sent as null) loses it. Only
+     * endsAt and eventUrl can be removed; a null in any other field keeps it.
+     */
+    public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req, Set<String> removed) throws SQLException {
         PostWriteRepository.ExistingPost existing = repository.findById(postId)
             .orElseThrow(() -> new IllegalArgumentException("Post not found: " + postId));
 
@@ -71,9 +78,19 @@ public class PostWriteService {
             : existing.location();
         validateTypeLocationInvariant(newType, newLocation);
 
+        validateEnd(req.openEnded(), req.endsAt());
+        // An end sent alone turns "no end date" off, and "no end date" drops any saved end.
+        boolean openEnded = req.openEnded() != null ? req.openEnded() : req.endsAt() == null && existing.openEnded();
+        Instant newEndsAt = openEnded ? null
+            : req.endsAt() != null ? req.endsAt()
+            : removed.contains("endsAt") ? null
+            : existing.endsAt();
+        String newEventUrl = req.eventUrl() != null ? req.eventUrl()
+            : removed.contains("eventUrl") ? null
+            : existing.eventUrl();
         Instant newStartsAt = req.startsAt() != null ? req.startsAt() : existing.startsAt();
-        Instant newEndsAt = req.endsAt() != null ? req.endsAt() : existing.endsAt();
         validateDateRange(newStartsAt, newEndsAt);
+        refuseStartMovedToPast(existing.startsAt(), req.startsAt(), Instant.now());
 
         UpdatePostRequest toSave = req;
         if (req.mediaIds() != null) {
@@ -84,7 +101,11 @@ public class PostWriteService {
             }
         }
 
-        PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave);
+        PostWriteRepository.Fields fields = new PostWriteRepository.Fields(
+            req.title() != null ? req.title() : existing.title(),
+            req.description() != null ? req.description() : existing.description(),
+            newEventUrl, newType, newStartsAt, newEndsAt, openEnded);
+        PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave, fields);
         if (embeddedContentChanged(existing, updated)) {
             embeddingPublisher.requestPost(updated.id());
         }
@@ -154,12 +175,7 @@ public class PostWriteService {
 
     private boolean embeddedContentChanged(PostWriteRepository.ExistingPost existing, PostDetailDto updated) {
         return !Objects.equals(existing.title(), updated.title())
-            || !Objects.equals(existing.description(), updated.description())
-            || !Objects.equals(normalizeTags(existing.tags()), normalizeTags(updated.tags()));
-    }
-
-    private List<String> normalizeTags(List<String> tags) {
-        return tags != null ? tags : List.of();
+            || !Objects.equals(existing.description(), updated.description());
     }
 
     private void validateTypeLocationInvariant(PostType type, EventLocationDto location) {
@@ -174,6 +190,25 @@ public class PostWriteService {
     private void validateDateRange(Instant startsAt, Instant endsAt) {
         if (endsAt != null && startsAt != null && !endsAt.isAfter(startsAt)) {
             throw new IllegalArgumentException("endsAt must be strictly after startsAt");
+        }
+    }
+
+    /**
+     * The form sends startsAt on every save, without seconds, so a start that is the same to the minute is unchanged.
+     * That keeps a running or ended event editable.
+     */
+    static void refuseStartMovedToPast(Instant oldStart, Instant newStart, Instant now) {
+        if (newStart == null) return;
+        Instant newMinute = newStart.truncatedTo(ChronoUnit.MINUTES);
+        if (oldStart != null && newMinute.equals(oldStart.truncatedTo(ChronoUnit.MINUTES))) return;
+        if (newMinute.isBefore(now.truncatedTo(ChronoUnit.MINUTES))) {
+            throw new IllegalArgumentException("startsAt can't be moved to the past");
+        }
+    }
+
+    private static void validateEnd(Boolean openEnded, Instant endsAt) {
+        if (Boolean.TRUE.equals(openEnded) && endsAt != null) {
+            throw new IllegalArgumentException("A post with no end date (openEnded) can't have endsAt");
         }
     }
 

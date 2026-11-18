@@ -69,7 +69,7 @@ class FakeApi:
     def existing_event_urls(self):
         return self.existing
 
-    def create_post(self, post, images=()):
+    def create_post(self, post, images=(), category=None):
         names = [image.file_name for image in images][self.refuse_images:]
         self.created.append({**post, 'mediaIds': names} if names else post)
         return Outcome(self.failure) if self.failure else Outcome(photos=len(names))

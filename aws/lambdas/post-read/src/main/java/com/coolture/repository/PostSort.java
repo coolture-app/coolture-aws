@@ -5,7 +5,8 @@ public enum PostSort {
 
     RECENT("(p.created_at, p.id) < (?::timestamptz, ?::uuid)", "p.created_at DESC, p.id DESC"),
     POPULAR("(COALESCE(p.positive_reaction_count, 0), p.id) < (?::int, ?::uuid)", "COALESCE(p.positive_reaction_count, 0) DESC, p.id DESC"),
-    UPCOMING("(p.starts_at, p.id) > (?::timestamptz, ?::uuid)", "p.starts_at ASC, p.id ASC"),
+    /** Two streams merged in Java (Upcoming), so no single keyset or order. */
+    UPCOMING(null, null),
     /**
      * Nearest first, from the request's position, posts with a place only. The cursor holds just the last id: its
      * distance is measured again here, with the same expression, so the comparison is exact.

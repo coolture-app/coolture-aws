@@ -23,6 +23,7 @@ import com.coolture.feed.FeedService;
 import com.coolture.feed.UserVector;
 import com.coolture.repository.PostReadRepository;
 import com.coolture.repository.PostSort;
+import com.coolture.repository.Upcoming;
 import com.coolture.services.PostReadService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -102,7 +103,7 @@ class PostReadDbTest {
     }
 
     private static PostFeedFilters filters(String sortBy, boolean includePast, Instant startsFrom, Instant startsTo) {
-        return new PostFeedFilters(null, null, null, null, null, null, startsFrom, startsTo, null, null, null,
+        return new PostFeedFilters(null, null, null, null, null, startsFrom, startsTo, null, null, null,
             null, null, null, 20, sortBy, includePast);
     }
 
@@ -225,9 +226,9 @@ class PostReadDbTest {
     @Test
     void feed_theFallback_appliesExactlyTheSameRules() throws SQLException {
         assertEquals(ruleTitles(walkFeed(feedService, ME, 100, null, null, FeedMode.RANKED)),
-            ruleTitles(feedRepository.findUpcoming(ME, Instant.now(), PostFeedFilters.none(), null, null, 1000)));
+            ruleTitles(feedRepository.findUpcoming(ME, PostFeedFilters.none(), Upcoming.Position.start(Instant.now()), 1000).items()));
         assertEquals(ruleTitles(walkFeed(feedService, null, 100, null, null, FeedMode.RANKED)),
-            ruleTitles(feedRepository.findUpcoming(null, Instant.now(), PostFeedFilters.none(), null, null, 1000)));
+            ruleTitles(feedRepository.findUpcoming(null, PostFeedFilters.none(), Upcoming.Position.start(Instant.now()), 1000).items()));
     }
 
     @Test
@@ -586,7 +587,7 @@ class PostReadDbTest {
     }
 
     private static PostFeedFilters stances(String... types) {
-        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null, null,
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
             List.of(types), null, null, 20, "STANCE_NEWEST", true);
     }
 
@@ -617,7 +618,7 @@ class PostReadDbTest {
     private static final Set<String> FOLLOWED_AND_FRIENDS = Set.of("by_followed", "friend_going", "friend_interested", "friends_crowd");
 
     private static PostFeedFilters followed() {
-        return new PostFeedFilters(null, null, null, null, true, null, null, null, null, null, null,
+        return new PostFeedFilters(null, null, null, true, null, null, null, null, null, null,
             null, null, null, 20, "RECENT", false);
     }
 
@@ -691,6 +692,16 @@ class PostReadDbTest {
     }
 
     @Test
+    void thePostPage_andItsFriendsList_areNotFound_acrossABlock_eitherWay() throws SQLException {
+        for (String title : List.of("by_i_blocked", "by_blocked_me")) {
+            assertTrue(postRepository.findById(postTitled(title), ME).isEmpty(), title);
+            assertTrue(postRepository.findFriends(postTitled(title), ME).isEmpty(), title);
+            assertTrue(postRepository.findById(postTitled(title), null).isPresent(), title + " for a guest");
+            assertTrue(postRepository.findFriends(postTitled(title), null).isPresent(), title + " for a guest");
+        }
+    }
+
+    @Test
     void aStance_isntShownToTheOneWhoTookIt_orToAStranger() throws SQLException {
         UUID friend = UUID.fromString("a0000000-0000-0000-0000-000000000006");
         UUID stranger = UUID.fromString("a0000000-0000-0000-0000-000000000002");
@@ -723,12 +734,12 @@ class PostReadDbTest {
 
     /** Around the fixtures' centre, (54.35, 18.65): close is there, mid about 650 m away, far about 6.5 km. */
     private static PostFeedFilters around(String sortBy, Double radiusKm) {
-        return new PostFeedFilters(null, null, null, null, null, null, null, null, 54.35, 18.65, radiusKm,
+        return new PostFeedFilters(null, null, null, null, null, null, null, 54.35, 18.65, radiusKm,
             null, null, null, 20, sortBy, false);
     }
 
     private static PostFeedFilters searching(String q) {
-        return new PostFeedFilters(q, null, null, null, null, null, null, null, null, null, null,
+        return new PostFeedFilters(q, null, null, null, null, null, null, null, null, null,
             null, null, null, 20, null, false);
     }
 
@@ -812,7 +823,7 @@ class PostReadDbTest {
     void feed_theFallback_appliesTheSameFilters() throws SQLException {
         PostFeedFilters filters = around(null, 1.0);
         assertEquals(new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, filters, FeedMode.RANKED)))),
-            new HashSet<>(distances(titles(feedRepository.findUpcoming(ME, Instant.now(), filters, null, null, 1000)))));
+            new HashSet<>(distances(titles(feedRepository.findUpcoming(ME, filters, Upcoming.Position.start(Instant.now()), 1000).items()))));
     }
 
     @Test
@@ -860,7 +871,7 @@ class PostReadDbTest {
     // ===== Walks =====
 
     @ParameterizedTest
-    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = {"NEAREST", "STANCE_NEWEST"})
+    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = {"NEAREST", "STANCE_NEWEST", "UPCOMING"})
     void walkingASort_showsEveryPostOnceInOrder(PostSort sort) throws SQLException {
         for (boolean includePast : List.of(false, true)) {
             PostFeedFilters filters = filters(sort.name(), includePast, null, null);
@@ -900,5 +911,114 @@ class PostReadDbTest {
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
         assertEquals(ids(feedRepository.findCandidates(ME, null, null, Instant.now(), null, null, PostFeedFilters.none())), new HashSet<>(walked));
+    }
+
+    @Test
+    void walkingUpcoming_showsEveryPostOnce_inTheSameOrderAtAnyPageSize() throws SQLException {
+        PostFeedFilters filters = filters("UPCOMING", false, null, null);
+        List<UUID> inOnePage = walkPosts(ME, filters, 100).stream().map(PostCardDto::id).toList();
+        List<UUID> walked = walkPosts(ME, filters, 7).stream().map(PostCardDto::id).toList();
+
+        assertTrue(inOnePage.size() > 60, "the walk must cross the tied posts");
+        assertEquals(inOnePage, walked);
+        assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
+    }
+
+    // ===== Dates by overlap and events with no end date =====
+
+    private static final UUID TIMEKEEPER = UUID.fromString("a0000000-0000-0000-0000-000000000011");
+    private static final UUID RHYTHM = UUID.fromString("a0000000-0000-0000-0000-000000000012");
+    private static final Instant WINDOW_FROM = Instant.parse("2040-06-06T00:00:00Z");
+    private static final Instant WINDOW_TO = Instant.parse("2040-06-07T23:59:59.999Z");
+
+    private static PostFeedFilters by(UUID author, String sortBy, Instant from, Instant to, String q) {
+        return new PostFeedFilters(q, author, null, null, null, from, to, null, null, null,
+            null, null, null, 100, sortBy, false);
+    }
+
+    private Set<String> timeTitles(Instant from, Instant to) throws SQLException {
+        return walkPosts(ME, by(TIMEKEEPER, "RECENT", from, to, null), 100).stream()
+            .map(PostCardDto::title).collect(Collectors.toSet());
+    }
+
+    @Test
+    void dates_matchAPostRunningAtAnyMomentInTheWindow_atEachEdge() throws SQLException {
+        assertEquals(Set.of("time_ends_at_from", "time_starts_at_to", "time_spans_the_window", "time_default_end_inside",
+            "time_no_end_date_before"), timeTitles(WINDOW_FROM, WINDOW_TO));
+    }
+
+    @Test
+    void dates_eitherSideIsOptional() throws SQLException {
+        assertEquals(Set.of("time_ends_at_from", "time_starts_at_to", "time_starts_after_to", "time_spans_the_window",
+            "time_default_end_inside", "time_no_end_date_before", "time_no_end_date_after"), timeTitles(WINDOW_FROM, null));
+        assertEquals(Set.of("time_ends_at_from", "time_ends_before_from", "time_starts_at_to", "time_spans_the_window",
+            "time_default_end_inside", "time_default_end_before", "time_no_end_date_before"), timeTitles(null, WINDOW_TO));
+    }
+
+    @Test
+    void dates_aPostWithNoEndDate_isInEveryLaterWindow() throws SQLException {
+        Instant decadeLater = Instant.parse("2050-01-01T00:00:00Z");
+        assertEquals(Set.of("time_no_end_date_before", "time_no_end_date_after"),
+            timeTitles(decadeLater, decadeLater.plus(Duration.ofDays(1))));
+    }
+
+    @Test
+    void dates_meanTheSameInTheFeed() throws SQLException {
+        PostFeedFilters filters = by(TIMEKEEPER, null, WINDOW_FROM, WINDOW_TO, null);
+        Set<String> feed = walkFeed(feedService, ME, 100, null, null, filters, FeedMode.RANKED).stream()
+            .map(PostCardDto::title).collect(Collectors.toSet());
+
+        assertEquals(timeTitles(WINDOW_FROM, WINDOW_TO), feed);
+    }
+
+    @Test
+    void cards_mapMarksAndThePostPage_sayWhenThereIsNoEndDate() throws SQLException {
+        PostCardDto card = walkPosts(ME, by(TIMEKEEPER, "RECENT", null, null, null), 100).stream()
+            .filter(c -> c.title().equals("time_no_end_date_before")).findFirst().orElseThrow();
+
+        assertTrue(card.openEnded());
+        assertNull(card.endsAt());
+        assertTrue(postRepository.findById(card.id(), ME).orElseThrow().openEnded());
+    }
+
+    // ===== Nadchodzące =====
+
+    private List<String> upcomingTitles(PostFeedFilters filters, int pageSize) throws SQLException {
+        return walkPosts(ME, filters, pageSize).stream().map(PostCardDto::title).toList();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1", "3", "5", "100"})
+    void upcoming_everyFifthCardIsRunning_endingSoonestFirst_noEndDateLast(int pageSize) throws SQLException {
+        assertEquals(List.of("rhythm_dated_1", "rhythm_dated_2", "rhythm_dated_3", "rhythm_dated_4", "rhythm_running_1",
+                "rhythm_dated_5", "rhythm_dated_6", "rhythm_dated_7", "rhythm_dated_8", "rhythm_running_2",
+                "rhythm_dated_9", "rhythm_running_open"),
+            upcomingTitles(by(RHYTHM, "UPCOMING", null, null, null), pageSize),
+            "the dated stream runs out at the 11th card, so the running stream continues alone");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1", "4", "100"})
+    void upcoming_whenTheRunningStreamRunsOut_theDatedOneContinues(int pageSize) throws SQLException {
+        assertEquals(List.of("rhythm_dated_1", "rhythm_dated_2", "rhythm_dated_3", "rhythm_dated_4", "rhythm_running_1",
+                "rhythm_dated_5", "rhythm_dated_6", "rhythm_dated_7", "rhythm_dated_8", "rhythm_dated_9"),
+            upcomingTitles(by(RHYTHM, "UPCOMING", null, null, "rytm"), pageSize));
+    }
+
+    @Test
+    void upcoming_aLaterFrom_movesTheMoment() throws SQLException {
+        Instant from = Instant.now().plus(Duration.ofDays(3)).plus(Duration.ofHours(12));
+
+        assertEquals(List.of("rhythm_dated_4", "rhythm_dated_5", "rhythm_dated_6", "rhythm_dated_7", "rhythm_running_open",
+                "rhythm_dated_8", "rhythm_dated_9"),
+            upcomingTitles(by(RHYTHM, "UPCOMING", from, null, null), 2));
+    }
+
+    @Test
+    void upcoming_theFeedsFallback_mixesTheSameWay() throws SQLException {
+        List<String> fallback = feedRepository.findUpcoming(null, by(RHYTHM, null, null, null, null),
+            Upcoming.Position.start(Instant.now()), 100).items().stream().map(PostCardDto::title).toList();
+
+        assertEquals(upcomingTitles(by(RHYTHM, "UPCOMING", null, null, null), 100), fallback);
     }
 }

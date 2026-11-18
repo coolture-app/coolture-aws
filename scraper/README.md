@@ -115,6 +115,12 @@ media, and so does a post the API refuses with a 4xx. A timeout or a 5xx keeps t
 A 401 or 403 stops the run. `--dry-run` prints each photo it would upload under `images`, as `fileName`, `mimeType`,
 `sizeBytes`, `width` and `height`.
 
+The end is the first the site gives: the page's `endDate` (a last day runs to 23:59), then a run written in the text
+("Wystawa czynna: od … do 28 lutego 2027", a day with no year being the next one after the start), then the listing's hour
+range ("Godz. 14:00 - 18:00"). With none of them, a page saying "wystawa stała", "ekspozycja stała" or "do odwołania" makes a
+post with no end date (`openEnded`); anything else keeps the API's 3-hour default. The "wystawy, spotkania" category alone
+says nothing, since it also holds talks and workshops.
+
 The page's text becomes plain paragraphs, separated by a blank line:
 
 - A heading gets its own paragraph: a line in bold on its own, a short line ending in `?` or `:`, or one in capitals.

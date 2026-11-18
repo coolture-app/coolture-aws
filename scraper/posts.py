@@ -8,7 +8,6 @@ COUNTRY = 'PL'
 
 TITLE_MAX = 128
 DESCRIPTION_MAX = 1000
-TAG_MAX = 32
 VENUE_MAX = 64
 BUILDING_NUMBER_MAX = 16
 ADDRESS_MAX = 128
@@ -71,11 +70,12 @@ def to_post(event: Event, place: Place | None) -> dict:
         'description': cut_description(event.description),
         'eventUrl': event.url,
         'startsAt': _iso(event.start),
-        'tags': [cut(tag, TAG_MAX) for tag in event.category.split(', ')] if event.category else [],
         'type': 'ONLINE' if event.online else 'OFFLINE',
     }
     if event.end is not None:
         post['endsAt'] = _iso(event.end)
+    if event.open_ended:
+        post['openEnded'] = True
     if place is not None:
         post['location'] = _location(event, place)
     return post

@@ -1,9 +1,11 @@
 package com.coolture.repository;
 
+import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.StanceCounts;
 import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
@@ -36,14 +38,13 @@ public class PostReadRepository {
     /** Enough for three lines of the map's preview, so a pin's preview needs no request of its own. */
     static final int EXCERPT_CHARS = 200;
 
+    /** Every sort but UPCOMING, which is {@link #findUpcoming}. These hide only long-ended events, and can show those too. */
     public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit) throws SQLException {
-        // UPCOMING never shows an ended event. The other sorts hide only long-ended ones, and can show those too.
-        boolean upcoming = sort == PostSort.UPCOMING;
         String sql = PostSql.CARD_SELECT
             + "WHERE p.deleted_at IS NULL\n"
             + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
-            + "  AND " + (upcoming ? PostSql.NOT_ENDED : PostSql.NOT_LONG_ENDED) + "\n"
+            + "  AND " + PostSql.NOT_LONG_ENDED + "\n"
             + (sort.needsPosition() ? "  AND el.coordinates IS NOT NULL\n" : "")
             + "  AND " + PARTICIPATION_AND_REACTION + "\n"
             + (cursor != null ? "  AND " + sort.keysetSql() + "\n" : "")
@@ -66,9 +67,7 @@ public class PostReadRepository {
              .bindNullableUUID(callerId);
 
             // Past events
-            if (!upcoming) {
-                b.bindBoolean(f.showsAllPastEvents());
-            }
+            b.bindBoolean(f.showsAllPastEvents());
 
             bindParticipationAndReaction(b, f, callerId);
 
@@ -85,6 +84,27 @@ public class PostReadRepository {
             try (ResultSet rs = stmt.executeQuery()) {
                 return Friends.withFriendStances(conn, callerId, MediaQueries.withPhotos(conn, mapPostCardList(rs)));
             }
+        }
+    }
+
+    /** Nadchodzące. Never an ended event, even with includePast or a date. */
+    public Upcoming.Page findUpcoming(PostFeedFilters f, UUID callerId, Upcoming.Position at, int limit) throws SQLException {
+        String sql = PostSql.CARD_SELECT
+            + "WHERE p.deleted_at IS NULL\n"
+            + "  AND " + PostFilterSql.MATCHES + "\n"
+            + "  AND " + PostSql.NOT_BLOCKED + "\n"
+            + "  AND " + PostSql.NOT_ENDED + "\n"
+            + "  AND " + PARTICIPATION_AND_REACTION + "\n";
+        Upcoming.Query query = new Upcoming.Query(sql, b -> {
+            b.bindUUID(callerId)
+             .bindUUID(callerId);
+            PostFilterSql.bind(b, f, callerId);
+            b.bindNullableUUID(callerId)
+             .bindNullableUUID(callerId);
+            bindParticipationAndReaction(b, f, callerId);
+        });
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Upcoming.find(conn, query, callerId, f.from(), at, limit);
         }
     }
 
@@ -110,10 +130,10 @@ public class PostReadRepository {
 
     public Optional<PostDetailDto> findById(UUID postId, UUID callerId) throws SQLException {
         String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status,
+            SELECT p.id, p.title, p.description, p.event_url, p.type, p.status,
                    p.positive_reaction_count, p.comments_count,
                    stances.participant_count, stances.interested_count, stances.going_count,
-                   p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
+                   p.starts_at, p.ends_at, p.open_ended, p.created_at, p.last_modified_at, p.deleted_at,
                    u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
                    avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
                    avatar_m.size_bytes AS avatar_size_bytes, avatar_m.status AS avatar_status,
@@ -133,15 +153,16 @@ public class PostReadRepository {
             LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid
             LEFT JOIN post_participations pp_my ON pp_my.post_id = p.id AND pp_my.user_id = ?::uuid
             WHERE p.id = ? AND p.deleted_at IS NULL
-        """;
+            """ + "  AND " + PostSql.NOT_BLOCKED;
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            new ParamBinder(stmt, conn)
+            ParamBinder b = new ParamBinder(stmt, conn)
                 .bindUUID(callerId)
                 .bindUUID(callerId)
                 .bindUUID(postId);
+            Blocks.bindViewer(b, callerId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -160,7 +181,7 @@ public class PostReadRepository {
                         rs.getString("event_url"),
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
-                        mapTags(rs),
+                        rs.getBoolean("open_ended"),
                         rs.getInt("positive_reaction_count"),
                         rs.getInt("participant_count"),
                         rs.getInt("interested_count"),
@@ -183,15 +204,11 @@ public class PostReadRepository {
         return Optional.empty();
     }
 
-    /** Empty when the post is missing or deleted, as on the post's page. */
+    /** Empty when the post's page would be a 404. */
     public Optional<PostFriendsDto> findFriends(UUID postId, UUID callerId) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM posts WHERE id = ? AND deleted_at IS NULL")) {
-            new ParamBinder(stmt, conn).bindUUID(postId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            if (!PostQueries.isPostVisible(conn, postId, callerId)) {
+                return Optional.empty();
             }
             return Optional.of(Friends.forPost(conn, callerId, postId));
         }
@@ -201,7 +218,7 @@ public class PostReadRepository {
     public List<PostMarkDto> findPostMarks(PostFeedFilters f, MapBoundsDto bounds, UUID callerId, boolean excludeMine) throws SQLException {
         boolean hidesMine = excludeMine && callerId != null;
         String sql = """
-            SELECT p.id, p.title, p.starts_at, p.ends_at, p.positive_reaction_count,
+            SELECT p.id, p.title, p.starts_at, p.ends_at, p.open_ended, p.positive_reaction_count,
                    stances.interested_count, stances.going_count,
                    NULLIF(left(regexp_replace(btrim(p.description), '\\s+', ' ', 'g'), """ + EXCERPT_CHARS + """
                    ), '') AS excerpt,
@@ -272,6 +289,7 @@ public class PostReadRepository {
                         rs.getString("title"),
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
+                        rs.getBoolean("open_ended"),
                         MediaUrls.presign(rs.getString("cover_url")),
                         rs.getString("excerpt"),
                         rs.getInt("positive_reaction_count"),

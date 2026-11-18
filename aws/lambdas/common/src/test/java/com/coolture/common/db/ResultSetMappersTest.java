@@ -16,12 +16,10 @@ import com.coolture.common.storage.S3StorageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -68,29 +66,6 @@ class ResultSetMappersTest {
         PostType result = ResultSetMappers.mapEnum(rs, "type", PostType.class);
 
         assertNull(result);
-    }
-
-    @Test
-    void mapTags_whenArrayPresent_returnsList() throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        Array sqlArray = mock(Array.class);
-        String[] tags = new String[]{"music", "festival"};
-        when(sqlArray.getArray()).thenReturn(tags);
-        when(rs.getArray("tags")).thenReturn(sqlArray);
-
-        List<String> result = ResultSetMappers.mapTags(rs);
-
-        assertEquals(List.of("music", "festival"), result);
-    }
-
-    @Test
-    void mapTags_whenArrayNull_returnsEmptyList() throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        when(rs.getArray("tags")).thenReturn(null);
-
-        List<String> result = ResultSetMappers.mapTags(rs);
-
-        assertTrue(result.isEmpty());
     }
 
     @Test
@@ -298,7 +273,6 @@ class ResultSetMappersTest {
         when(rs.getString("event_url")).thenReturn("https://example.com");
         when(rs.getTimestamp("starts_at")).thenReturn(Timestamp.from(now));
         when(rs.getTimestamp("ends_at")).thenReturn(Timestamp.from(now.plusSeconds(3600)));
-        when(rs.getArray("tags")).thenReturn(null);
         when(rs.getInt("positive_reaction_count")).thenReturn(42);
         when(rs.getInt("participant_count")).thenReturn(10);
         when(rs.getInt("comments_count")).thenReturn(5);

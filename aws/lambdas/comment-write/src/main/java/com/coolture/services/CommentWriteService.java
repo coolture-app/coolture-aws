@@ -24,11 +24,14 @@ public class CommentWriteService {
     }
 
     public CommentSummaryDto create(UUID postId, UUID callerId, CommentCreateRequest req) throws SQLException {
-        repository.ensurePostVisible(postId);
+        repository.ensurePostVisible(postId, callerId);
 
         CommentWriteRepository.ExistingComment parent = null;
         if (req.parentCommentId() != null) {
             parent = findActiveOrThrow(req.parentCommentId());
+            if (!repository.isCommentVisible(parent.id(), callerId)) {
+                throw new IllegalArgumentException("Comment with id '" + parent.id() + "' was not found");
+            }
             if (!parent.postId().equals(postId)) {
                 throw new SecurityException("Parent comment belongs to a different post");
             }

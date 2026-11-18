@@ -58,8 +58,8 @@ class FakeApi:
 def saved_snapshot(directory, count=3):
     snapshot = Snapshot(directory)
     for number in range(count):
-        snapshot.create_post({'eventUrl': f'https://site.test/{number}', 'startsAt': '2026-11-05T18:00:00Z',
-                              'tags': ['koncerty']}, [Image(b'photo%d' % number, 'image/webp', f'{number}.webp', 4, 3)])
+        snapshot.create_post({'eventUrl': f'https://site.test/{number}', 'startsAt': '2026-11-05T18:00:00Z'},
+                             [Image(b'photo%d' % number, 'image/webp', f'{number}.webp', 4, 3)])
     snapshot.mark_complete()
 
 

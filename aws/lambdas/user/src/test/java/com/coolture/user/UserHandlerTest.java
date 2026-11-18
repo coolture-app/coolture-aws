@@ -74,7 +74,7 @@ class UserHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            verify(interestService).getSelection(USER_ID);
+            verify(interestService).getSelection(USER_ID, CALLER_ID);
         }
     }
 

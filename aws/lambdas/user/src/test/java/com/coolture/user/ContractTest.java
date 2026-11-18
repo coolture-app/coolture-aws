@@ -141,6 +141,14 @@ class ContractTest {
     }
 
     @Test
+    void theBlockersSlimProfile_matches() throws Exception {
+        when(users.getByIdForCaller(OTHER, CALLER)).thenReturn(
+            new UserProfileDto(OTHER, "jan", "Jan", "Demo", avatar(), null, null, null, null, false, true, false, null));
+
+        assertMatches(report("/users/" + OTHER, Request.Method.GET, signedIn("GET", "/users/" + OTHER, null, OTHER)));
+    }
+
+    @Test
     void pagesOfPeople_match() throws Exception {
         when(users.search(any(), any(), any(), anyInt())).thenReturn(page());
         when(users.getFollowers(any(), any(), any(), anyInt())).thenReturn(page());
@@ -199,8 +207,8 @@ class ContractTest {
         when(interests.getCatalog()).thenReturn(new InterestCatalogDto(3, 6, List.of(new InterestCatalogDto.Category(
             "culture", "Kultura", "Culture", List.of(new InterestCatalogDto.Interest("theatre", "Teatr", "Theatre"))))));
         UUID nobody = UUID.randomUUID();
-        when(interests.getSelection(OTHER)).thenReturn(new UserInterestsDto(List.of("theatre")));
-        when(interests.getSelection(nobody)).thenThrow(new IllegalArgumentException("User " + nobody + " not found"));
+        when(interests.getSelection(eq(OTHER), any())).thenReturn(new UserInterestsDto(List.of("theatre")));
+        when(interests.getSelection(eq(nobody), any())).thenThrow(new IllegalArgumentException("User " + nobody + " not found"));
         when(interests.replaceSelection(eq(CALLER), eq(CALLER), any())).thenReturn(new UserInterestsDto(List.of("theatre", "cinema", "jazz")));
         String path = "/users/" + CALLER + "/interests";
 
@@ -254,11 +262,11 @@ class ContractTest {
     }
 
     @Test
-    void aProfileWithoutInterests_failsTheCheck() {
-        String withoutInterests = "{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false}";
+    void meWithoutInterests_failsTheCheck() {
+        String withoutInterests = "{\"id\":\"" + CALLER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
+            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interestsSelected\":false,\"shareStances\":true}";
 
-        assertTrue(VALIDATOR.validateResponse("/users/" + OTHER, Request.Method.GET,
+        assertTrue(VALIDATOR.validateResponse("/auth/me", Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(withoutInterests).build()).hasErrors());
     }
 

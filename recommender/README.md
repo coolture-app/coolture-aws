@@ -9,7 +9,7 @@ in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post
 
 | Path | What it does |
 |---|---|
-| `embedding-workers/post-embedding/` | Container image: embeds a post's title, description and tags, and interests, with `mmlw-roberta-base` |
+| `embedding-workers/post-embedding/` | Container image: embeds a post's title and description, and interests, with `mmlw-roberta-base` |
 | `ppr/` | Zip function: personalised PageRank for every user, into `rec_ppr_scores` |
 | `embedding-workers/template.yaml` | Both functions' stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
 
@@ -18,7 +18,7 @@ All commands below run from the repository root.
 ## Embeddings
 
 ```
-post-write (create, or a change to title, description or tags)
+post-write (create, or a change to title or description)
    └─► PutObject s3://coolture-<env>-embedding-requests-<account>/posts/<postId>   (empty object)
           └─ S3 notification ─► SQS coolture-<env>-post-embedding ─► PostEmbeddingFunction ─► post_embeddings
                                    └─ after 3 failed receives ─► ...-post-embedding-dlq (14 days)

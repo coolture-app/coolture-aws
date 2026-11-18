@@ -1,6 +1,8 @@
 package com.coolture.user.repository;
 
+import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.ParamBinder;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.MediaStatus;
 
@@ -252,10 +254,11 @@ public class UserRepository {
                    %s AS follows_you
             FROM users u
             WHERE (? IS NULL OR username ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?)
+              AND %s
               AND (?::timestamptz IS NULL OR (created_at < ?::timestamptz OR (created_at = ?::timestamptz AND id < ?::uuid)))
             ORDER BY created_at DESC, id DESC
             LIMIT ?
-        """.formatted(FOLLOWS_CALLER);
+        """.formatted(FOLLOWS_CALLER, Blocks.notWithViewer("u.id"));
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -270,12 +273,15 @@ public class UserRepository {
             stmt.setString(4, pattern);
             stmt.setString(5, pattern);
 
-            stmt.setTimestamp(6, cursorTs);
-            stmt.setTimestamp(7, cursorTs);
-            stmt.setTimestamp(8, cursorTs);
-            stmt.setObject(9, cursorId);
+            stmt.setObject(6, callerId);
+            stmt.setObject(7, callerId);
 
-            stmt.setInt(10, limit);
+            stmt.setTimestamp(8, cursorTs);
+            stmt.setTimestamp(9, cursorTs);
+            stmt.setTimestamp(10, cursorTs);
+            stmt.setObject(11, cursorId);
+
+            stmt.setInt(12, limit);
 
             List<ListedUser> users = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
@@ -382,11 +388,12 @@ public class UserRepository {
             JOIN users u ON u.id = ur.source_user_id
             WHERE ur.target_user_id = ?
               AND ur.type = 'FOLLOW'
+              AND %s
               AND (?::timestamptz IS NULL OR (ur.created_at < ?::timestamptz OR (ur.created_at = ?::timestamptz AND ur.source_user_id < ?::uuid)))
             ORDER BY ur.created_at DESC, ur.source_user_id DESC
             LIMIT ?
-        """.formatted(FOLLOWS_CALLER);
-        return queryUserRelations(sql, userId, callerId, cursorCreatedAt, cursorId, limit);
+        """.formatted(FOLLOWS_CALLER, Blocks.notWithViewer("u.id"));
+        return queryUserRelations(sql, userId, callerId, true, cursorCreatedAt, cursorId, limit);
     }
 
     public List<UserRelationRow> findFollowing(UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
@@ -397,11 +404,12 @@ public class UserRepository {
             JOIN users u ON u.id = ur.target_user_id
             WHERE ur.source_user_id = ?
               AND ur.type = 'FOLLOW'
+              AND %s
               AND (?::timestamptz IS NULL OR (ur.created_at < ?::timestamptz OR (ur.created_at = ?::timestamptz AND ur.target_user_id < ?::uuid)))
             ORDER BY ur.created_at DESC, ur.target_user_id DESC
             LIMIT ?
-        """.formatted(FOLLOWS_CALLER);
-        return queryUserRelations(sql, userId, callerId, cursorCreatedAt, cursorId, limit);
+        """.formatted(FOLLOWS_CALLER, Blocks.notWithViewer("u.id"));
+        return queryUserRelations(sql, userId, callerId, true, cursorCreatedAt, cursorId, limit);
     }
 
     public List<UserRelationRow> findBlocking(UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
@@ -416,20 +424,24 @@ public class UserRepository {
             ORDER BY ur.created_at DESC, ur.target_user_id DESC
             LIMIT ?
         """.formatted(FOLLOWS_CALLER);
-        return queryUserRelations(sql, userId, callerId, cursorCreatedAt, cursorId, limit);
+        return queryUserRelations(sql, userId, callerId, false, cursorCreatedAt, cursorId, limit);
     }
 
-    private List<UserRelationRow> queryUserRelations(String sql, UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    private List<UserRelationRow> queryUserRelations(String sql, UUID userId, UUID callerId, boolean leavesOutBlocked,
+                                                     Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
-            Timestamp cursorTs = cursorCreatedAt != null ? Timestamp.from(cursorCreatedAt) : null;
-            stmt.setObject(1, callerId);
-            stmt.setObject(2, userId);
-            stmt.setTimestamp(3, cursorTs);
-            stmt.setTimestamp(4, cursorTs);
-            stmt.setTimestamp(5, cursorTs);
-            stmt.setObject(6, cursorId);
-            stmt.setInt(7, limit);
+            ParamBinder b = new ParamBinder(stmt, conn)
+                .bindNullableUUID(callerId)
+                .bindUUID(userId);
+            if (leavesOutBlocked) {
+                Blocks.bindViewer(b, callerId);
+            }
+            b.bindTimestamp(cursorCreatedAt)
+             .bindTimestamp(cursorCreatedAt)
+             .bindTimestamp(cursorCreatedAt)
+             .bindNullableUUID(cursorId)
+             .bindInt(limit);
 
             List<UserRelationRow> list = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
@@ -622,25 +634,9 @@ public class UserRepository {
         }
     }
 
-    /**
-     * Checks if either user has blocked the other (in either direction).
-     */
     public boolean isBlockedEitherDirection(UUID userId1, UUID userId2) throws SQLException {
-        if (userId1 == null || userId2 == null) return false;
-        String sql = """
-            SELECT 1 FROM user_relations
-            WHERE type = 'BLOCK'
-              AND ((source_user_id = ? AND target_user_id = ?) OR (source_user_id = ? AND target_user_id = ?))
-        """;
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, userId1);
-            stmt.setObject(2, userId2);
-            stmt.setObject(3, userId2);
-            stmt.setObject(4, userId1);
-            try (ResultSet rs = stmt.executeQuery()) {
-                return rs.next();
-            }
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Blocks.between(conn, userId1, userId2);
         }
     }
 

@@ -1,5 +1,7 @@
 package com.coolture.feed;
 
+import com.coolture.repository.Upcoming;
+
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
@@ -69,18 +71,20 @@ class FeedServiceTest {
             return candidates;
         }
 
+        /** Every candidate is dated here; the running stream and the rhythm are PostReadDbTest's. */
         @Override
-        public List<PostCardDto> findUpcoming(UUID viewer, Instant asOf, PostFeedFilters filters, Instant afterStartsAt, UUID afterId, int limit) throws SQLException {
-            asOfs.add(asOf);
+        public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
+            asOfs.add(at.asOf());
             if (upcomingFailure != null) throw upcomingFailure;
             Comparator<FeedScorer.Facts> soonest = Comparator.comparing(FeedScorer.Facts::startsAt).thenComparing(FeedScorer.Facts::id);
-            FeedScorer.Facts after = afterStartsAt == null ? null : new FeedScorer.Facts(afterId, afterStartsAt, 0, null, null);
-            return candidates.stream()
+            FeedScorer.Facts after = at.datedId() == null ? null : new FeedScorer.Facts(at.datedId(), at.datedStart(), 0, null, null);
+            List<PostCardDto> dated = candidates.stream()
                 .filter(f -> after == null || soonest.compare(f, after) > 0)
                 .sorted(soonest)
-                .limit(limit)
+                .limit(limit + 1L)
                 .map(FeedServiceTest::card)
                 .toList();
+            return Upcoming.merge(dated, List.of(), at, limit);
         }
 
         @Override
@@ -91,7 +95,7 @@ class FeedServiceTest {
     }
 
     private static PostCardDto card(FeedScorer.Facts f) {
-        return new PostCardDto(f.id(), null, null, "t", null, null, f.startsAt(), null, List.of(),
+        return new PostCardDto(f.id(), null, null, "t", null, null, f.startsAt(), null, false,
             f.engagement(), 0, 0, 0, 0, null, null, START, null, null, null, null, null, null, null);
     }
 
