@@ -13,7 +13,8 @@ Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (def
 Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url),
   FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack),
   SCRAPER_SCHEDULE=true|false and SCRAPER_END_DATE=2027-06-30T00:00:00Z (both keep their deployed values when unset),
-  PPR_SCHEDULE=true|false (PageRank's schedule; keeps its deployed value when unset)
+  PPR_SCHEDULE=true|false (PageRank's schedule; keeps its deployed value when unset),
+  FEED_WEIGHTS=default|ppr=0|... (the feed's weights, FeedConfig; keeps its deployed value when unset)
 EOF
 }
 
@@ -106,7 +107,9 @@ overrides_for() {
             echo "Environment=$ENVIRONMENT FrontendUrl=\"$(frontend_url)\""
             ;;
         backend)
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\""
+            local weights
+            weights="${FEED_WEIGHTS:-$(stack_param backend FeedWeights 2> /dev/null || true)}"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\" FeedWeights=\"${weights:-default}\""
             ;;
         embeddings)
             local enabled

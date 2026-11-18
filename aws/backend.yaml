@@ -58,6 +58,10 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 7
+  FeedWeights:
+    Type: String
+    Default: default
+    Description: The feed's FEED_WEIGHTS, such as ppr=0 for PageRank's shadow runs (FeedConfig)
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
@@ -467,7 +471,7 @@ Resources:
       Environment:
         Variables:
           DB_USERNAME: !If [IsAWS, !Ref DbReadUsername, !Ref DbUsername]
-          FEED_WEIGHTS: default
+          FEED_WEIGHTS: !Ref FeedWeights
       Policies:
         - !If [IsAWS, !Ref DbReadConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:

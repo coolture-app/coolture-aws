@@ -214,7 +214,7 @@ validate: ## Validate SAM templates
 	@sam validate --template-file aws/auth.yaml
 	@sam validate --template-file recommender/embedding-workers/template.yaml
 
-deploy-backend: ## Deploy backend to AWS (dev, arm64) - needs mgmt-stack-networking (management stack) + auth deployed
+deploy-backend: ## Deploy backend to AWS (dev, arm64; FEED_WEIGHTS=ppr=0 sets the feed's weights) - needs mgmt-stack-networking (management stack) + auth deployed
 	@scripts/deploy.sh dev backend
 
 deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to AWS (dev) - needs backend deployed
