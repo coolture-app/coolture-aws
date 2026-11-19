@@ -9,7 +9,7 @@ in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post
 
 | Path | What it does |
 |---|---|
-| `post-embedding/` | Container image: embeds a post's title and description, and interests, with `mmlw-roberta-base` |
+| `post-embedding/` | Container image: embeds a post's title, description, venue and city, and interests, with `mmlw-roberta-base` |
 | `ppr/` | Zip function: personalised PageRank for every user, into `rec_ppr_scores` |
 | `template.yaml` | Both functions' stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
 

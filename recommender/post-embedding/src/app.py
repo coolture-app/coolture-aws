@@ -73,16 +73,17 @@ def post_ids_from_s3_event(body: str) -> list[UUID]:
 def find_post_content(conn: psycopg.Connection, post_id: UUID) -> PostContent | None:
     row = conn.execute(
         """
-        SELECT title, description
-        FROM posts
-        WHERE id = %s AND status <> 'DELETED' AND deleted_at IS NULL
+        SELECT p.title, p.description, el.venue_name, el.city
+        FROM posts p
+        LEFT JOIN event_locations el ON el.id = p.event_location_id
+        WHERE p.id = %s AND p.status <> 'DELETED' AND p.deleted_at IS NULL
         """,
         (str(post_id),),
     ).fetchone()
     if row is None:
         return None
-    title, description = row
-    return PostContent(title=title, description=description)
+    title, description, venue_name, city = row
+    return PostContent(title=title, description=description, venue_name=venue_name, city=city)
 
 
 def upsert_embedding(conn: psycopg.Connection, record: PostEmbeddingRecord) -> None:
