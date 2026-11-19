@@ -461,71 +461,21 @@ class PostWriteServiceTest {
     }
 
     @Test
-    void updatePost_whenEmbeddedContentChanged_publishesEmbeddingMessage() throws SQLException {
+    void updatePost_publishesEmbeddingMessage() throws SQLException {
         UUID postId = UUID.randomUUID();
         UUID authorId = UUID.randomUUID();
         PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         UpdatePostRequest req = new UpdatePostRequest(
-            "New Title", null, null, null, null, null, null, null, null, null
-        );
-        PostDetailDto updated = postDetail(postId, "New Title", "Desc");
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
-
-        service.updatePost(postId, authorId, req, Set.of());
-
-        verify(embeddingPublisher).requestPost(postId);
-    }
-
-    @Test
-    void updatePost_whenEmbeddedContentUnchanged_doesNotPublish() throws SQLException {
-        UUID postId = UUID.randomUUID();
-        UUID authorId = UUID.randomUUID();
-        PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
-        when(repository.findById(postId)).thenReturn(Optional.of(existing));
-
-        UpdatePostRequest req = new UpdatePostRequest(
-            "Title", null, "https://new.example.com", null, null, null, null, null, null, null
+            null, null, "https://new.example.com", null, null, null, null, null, null, null
         );
         PostDetailDto updated = postDetail(postId, "Title", "Desc");
         when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
 
         service.updatePost(postId, authorId, req, Set.of());
 
-        verifyNoInteractions(embeddingPublisher);
-    }
-
-    @Test
-    void updatePost_whenVenueOrCityChanged_publishesEmbeddingMessage() throws SQLException {
-        UUID postId = UUID.randomUUID();
-        UUID authorId = UUID.randomUUID();
-        PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
-        when(repository.findById(postId)).thenReturn(Optional.of(existing));
-        UpdatePostRequest req = new UpdatePostRequest(null, null, null, null, null, null, null, null, null, null);
-        EventLocationDto moved = new EventLocationDto("PL", "Hala", null, null, null, "Gdynia", new GeoPointDto(54.5, 18.5));
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
-            .thenReturn(postDetail(postId, "Title", "Desc", moved));
-
-        service.updatePost(postId, authorId, req, Set.of());
-
         verify(embeddingPublisher).requestPost(postId);
-    }
-
-    @Test
-    void updatePost_whenOnlyTheStreetChanged_doesNotPublish() throws SQLException {
-        UUID postId = UUID.randomUUID();
-        UUID authorId = UUID.randomUUID();
-        PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
-        when(repository.findById(postId)).thenReturn(Optional.of(existing));
-        UpdatePostRequest req = new UpdatePostRequest(null, null, null, null, null, null, null, null, null, null);
-        EventLocationDto renumbered = new EventLocationDto("PL", "Hala", "2", "Długa", null, "Gdańsk", new GeoPointDto(54.4, 18.6));
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
-            .thenReturn(postDetail(postId, "Title", "Desc", renumbered));
-
-        service.updatePost(postId, authorId, req, Set.of());
-
-        verifyNoInteractions(embeddingPublisher);
     }
 
     private PostWriteRepository.ExistingPost activeExistingPost(UUID postId, UUID authorId) {
@@ -537,12 +487,8 @@ class PostWriteServiceTest {
     }
 
     private PostDetailDto postDetail(UUID postId, String title, String description) {
-        return postDetail(postId, title, description, null);
-    }
-
-    private PostDetailDto postDetail(UUID postId, String title, String description, EventLocationDto location) {
         return new PostDetailDto(
-            postId, null, location, title, description, null,
+            postId, null, null, title, description, null,
             Instant.now(), null, false, 0, 0, 0, 0, 0,
             PostType.ONLINE, PostStatus.ACTIVE,
             Instant.now(), null, null, null, null, null, null, null

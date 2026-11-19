@@ -16,11 +16,9 @@ import com.coolture.common.validation.PostLimits;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -107,9 +105,8 @@ public class PostWriteService {
             req.description() != null ? req.description() : existing.description(),
             newEventUrl, newType, newStartsAt, newEndsAt, openEnded);
         PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave, fields);
-        if (embeddedContentChanged(existing, updated)) {
-            embeddingPublisher.requestPost(updated.id());
-        }
+        // Every edit, so which fields make up the embedded text stays only in the worker's PostContent.
+        embeddingPublisher.requestPost(updated.id());
         return updated;
     }
 
@@ -172,17 +169,6 @@ public class PostWriteService {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
         }
         repository.deleteParticipation(postId, userId);
-    }
-
-    /** The fields the embedding worker reads into a post's text. */
-    private boolean embeddedContentChanged(PostWriteRepository.ExistingPost existing, PostDetailDto updated) {
-        return !Objects.equals(existing.title(), updated.title())
-            || !Objects.equals(existing.description(), updated.description())
-            || !Objects.equals(venueAndCity(existing.location()), venueAndCity(updated.location()));
-    }
-
-    private static List<String> venueAndCity(EventLocationDto location) {
-        return location == null ? null : Arrays.asList(location.venueName(), location.city());
     }
 
     private void validateTypeLocationInvariant(PostType type, EventLocationDto location) {
