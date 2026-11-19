@@ -5,7 +5,6 @@ import psycopg
 import pytest
 
 import app
-import ppr
 
 pytestmark = pytest.mark.skipif(os.environ.get("DB_TEST") != "true", reason="needs make up and make seed; DB_TEST=true")
 
@@ -29,42 +28,27 @@ def relate(conn, source, target, kind):
                  (source, target, kind))
 
 
-def befriend(conn, user, friend, going):
-    for a, b in ((user, friend), (friend, user)):
-        relate(conn, a, b, "FOLLOW")
-    conn.execute("UPDATE users SET share_stances = true WHERE id IN (%s, %s)", (user, friend))
-    conn.execute("""INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (%s, %s, 'TAKES_PART', now())
-                    ON CONFLICT (post_id, user_id) DO UPDATE SET type = EXCLUDED.type, created_at = EXCLUDED.created_at""",
-                 (going, friend))
+def ranked(inputs):
+    return {p for p, not_ended in zip(inputs.event_ids, inputs.not_ended) if not_ended}
 
 
-def test_a_post_with_no_end_date_that_started_long_ago_gets_a_score(conn, monkeypatch):
-    monkeypatch.setattr(ppr, "SCORES_PER_USER", 10**6)
-    user, friend = users(conn, 2)
-    going, standing = [p for (p,) in conn.execute(
+def test_a_post_with_no_end_date_that_started_long_ago_is_ranked(conn):
+    (standing,) = conn.execute(
         """SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
-           WHERE p.deleted_at IS NULL ORDER BY p.id LIMIT 2""", (app.EMBEDDING_MODEL,))]
+           WHERE p.deleted_at IS NULL ORDER BY p.id LIMIT 1""", (app.EMBEDDING_MODEL,)).fetchone()
     conn.execute("UPDATE posts SET starts_at = now() - interval '200 days', ends_at = NULL, open_ended = true "
                  "WHERE id = %s", (standing,))
-    conn.execute("UPDATE posts SET starts_at = now() + interval '1 day', ends_at = NULL, open_ended = false "
-                 "WHERE id = %s", (going,))
-    befriend(conn, user, friend, going)
 
-    run, _ = app.write(conn, app.load(conn))
-
-    assert conn.execute("SELECT 1 FROM rec_ppr_scores WHERE run_number = %s AND user_id = %s AND post_id = %s",
-                        (run, user, standing)).fetchone()
+    assert standing in ranked(app.load(conn))
 
 
-def test_a_run_scores_every_event_that_hasnt_ended_and_nothing_else(conn, monkeypatch):
-    monkeypatch.setattr(ppr, "SCORES_PER_USER", 10**6)
-    # The feed alone leaves out a user's own, reacted and blocked posts.
-    user, friend, blocked = users(conn, 3)
-    going, deleted, ended, own, by_blocked, reacted = [p for (p,) in conn.execute(
+def test_a_run_ranks_every_event_that_hasnt_ended_and_nothing_else(conn):
+    user, blocked = users(conn, 2)
+    upcoming, deleted, ended, own, by_blocked, reacted = [p for (p,) in conn.execute(
         """SELECT p.id FROM posts p JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %s
            WHERE p.deleted_at IS NULL ORDER BY p.id LIMIT 6""", (app.EMBEDDING_MODEL,))]
     conn.execute("UPDATE posts SET starts_at = now() + interval '1 day', ends_at = NULL, open_ended = false "
-                 "WHERE id IN (%s, %s, %s, %s, %s)", (going, deleted, own, by_blocked, reacted))
+                 "WHERE id IN (%s, %s, %s, %s, %s)", (upcoming, deleted, own, by_blocked, reacted))
     conn.execute("UPDATE posts SET deleted_at = now() WHERE id = %s", (deleted,))
     conn.execute("UPDATE posts SET starts_at = now() - interval '2 days', ends_at = now() - interval '1 day', "
                  "open_ended = false WHERE id = %s", (ended,))
@@ -73,13 +57,10 @@ def test_a_run_scores_every_event_that_hasnt_ended_and_nothing_else(conn, monkey
     relate(conn, user, blocked, "BLOCK")
     conn.execute("""INSERT INTO post_participations (post_id, user_id, type) VALUES (%s, %s, 'NOT_INTERESTED')
                     ON CONFLICT DO NOTHING""", (reacted, user))
-    befriend(conn, user, friend, going)
 
-    run, _ = app.write(conn, app.load(conn))
+    events = ranked(app.load(conn))
 
-    scored = {p for (p,) in conn.execute("SELECT post_id FROM rec_ppr_scores WHERE run_number = %s AND user_id = %s",
-                                         (run, user))}
-    assert {going, own, by_blocked, reacted} <= scored and not scored & {deleted, ended}
+    assert {upcoming, own, by_blocked, reacted} <= events and not events & {deleted, ended}
 
 
 def test_the_rows_written_are_the_walks_scores(conn):
@@ -89,7 +70,7 @@ def test_the_rows_written_are_the_walks_scores(conn):
 
     written = {(u, p): s for u, p, s in conn.execute(
         "SELECT user_id, post_id, score FROM rec_ppr_scores WHERE run_number = %s", (run,))}
-    expected = {(inputs.user_ids[u], inputs.event_ids[e]): s for u, e, s in app.scores(inputs)}
+    expected = {(inputs.user_ids[u], inputs.event_ids[e]): s for u, e, s in app.written(app.scores(inputs))}
     assert written and written.keys() == expected.keys()
     assert all(abs(written[k] - s) < 1e-6 for k, s in expected.items())
 

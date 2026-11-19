@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import psycopg
 
-from ppr import Inputs, scores
+from ppr import Inputs, scores, written
 from settings import settings
 
 logger = logging.getLogger("ppr")
@@ -155,7 +155,7 @@ def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
         (run,) = conn.execute("INSERT INTO rec_ppr_runs DEFAULT VALUES RETURNING run_number").fetchone()
         with conn.cursor() as cursor:
             with cursor.copy("COPY rec_ppr_scores (run_number, user_id, post_id, score) FROM STDIN") as copy:
-                for user, event, score in scores(inputs):
+                for user, event, score in written(scores(inputs)):
                     copy.write_row((run, inputs.user_ids[user], inputs.event_ids[event], score))
                     rows += 1
         # Not now(), which is when the transaction began, before the scores were written.

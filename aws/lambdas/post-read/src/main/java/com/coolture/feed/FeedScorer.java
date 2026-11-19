@@ -45,7 +45,7 @@ public final class FeedScorer {
         }
         double popularity = StrictMath.min(StrictMath.log(1.0 + StrictMath.max(facts.engagement(), 0)) / POPULARITY_SCALE, 1.0);
         double jitter = jitter(facts.id(), seed);
-        // PageRank scores are ranks from 0 to 1, so NEUTRAL is their median.
+        // The PageRank job writes only the posts it lifts above NEUTRAL (recommender/ppr), so no row means NEUTRAL.
         double ppr = facts.ppr() == null ? FeedConfig.NEUTRAL : facts.ppr();
 
         double total = config.affinity() * affinity

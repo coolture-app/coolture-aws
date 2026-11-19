@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 
 import app
+import ppr
 
 LAMBDAS = Path(__file__).resolve().parents[3] / "aws/lambdas"
 FEED_CONFIG = (LAMBDAS / "post-read/src/main/java/com/coolture/feed/FeedConfig.java").read_text(encoding="utf-8")
@@ -31,3 +32,7 @@ def test_the_job_reads_stances_and_events_as_the_feed_does():
 
 def test_runs_are_deleted_when_the_feed_stops_reading_them():
     assert app.RUN_MAX_AGE_HOURS == int(java(r"PPR_RUN_MAX_AGE_HOURS = (\d+);"))
+
+
+def test_rows_are_written_only_above_what_the_feed_reads_for_none():
+    assert ppr.NEUTRAL == float(java(r"double NEUTRAL = ([\d.]+);"))

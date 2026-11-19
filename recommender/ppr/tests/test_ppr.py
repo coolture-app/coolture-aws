@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import ppr
-from ppr import Inputs, adjacency, scores, seeds, similar_events
+from ppr import NEUTRAL, Inputs, adjacency, scores, seeds, similar_events, written
 
 DIM, GROUPS, PER_GROUP = 12, 6, 4
 # Each group of events sits along its own axis, with seeded noise so no two events are alike.
@@ -62,10 +62,28 @@ def test_ended_events_get_no_score():
     assert set(got) == set(range(N)) - {5}
 
 
-def test_only_the_events_with_the_most_mass_get_rows_with_their_rank_among_all(monkeypatch):
+def test_written_are_the_ranks_above_neutral_with_fewer_events_than_twice_the_cap():
     every = by_event(scores(inputs(**FRIENDS)))
-    monkeypatch.setattr(ppr, "SCORES_PER_USER", 5)
-    assert by_event(scores(inputs(**FRIENDS))) == {e: every[e] for e in sorted(every, key=every.get)[-5:]}
+    assert N < 2 * ppr.SCORES_PER_USER
+    assert by_event(written(scores(inputs(**FRIENDS)))) == {e: s for e, s in every.items() if s > NEUTRAL}
+
+
+def test_written_leaves_out_events_the_walk_cant_reach():
+    vectors = EVENTS.copy()
+    vectors[[6, 7]] = EVENTS.mean(axis=0)
+    got = by_event(written(scores(inputs(**FRIENDS, event_vectors=vectors, post_average=EVENTS.mean(axis=0)))))
+    assert 6 not in got and 7 not in got
+
+
+def test_written_keeps_each_users_highest_scores_up_to_the_cap(monkeypatch):
+    many = inputs(user_ids=["u0", "u1", "u2"], stances=[(0, 4, 2.0), (1, 8, 2.0), (2, 12, 2.0)],
+                  friends=[(0, 1), (1, 2), (2, 0)])
+    every = list(scores(many))
+    monkeypatch.setattr(ppr, "SCORES_PER_USER", 3)
+    got = list(written(every))
+    for user in range(3):
+        mine = by_event(every, user)
+        assert by_event(got, user) == {e: mine[e] for e in sorted(mine, key=lambda e: (-mine[e], e))[:3]}
 
 
 def test_a_user_whose_friends_marked_nothing_gets_no_rows():
