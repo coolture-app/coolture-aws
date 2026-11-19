@@ -16,6 +16,7 @@ import com.coolture.common.validation.PostLimits;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -173,9 +174,15 @@ public class PostWriteService {
         repository.deleteParticipation(postId, userId);
     }
 
+    /** The fields the embedding worker reads into a post's text. */
     private boolean embeddedContentChanged(PostWriteRepository.ExistingPost existing, PostDetailDto updated) {
         return !Objects.equals(existing.title(), updated.title())
-            || !Objects.equals(existing.description(), updated.description());
+            || !Objects.equals(existing.description(), updated.description())
+            || !Objects.equals(venueAndCity(existing.location()), venueAndCity(updated.location()));
+    }
+
+    private static List<String> venueAndCity(EventLocationDto location) {
+        return location == null ? null : Arrays.asList(location.venueName(), location.city());
     }
 
     private void validateTypeLocationInvariant(PostType type, EventLocationDto location) {
