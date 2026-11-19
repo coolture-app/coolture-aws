@@ -104,7 +104,7 @@ FRIEND_POSTS_SQL = """
 SELECT p.id
 FROM posts p
 WHERE p.author_id = '{bot_id}' AND p.deleted_at IS NULL
-  AND (p.open_ended OR COALESCE(p.ends_at, p.starts_at + interval '3 hours') >= now())
+  AND event_end(p.starts_at, p.ends_at, p.open_ended) >= now()
   AND NOT EXISTS (SELECT 1 FROM post_participations pp
                   WHERE pp.post_id = p.id AND pp.user_id <> ALL('{{{friends}}}'::uuid[]))
 ORDER BY p.starts_at, p.id

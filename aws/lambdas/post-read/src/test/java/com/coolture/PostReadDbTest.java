@@ -1,6 +1,7 @@
 package com.coolture;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.EventTime;
 import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
@@ -20,6 +21,7 @@ import com.coolture.feed.FeedPage;
 import com.coolture.feed.FeedRepository;
 import com.coolture.feed.FeedScorer;
 import com.coolture.feed.FeedService;
+import com.coolture.feed.TestFacts;
 import com.coolture.feed.UserVector;
 import com.coolture.repository.PostReadRepository;
 import com.coolture.repository.PostSort;
@@ -42,6 +44,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -296,7 +299,7 @@ class PostReadDbTest {
     void aPostCountsInterestedAndGoingApart_onItsPageAndItsCard() throws SQLException {
         UUID post = postTitled("walk_3");
         try {
-            writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'INTERESTED', now())", post);
+            writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'INTERESTED', now())", post, ME);
             PostDetailDto page = postRepository.findById(post, ME).orElseThrow();
             PostCardDto card = postRepository.findFeed(searching("walk_3"), PostSort.RECENT, ME, null, 10).stream()
                 .filter(c -> c.id().equals(post)).findFirst().orElseThrow();
@@ -321,35 +324,72 @@ class PostReadDbTest {
     }
 
     /** As the app's role, because the tests read as the read-only one. */
-    private static void writeAsTheApp(String sql, UUID post) throws SQLException {
+    private static long writeAsTheApp(String sql, Object... params) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("RESET ROLE");
             try (PreparedStatement write = conn.prepareStatement(sql)) {
-                write.setObject(1, post);
-                write.setObject(2, ME);
-                write.executeUpdate();
+                for (int i = 0; i < params.length; i++) {
+                    write.setObject(i + 1, params[i]);
+                }
+                if (!write.execute()) {
+                    return 0;
+                }
+                try (ResultSet rs = write.getResultSet()) {
+                    rs.next();
+                    return rs.getLong(1);
+                }
             } finally {
                 stmt.execute("SET ROLE coolture_reader");
             }
         }
     }
 
+    @Test
+    void feed_readsTheLatestPprRunFinishedBeforeAsOfWithinItsMaxAge() throws SQLException {
+        // A day ahead, so a run made just now, as make seed's last step does, is never the latest.
+        Instant base = Instant.now().plus(Duration.ofDays(1));
+        UUID post = postTitled("future_public");
+        UUID commented = postTitled("commented");
+        String run = "INSERT INTO rec_ppr_runs (finished_at) VALUES (?) RETURNING run_number";
+        String score = "INSERT INTO rec_ppr_scores (run_number, user_id, post_id, score) VALUES (?, ?, ?, ?)";
+        // The later run is made first, so the latest isn't simply the highest number.
+        long later = writeAsTheApp(run, Timestamp.from(base.plus(Duration.ofHours(1))));
+        long earlier = writeAsTheApp(run, Timestamp.from(base.minus(Duration.ofHours(1))));
+        writeAsTheApp(score, later, ME, post, 0.75);
+        writeAsTheApp(score, earlier, ME, post, 0.25);
+        writeAsTheApp(score, earlier, UUID.fromString("a0000000-0000-0000-0000-000000000002"), commented, 0.9);
+        try {
+            assertEquals(0.25, pprOf(post, base), 1e-6);
+            assertEquals(0.25, pprOf(post, base.plus(Duration.ofHours(1)).plusSeconds(30)), 1e-6);
+            assertEquals(0.75, pprOf(post, base.plus(Duration.ofHours(2))), 1e-6);
+            assertNull(pprOf(commented, base), "another user's score");
+            assertNull(pprOf(post, base.plus(Duration.ofHours(1 + FeedConfig.PPR_RUN_MAX_AGE_HOURS + 1))), "a stale run");
+        } finally {
+            writeAsTheApp("DELETE FROM rec_ppr_scores WHERE run_number IN (?, ?)", earlier, later);
+            writeAsTheApp("DELETE FROM rec_ppr_runs WHERE run_number IN (?, ?)", earlier, later);
+        }
+    }
+
+    private Double pprOf(UUID post, Instant asOf) throws SQLException {
+        return candidates(asOf).stream().filter(f -> f.id().equals(post)).findFirst().orElseThrow().ppr();
+    }
+
     private static void like(UUID post) throws SQLException {
-        writeAsTheApp("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (?, ?, 'LIKE', now())", post);
+        writeAsTheApp("INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (?, ?, 'LIKE', now())", post, ME);
     }
 
     private static void unlike(UUID post) throws SQLException {
-        writeAsTheApp("DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?", post);
+        writeAsTheApp("DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?", post, ME);
     }
 
     /** "Nie dla mnie" at the given SQL time. */
     private static void mark(UUID post, String createdAt) throws SQLException {
         writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'NOT_INTERESTED', "
-            + createdAt + ")", post);
+            + createdAt + ")", post, ME);
     }
 
     private static void unmark(UUID post) throws SQLException {
-        writeAsTheApp("DELETE FROM post_participations WHERE post_id = ? AND user_id = ?", post);
+        writeAsTheApp("DELETE FROM post_participations WHERE post_id = ? AND user_id = ?", post, ME);
     }
 
     private double nearMark(UUID post, Instant asOf) throws SQLException {
@@ -429,10 +469,9 @@ class PostReadDbTest {
             assertEquals(1, nearMark(twin, next), 1e-6);
             assertFalse(candidates(next).stream().anyMatch(f -> f.id().equals(marked)), "the marked post is still a candidate");
             FeedConfig d = FeedConfig.DEFAULTS;
-            FeedScorer scorer = new FeedScorer(new FeedConfig(d.affinity(), d.proximity(), d.time(), d.popularity(), 0, d.notForMe()));
+            FeedScorer scorer = new FeedScorer(new FeedConfig(d.affinity(), d.proximity(), d.time(), d.popularity(), 0, d.notForMe(), d.ppr()));
             FeedScorer.Facts twinFacts = candidates(next).stream().filter(f -> f.id().equals(twin)).findFirst().orElseThrow();
-            FeedScorer.Facts unmarked = new FeedScorer.Facts(twinFacts.id(), twinFacts.startsAt(), twinFacts.endsAt(),
-                twinFacts.engagement(), twinFacts.similarity(), twinFacts.meters());
+            FeedScorer.Facts unmarked = TestFacts.copyOf(twinFacts).nearMark(0).build();
             assertTrue(scorer.score(twinFacts, next, 1).total() < scorer.score(unmarked, next, 1).total());
         } finally {
             unmark(marked);
@@ -887,6 +926,25 @@ class PostReadDbTest {
     }
 
     // ===== Dates by overlap and events with no end date =====
+
+    @ParameterizedTest
+    @CsvSource(nullValues = "null", value = {"2026-11-16T18:00:00Z, false", "null, false", "null, true"})
+    void eventEnd_inTheDatabase_isEventTimeEnd(String endsAt, boolean openEnded) throws SQLException {
+        Instant start = Instant.parse("2026-11-14T18:00:00Z");
+        Instant end = endsAt == null ? null : Instant.parse(endsAt);
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "SELECT CASE WHEN isfinite(e) THEN e END FROM (SELECT event_end(?::timestamptz, ?::timestamptz, ?) AS e) x")) {
+            stmt.setTimestamp(1, Timestamp.from(start));
+            stmt.setTimestamp(2, end == null ? null : Timestamp.from(end));
+            stmt.setBoolean(3, openEnded);
+            try (ResultSet rs = stmt.executeQuery()) {
+                rs.next();
+                Timestamp got = rs.getTimestamp(1);
+                assertEquals(EventTime.end(start, end, openEnded), got == null ? null : got.toInstant());
+            }
+        }
+    }
 
     private static final UUID TIMEKEEPER = UUID.fromString("a0000000-0000-0000-0000-000000000011");
     private static final UUID RHYTHM = UUID.fromString("a0000000-0000-0000-0000-000000000012");

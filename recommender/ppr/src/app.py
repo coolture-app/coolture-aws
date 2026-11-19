@@ -1,0 +1,178 @@
+import logging
+import time
+from collections.abc import Sequence
+from datetime import datetime
+from typing import Any
+
+import numpy as np
+import psycopg
+
+from ppr import Inputs, scores, written
+from settings import settings
+
+logger = logging.getLogger("ppr")
+logger.setLevel(logging.INFO)
+
+EMBEDDING_MODEL = "sdadas/mmlw-roberta-base"
+
+# The feed's own rules, from FeedConfig. tests/test_feed_constants.py checks they agree.
+# Not likes: friends see only interested and going on the cards, and through the graph a like would reach them.
+STANCE_WEIGHTS = {"INTERESTED": 1.5, "TAKES_PART": 2.0}
+STANCE_HALF_LIFE_DAYS = 14
+STANCE_MAX_AGE_DAYS = 112
+RUN_MAX_AGE_HOURS = 24
+
+POST_AVERAGE = """
+SELECT avg(pe.embedding)::real[]
+FROM post_embeddings pe
+JOIN posts p ON p.id = pe.post_id
+WHERE pe.model = %(model)s AND p.created_at <= %(as_of)s
+"""
+
+# Ended events stay while their stances count, to connect people and places.
+EVENTS = """
+SELECT p.id,
+       vector_send(pe.embedding) AS vector,
+       event_end(p.starts_at, p.ends_at, p.open_ended) >= %(as_of)s AS not_ended,
+       CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
+            THEN lower(btrim(el.venue_name)) || ' | ' || lower(btrim(coalesce(el.city, ''))) END AS venue
+FROM posts p
+JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %(model)s
+LEFT JOIN event_locations el ON el.id = p.event_location_id
+WHERE p.created_at <= %(as_of)s AND (p.deleted_at IS NULL OR p.deleted_at > %(as_of)s)
+  AND event_end(p.starts_at, p.ends_at, p.open_ended) >= %(as_of)s - make_interval(days => %(max_age_days)s)
+ORDER BY p.id
+"""
+
+STANCES = """
+SELECT user_id, post_id, type, floor(extract(epoch FROM %(as_of)s - created_at) / 86400)::int AS age_days
+FROM post_participations
+WHERE type = ANY(%(types)s)
+  AND created_at <= %(as_of)s AND created_at > %(as_of)s - make_interval(days => %(max_age_days)s)
+"""
+
+# A row with no time counts as always there.
+FOLLOWS = """
+SELECT source_user_id, target_user_id FROM user_relations
+WHERE type = 'FOLLOW' AND COALESCE(created_at, '-infinity') <= %(as_of)s
+"""
+
+# The feed ignores these runs, whatever the session's asOf.
+DELETE_OLD_RUNS = """
+WITH old AS (
+    DELETE FROM rec_ppr_runs WHERE finished_at < now() - make_interval(hours => %(max_age_hours)s)
+    RETURNING run_number
+)
+DELETE FROM rec_ppr_scores WHERE run_number IN (SELECT run_number FROM old)
+"""
+
+
+def _connect() -> psycopg.Connection:
+    # A copy of post-embedding's _connect; change both.
+    return psycopg.connect(
+        host=settings.db_host,
+        port=settings.db_port,
+        dbname=settings.db_name,
+        user=settings.db_username,
+        connect_timeout=settings.db_connect_timeout_seconds,
+        autocommit=True,
+        **_db_credentials(),
+    )
+
+
+def _db_credentials() -> dict[str, str]:
+    if not settings.db_iam_auth:
+        return {"password": settings.db_password}
+    import boto3
+
+    token = boto3.client("rds", region_name=settings.aws_region).generate_db_auth_token(
+        DBHostname=settings.db_host, Port=settings.db_port, DBUsername=settings.db_username
+    )
+    return {"password": token, "sslmode": "require"}
+
+
+def _matrix(sent: Sequence[bytes]) -> np.ndarray:
+    # pgvector's binary form: dimensions and an unused int16, then big-endian float4. Far lighter than text arrays.
+    return np.array([np.frombuffer(v, dtype=">f4", offset=4) for v in sent], dtype=float)
+
+
+def _positions(items: Sequence) -> dict[Any, int]:
+    return {item: i for i, item in enumerate(items)}
+
+
+def _stance_weight(kind: str, age_days: int) -> float:
+    return STANCE_WEIGHTS[kind] * 0.5 ** (age_days / STANCE_HALF_LIFE_DAYS)
+
+
+def load(conn: psycopg.Connection, as_of: datetime | None = None) -> Inputs | None:
+    """What the app knew at as_of, the database's now by default. None when no event has a vector of EMBEDDING_MODEL.
+    An earlier as_of is approximate: a changed stance keeps only its latest time, and removed stances, follows and
+    edited posts leave no trace."""
+    if as_of is None:
+        (as_of,) = conn.execute("SELECT now()").fetchone()
+    assert as_of.tzinfo, "a naive as_of would be read in the session's time zone"
+    at = {"as_of": as_of, "model": EMBEDDING_MODEL, "max_age_days": STANCE_MAX_AGE_DAYS, "types": list(STANCE_WEIGHTS)}
+    (average,) = conn.execute(POST_AVERAGE, at).fetchone()
+    events = conn.execute(EVENTS, at).fetchall()
+    if average is None or not events:
+        return None
+    event_ids, event_vectors, not_ended, venues = zip(*events)
+
+    stances = conn.execute(STANCES, at).fetchall()
+    following = set(conn.execute(FOLLOWS, at).fetchall())
+    sharing = {u for (u,) in conn.execute("SELECT id FROM users WHERE share_stances")}
+    # Friends.sharingFriend's rule, the people whose stances the cards show. A block deletes the follows both ways, so
+    # it needs no check of its own.
+    friends = sorted((a, b) for a, b in following if (b, a) in following and b in sharing)
+
+    event_index = _positions(event_ids)
+    user_ids = sorted({u for u, _, _, _ in stances} | {u for pair in friends for u in pair})
+    user_index = _positions(user_ids)
+
+    return Inputs(
+        event_ids=list(event_ids),
+        event_vectors=_matrix(event_vectors),
+        not_ended=np.array(not_ended, dtype=bool),
+        venues=list(venues),
+        post_average=np.array(average, dtype=float),
+        user_ids=user_ids,
+        stances=[(user_index[u], event_index[p], _stance_weight(kind, age_days))
+                 for u, p, kind, age_days in stances if p in event_index],
+        friends=[(user_index[a], user_index[b]) for a, b in friends],
+    )
+
+
+def write(conn: psycopg.Connection, inputs: Inputs) -> tuple[int, int]:
+    """Scores while it copies, so the rows never all sit in memory."""
+    # Outside the run's transaction, so old runs go even when this run fails.
+    conn.execute(DELETE_OLD_RUNS, {"max_age_hours": RUN_MAX_AGE_HOURS})
+    rows = 0
+    with conn.transaction():
+        (run,) = conn.execute("INSERT INTO rec_ppr_runs DEFAULT VALUES RETURNING run_number").fetchone()
+        with conn.cursor() as cursor:
+            with cursor.copy("COPY rec_ppr_scores (run_number, user_id, post_id, score) FROM STDIN") as copy:
+                for user, event, score in written(scores(inputs)):
+                    copy.write_row((run, inputs.user_ids[user], inputs.event_ids[event], score))
+                    rows += 1
+        # Not now(), which is when the transaction began, before the scores were written.
+        conn.execute("UPDATE rec_ppr_runs SET finished_at = clock_timestamp() WHERE run_number = %s", (run,))
+    return run, rows
+
+
+def lambda_handler(_event: dict[str, Any], context: Any) -> dict[str, Any]:
+    started = time.monotonic()
+    with _connect() as conn:
+        logger.info("connected in %.1f s", time.monotonic() - started)
+        inputs = load(conn)
+        if inputs is None:
+            logger.info("nothing to score: no events with %s vectors", EMBEDDING_MODEL)
+            return {"run": None, "rows": 0}
+        loaded = time.monotonic()
+        logger.info("loaded %d events (%d not ended), %d users, %d friend edges in %.1f s", len(inputs.event_ids),
+                    inputs.not_ended.sum(), len(inputs.user_ids), len(inputs.friends), loaded - started)
+        # The database ends the run's transaction itself, before Lambda stops this process. 0 would mean no limit.
+        timeout_ms = max(context.get_remaining_time_in_millis() - 15_000, 1_000)
+        conn.execute("SELECT set_config('statement_timeout', %s, false)", (f"{timeout_ms}ms",))
+        run, rows = write(conn, inputs)
+    logger.info("run %s: %d rows, scored and written in %.1f s", run, rows, time.monotonic() - loaded)
+    return {"run": run, "rows": rows}

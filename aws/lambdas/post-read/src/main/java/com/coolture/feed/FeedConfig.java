@@ -8,9 +8,10 @@ import java.util.Map;
  * "affinity=0.4,jitter=0". A weight of 0 switches that signal off. FEED_WEIGHTS is never a request parameter.
  * notForMe is how much affinity a post loses at most for being like what the viewer marked "Nie dla mnie" (FeedScorer).
  */
-public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter, double notForMe) {
+public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter, double notForMe,
+                         double ppr) {
 
-    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10, 0.5);
+    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10, 0.5, 0.10);
 
     /** Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it can't change the order. */
     public static final double NEUTRAL = 0.5;
@@ -54,6 +55,16 @@ public record FeedConfig(double affinity, double proximity, double time, double 
     public static final int POPULARITY_CAP = 100;
 
     public static final int QUERY_TIMEOUT_SECONDS = 5;
+    /**
+     * A PageRank run counts for a session once it finished this long before asOf: clock skew between this Lambda and the
+     * database, and the commit after a run is stamped finished.
+     */
+    public static final int PPR_RUN_MARGIN_SECONDS = 60;
+    /**
+     * An older run counts as none, and every post gets NEUTRAL for PageRank: its scores may still carry friendships,
+     * blocks and sharing people have changed since. Long enough to outlast a few failed scheduled runs.
+     */
+    public static final int PPR_RUN_MAX_AGE_HOURS = 24;
 
     /** How long after its end an event still shows in browse. */
     public static final int PAST_WINDOW_HOURS = 12;
@@ -74,7 +85,8 @@ public record FeedConfig(double affinity, double proximity, double time, double 
                 "time", DEFAULTS.time,
                 "popularity", DEFAULTS.popularity,
                 "jitter", DEFAULTS.jitter,
-                "notForMe", DEFAULTS.notForMe));
+                "notForMe", DEFAULTS.notForMe,
+                "ppr", DEFAULTS.ppr));
             for (String entry : raw.split(",")) {
                 String[] pair = entry.split("=", 2);
                 String name = pair[0].trim();
@@ -88,7 +100,7 @@ public record FeedConfig(double affinity, double proximity, double time, double 
                 weights.put(name, value);
             }
             return new FeedConfig(weights.get("affinity"), weights.get("proximity"), weights.get("time"),
-                weights.get("popularity"), weights.get("jitter"), weights.get("notForMe"));
+                weights.get("popularity"), weights.get("jitter"), weights.get("notForMe"), weights.get("ppr"));
         } catch (RuntimeException e) {
             System.err.println("Invalid FEED_WEIGHTS, using the defaults: " + e.getMessage());
             return DEFAULTS;

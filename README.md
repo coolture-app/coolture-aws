@@ -1,7 +1,7 @@
 # Coolture backend
 
 The API, database, photo storage, recommender and event scraper of Coolture: Java Lambdas behind API Gateway, PostgreSQL
-(Aurora on AWS), S3, and a Python worker that embeds posts and interests for the feed. The web app is
+(Aurora on AWS), S3, and Python functions that embed posts and interests and score events with PageRank for the feed. The web app is
 [coolture-frontend](https://github.com/coolture-app/coolture-frontend).
 
 ## Run locally
@@ -45,9 +45,10 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 4. Lets the demo users react to posts close to their interests, so their feeds are personal.
 5. Has Anna's, Jan's and Ola's friends mark the soonest posts, so the top of Wszystkie, sorted Nadchodzące, shows every
    shape of a card's friends line. This step puts its cases back on every run, on the posts soonest then.
+6. Scores every user's events with personalised PageRank (`make ppr`).
 
-The first run takes about 30 minutes. Later runs take a minute and add nothing. How the snapshot is picked and loaded
-is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
+The first run takes about 30 minutes. Later runs take a minute and add only a new PageRank run. How the snapshot is
+picked and loaded is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
 
 **The geocoder**, Photon with an index of Poland, serves the post form's place search and locates the scraper's
 events. `make geo-index` builds it once, with 3 GB of disk, alone because of the memory. Then `make up` starts it on
@@ -159,8 +160,8 @@ scripts/                        # deploy.sh, doctor.sh, embed-posts.sh, geo-publ
 | Command | Runs |
 |---|---|
 | `mvn test -f aws/lambdas/<module>/pom.xml` | A Java module's unit tests, after `make build-common`. `make build` runs them too |
-| `make test-db` | The database tests of posts, comments and users, against `make up` |
-| `make test-python` | The Python Lambdas: embedding workers, migrations, authorizer |
+| `make test-db` | The database tests of posts, comments, users and PageRank, against `make up` |
+| `make test-python` | The Python Lambdas: embedding worker, PageRank, migrations, authorizer |
 | `make test-scraper` | The scraper |
 | `make api-test` | The request flows in `api/`, against `make dev` and `make seed` |
 
@@ -180,7 +181,7 @@ Deploy in this order, because later stacks import earlier ones' exports, and del
 |---|---|---|
 | `coolture-auth-<env>` | `aws/auth.yaml` | |
 | `coolture-backend-<env>` | `aws/backend.yaml` | networking (VPC, subnets), auth (authorizers, Cognito) |
-| `coolture-embeddings-<env>` | `recommender/embedding-workers/template.yaml` | networking, backend (queue ARN, DB endpoint, security group) |
+| `coolture-embeddings-<env>` | `recommender/template.yaml` | networking, backend (queue ARN, DB endpoint, security group) |
 | `coolture-geocoder-<env>` | `aws/geocoder.yaml` | networking (VPC, subnets) |
 | `coolture-scraper-<env>` | `aws/scraper.yaml` | backend (API domain), geocoder (proxy URL), auth (pool and client ids, passed by `deploy.sh`) |
 | `coolture-waf-<env>` (us-east-1) | `aws/waf.yaml` | |

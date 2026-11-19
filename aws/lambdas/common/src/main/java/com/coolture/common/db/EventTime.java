@@ -5,12 +5,13 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * When an event ends, in SQL and in Java. Every module takes the rule from here, so the two can't drift apart.
- * A post with no end date (open_ended) never ends.
+ * When an event ends. A post with no end date (open_ended) never ends. In SQL the rule is the database's event_end
+ * (V20), which the PageRank job and the seed call too; {@link #end} is the same rule for rows already read, and
+ * PostReadDbTest checks the two agree.
  */
 public final class EventTime {
 
-    /** An event with no end time has ended this long after it starts. */
+    /** An event with no end time has ended this long after it starts. A change needs a migration that replaces event_end. */
     public static final int DEFAULT_EVENT_HOURS = 3;
 
     /** A run longer than this is a standing event, like a post with no end date: the feed doesn't treat it as tonight's. */
@@ -20,9 +21,7 @@ public final class EventTime {
      * The end of the post aliased {@code p}. Binds nothing. Only for conditions and ordering: JDBC can't read
      * 'infinity' as an Instant, so a query that needs the end selects ends_at and open_ended for {@link #end}.
      */
-    public static final String END =
-        "CASE WHEN p.open_ended THEN 'infinity'::timestamptz "
-            + "ELSE COALESCE(p.ends_at, p.starts_at + interval '" + DEFAULT_EVENT_HOURS + " hours') END";
+    public static final String END = "event_end(p.starts_at, p.ends_at, p.open_ended)";
 
     /** Binds nothing. */
     public static final String ENDED = END + " < now()";

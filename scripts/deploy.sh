@@ -12,7 +12,9 @@ Usage: $0 [dev|staging|prod] [stack...]
 Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (default: all)
 Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url),
   FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack),
-  SCRAPER_SCHEDULE=true|false and SCRAPER_END_DATE=2027-06-30T00:00:00Z (both keep their deployed values when unset)
+  SCRAPER_SCHEDULE=true|false and SCRAPER_END_DATE=2027-06-30T00:00:00Z (both keep their deployed values when unset),
+  PPR_SCHEDULE=true|false (PageRank's schedule; keeps its deployed value when unset),
+  FEED_WEIGHTS=default|ppr=0|... (the feed's weights, FeedConfig; keeps its deployed value when unset)
 EOF
 }
 
@@ -54,7 +56,7 @@ template_for() {
     case "$1" in
         auth) echo aws/auth.yaml ;;
         backend) echo aws/backend.yaml ;;
-        embeddings) echo recommender/embedding-workers/template.yaml ;;
+        embeddings) echo recommender/template.yaml ;;
         geocoder) echo aws/geocoder.yaml ;;
         scraper) echo aws/scraper.yaml ;;
         waf) echo aws/waf.yaml ;;
@@ -105,10 +107,14 @@ overrides_for() {
             echo "Environment=$ENVIRONMENT FrontendUrl=\"$(frontend_url)\""
             ;;
         backend)
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\""
+            local weights
+            weights="${FEED_WEIGHTS:-$(stack_param backend FeedWeights 2> /dev/null || true)}"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\" FeedWeights=\"${weights:-default}\""
             ;;
         embeddings)
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT"
+            local enabled
+            enabled="${PPR_SCHEDULE:-$(stack_param embeddings PprScheduleEnabled 2> /dev/null || true)}"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT PprScheduleEnabled=${enabled:-false}"
             ;;
         geocoder)
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK CloudFrontPrefixListId=$(cloudfront_prefix_list)"

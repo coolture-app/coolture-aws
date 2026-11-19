@@ -21,7 +21,8 @@ PYTHON ?= $(if $(filter Windows_NT,$(OS)),python,python3)
 # One virtual environment for the scripts and the Python tests, made on first use.
 VENV_PY := .venv/$(if $(filter Windows_NT,$(OS)),Scripts/python.exe,bin/python)
 PY_REQUIREMENTS := scraper/requirements-dev.txt aws/lambdas/migrations/requirements-dev.txt \
-	aws/lambdas/authorizer/requirements-dev.txt recommender/embedding-workers/post-embedding/requirements-dev.txt
+	aws/lambdas/authorizer/requirements-dev.txt recommender/post-embedding/requirements-dev.txt \
+	recommender/ppr/requirements-dev.txt
 
 # The local Garage keys, the defaults in docker-compose.yml. Without them every upload and photo URL gets a 403.
 GARAGE_ACCESS_KEY_ID ?= GK9f23fc115cfabe3da0a5bcb5
@@ -36,7 +37,7 @@ SAM_LOCAL_ARGS := --template-file .aws-sam/build/template.yaml --skip-pull-image
 LAMBDA_IMAGES := public.ecr.aws/lambda/java:21-rapid-x86_64 public.ecr.aws/lambda/python:3.13-rapid-x86_64 \
 	postembeddingfunction:rapid-x86_64
 EMBEDDINGS_TEMPLATE := .aws-sam/embeddings/template.yaml
-# The post-embedding worker's image, which sam build tags from DockerTag in recommender/embedding-workers/template.yaml.
+# The post-embedding worker's image, which sam build tags from DockerTag in recommender/template.yaml.
 EMBEDDINGS_IMAGE := postembeddingfunction:python3.13-v1
 SNAPSHOT_DIR := scraper/snapshot
 
@@ -121,8 +122,8 @@ build: build-common ## Build backend lambdas
 	fi; \
 	sam build --template-file aws/backend.yaml --parallel --cached && echo "$$sum" > .aws-sam/common.sha1
 
-test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding workers, migrations, authorizer, geocoder proxy
-	@for dir in recommender/embedding-workers/post-embedding \
+test-python: $(VENV_PY) ## Run the Python Lambdas' unit tests: embedding worker, PageRank, migrations, authorizer, geocoder proxy
+	@for dir in recommender/post-embedding recommender/ppr \
 			aws/lambdas/migrations aws/lambdas/authorizer aws/lambdas/geo-proxy; do \
 		echo "$$dir"; (cd $$dir && "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests) || exit 1; \
 	done
@@ -166,30 +167,41 @@ seed-reactions: $(VENV_PY) ## Demo users react to posts close to their interests
 seed-friends: $(VENV_PY) ## Friends of the demo users mark the soonest posts, one shape of the cards' friends line each (after seed-events)
 	@$(VENV_PY) scraper/seed.py friends
 
-seed: seed-events embed-interests embed-posts seed-reactions seed-friends ## All realistic data: events, embeddings, reactions, friends. Waits for the API
+seed: seed-events embed-interests embed-posts seed-reactions seed-friends ppr ## All realistic data: events, embeddings, reactions, friends, PageRank scores. Waits for the API
 	@echo "Seeded. Run npm start in ../coolture-frontend and open http://localhost:4200"
 
 .NOTPARALLEL: seed
 
-test-db: build-common ## Run the database tests of posts, comments and users against `make up`
+test-db: build-common $(VENV_PY) ## Run the database tests of posts, comments, users and PageRank against `make up`
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-read/pom.xml -Dtest=PostReadDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-write/pom.xml -Dtest=PostWriteDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/comment-read/pom.xml -Dtest=CommentReadDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/comment-write/pom.xml -Dtest=CommentWriteDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/user/pom.xml -Dtest=UserDbTest
+	@cd recommender/ppr && DB_TEST=true "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests/test_app_db.py
 
 embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
 	@scripts/embed-posts.sh
 
-# Built on first use, or when its image was removed. After changing a worker's code, run make build-embeddings again.
+# sam local invoke exits 0 when the function raises, so the output decides. The payload can't hold a comma.
+invoke-worker = out="$$(echo '$(2)' | sam local invoke $(1) --template-file $(EMBEDDINGS_TEMPLATE) --skip-pull-image --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
+
+# Built on first use, when its image was removed, or when the template or either function's code changed.
+RECOMMENDER_SOURCES := recommender/template.yaml recommender/post-embedding/Dockerfile \
+	recommender/post-embedding/src recommender/ppr/src
 require-embeddings-build:
-	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] || ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
-		echo "Building the embedding workers. The first build downloads the model into a 3.5 GB image."; \
+	@if [ ! -f $(EMBEDDINGS_TEMPLATE) ] \
+		|| [ -n "$$(find $(RECOMMENDER_SOURCES) -type f -newer $(EMBEDDINGS_TEMPLATE) -not -path '*/__pycache__*')" ] \
+		|| ! docker image inspect $(EMBEDDINGS_IMAGE) > /dev/null 2>&1; then \
+		echo "Building the embedding worker and PageRank. The first build downloads the model into a 3.5 GB image."; \
 		$(MAKE) --no-print-directory build-embeddings; \
 	fi
 
 embed-interests: require-embeddings-build ## Embed interests missing vectors locally
-	@out="$$(echo '{"action":"embed-interests"}' | sam local invoke PostEmbeddingFunction --template-file .aws-sam/embeddings/template.yaml --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
+	@$(call invoke-worker,PostEmbeddingFunction,{"action":"embed-interests"})
+
+ppr: require-embeddings-build ## Score every user's events with personalised PageRank locally (after embed-posts)
+	@$(call invoke-worker,PprFunction,{})
 
 local: build stop-lambdas ## Start local API on localhost:3000 (Ctrl+C stops it; make stop if containers stay)
 	@echo "API: http://localhost:3000"
@@ -200,9 +212,9 @@ validate: ## Validate SAM templates
 	@sam validate --template-file aws/backend.yaml
 	@sam validate --template-file aws/frontend.yaml
 	@sam validate --template-file aws/auth.yaml
-	@sam validate --template-file recommender/embedding-workers/template.yaml
+	@sam validate --template-file recommender/template.yaml
 
-deploy-backend: ## Deploy backend to AWS (dev, arm64) - needs mgmt-stack-networking (management stack) + auth deployed
+deploy-backend: ## Deploy backend to AWS (dev, arm64; FEED_WEIGHTS=ppr=0 sets the feed's weights) - needs mgmt-stack-networking (management stack) + auth deployed
 	@scripts/deploy.sh dev backend
 
 deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to AWS (dev) - needs backend deployed
@@ -211,10 +223,10 @@ deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to
 deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
 	@scripts/deploy.sh dev auth
 
-build-embeddings: ## Build embedding workers for local runs (x86_64; post-embedding image needs Docker)
-	@sam build --template-file recommender/embedding-workers/template.yaml --build-dir .aws-sam/embeddings
+build-embeddings: ## Build the embedding worker and PageRank for local runs (x86_64; needs Docker and Python 3.13)
+	@sam build --template-file recommender/template.yaml --build-dir .aws-sam/embeddings
 
-deploy-embeddings: ## Deploy embedding workers to AWS (dev, arm64) - needs mgmt-stack-networking + backend deployed
+deploy-embeddings: ## Deploy the embedding worker and PageRank to AWS (dev, arm64; PPR_SCHEDULE=true turns PageRank's schedule on) - needs mgmt-stack-networking + backend deployed
 	@scripts/deploy.sh dev embeddings
 
 deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="auth backend embeddings waf frontend")
@@ -236,7 +248,7 @@ deploy-waf: ## Deploy CloudFront WAF web ACL + allowed-IP sets to us-east-1 (dev
 deploy-all: ## Deploy all stacks (dev)
 	@scripts/deploy.sh dev
 
-delete-embeddings: ## Delete embedding workers stack
+delete-embeddings: ## Delete the embedding worker and PageRank stack
 	@sam delete --stack-name coolture-embeddings-dev --no-prompts
 
 delete-backend: ## Delete backend stack (delete embeddings first: it imports backend outputs)

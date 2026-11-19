@@ -45,6 +45,9 @@ public class FeedRepository {
      * viewer's "Nie dla mnie" marks, centred the same way. Marks count up to asOf, fade as stances do, and only the newest
      * NOT_FOR_ME_MARKS. MATERIALIZED, because an inlined CTE would run again for every candidate, and OFFSET 0, because a
      * flattened lateral would read and centre the post's vector again for every mark (100 marks took 6 s at 2,000 posts).
+     * The PageRank score comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf, so a run landing
+     * mid-session doesn't move its pages, and less than PPR_RUN_MAX_AGE_HOURS before now too, since a cursor's asOf
+     * comes from the client.
      */
     private static final String FEATURES = """
         WITH marks AS MATERIALIZED (
@@ -67,11 +70,17 @@ public class FeedRepository {
                (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
                 FROM marks m) AS near_mark,
                ST_Distance(el.coordinates,
-                           ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters
+                           ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters,
+               pr.score::float8 AS ppr
         FROM posts p
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
         LEFT JOIN event_locations el ON el.id = p.event_location_id
         CROSS JOIN LATERAL (SELECT CASE WHEN pe.model = ? THEN pe.embedding - ?::vector END AS centred OFFSET 0) c
+        LEFT JOIN rec_ppr_scores pr ON pr.post_id = p.id AND pr.user_id = ?::uuid
+            AND pr.run_number = (SELECT run_number FROM rec_ppr_runs
+                                 WHERE finished_at BETWEEN GREATEST(?::timestamptz, now()) - make_interval(hours => ?)
+                                                       AND ?::timestamptz - make_interval(secs => ?)
+                                 ORDER BY finished_at DESC LIMIT 1)
         WHERE
         """;
 
@@ -246,7 +255,12 @@ public class FeedRepository {
              .bindDouble(longitude)
              .bindDouble(latitude)
              .bindString(model)
-             .bindString(average);
+             .bindString(average)
+             .bindNullableUUID(viewer)
+             .bindTimestamp(asOf)
+             .bindInt(FeedConfig.PPR_RUN_MAX_AGE_HOURS)
+             .bindTimestamp(asOf)
+             .bindInt(FeedConfig.PPR_RUN_MARGIN_SECONDS);
             bindRules(b, viewer, asOf, filters);
 
             List<FeedScorer.Facts> candidates = new ArrayList<>();
@@ -263,7 +277,8 @@ public class FeedRepository {
                         (Double) rs.getObject("similarity"),
                         (Double) rs.getObject("meters"),
                         nearMark((Double) rs.getObject("near_mark")),
-                        EventTime.isStanding(startsAt, endsAt, openEnded)
+                        EventTime.isStanding(startsAt, endsAt, openEnded),
+                        (Double) rs.getObject("ppr")
                     ));
                 }
             }

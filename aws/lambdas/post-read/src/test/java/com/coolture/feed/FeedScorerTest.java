@@ -21,14 +21,10 @@ class FeedScorerTest {
     private static final FeedScorer DEFAULT = new FeedScorer(FeedConfig.DEFAULTS);
     private static final FeedConfig NO_JITTER = FeedConfig.parse("jitter=0");
 
-    private static FeedScorer.Facts facts(UUID id, Instant startsAt, int engagement, Double similarity, Double meters) {
-        return new FeedScorer.Facts(id, startsAt, engagement, similarity, meters);
-    }
-
     private static List<FeedScorer.Facts> variedPosts(Double similarity, Double meters) {
         return IntStream.range(0, 50)
-            .mapToObj(i -> facts(new UUID(i, i * 31L), AS_OF.plus(Duration.ofHours(i * 7L)), (i * 13) % 40,
-                similarity == null ? null : similarity, meters == null ? null : meters))
+            .mapToObj(i -> TestFacts.startingAt(AS_OF.plus(Duration.ofHours(i * 7L))).id(new UUID(i, i * 31L))
+                .engagement((i * 13) % 40).similarity(similarity).meters(meters).build())
             .toList();
     }
 
@@ -41,7 +37,8 @@ class FeedScorerTest {
 
     @Test
     void score_computesEachPartFromTheFormula() {
-        FeedScorer.Facts post = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(30)), 100, 0.225, 20_000.0);
+        FeedScorer.Facts post = TestFacts.startingAt(AS_OF.plus(Duration.ofDays(30))).engagement(100).similarity(0.225)
+            .meters(20_000.0).build();
 
         FeedScorer.Score score = DEFAULT.score(post, AS_OF, 7);
 
@@ -51,12 +48,26 @@ class FeedScorerTest {
         assertEquals(1.0, score.popularity(), 1e-12);
         FeedConfig w = FeedConfig.DEFAULTS;
         assertEquals(w.affinity() * score.affinity() + w.proximity() * score.proximity() + w.time() * score.time()
-            + w.popularity() * score.popularity() + w.jitter() * score.jitter(), score.total(), 1e-12);
+            + w.popularity() * score.popularity() + w.jitter() * score.jitter() + w.ppr() * score.ppr(), score.total(), 1e-12);
+    }
+
+    @Test
+    void ppr_whenMissing_isNeutral() {
+        FeedScorer.Facts post = TestFacts.startingAt(AS_OF.plus(Duration.ofDays(1))).build();
+
+        assertEquals(FeedConfig.NEUTRAL, DEFAULT.score(post, AS_OF, 1).ppr());
+    }
+
+    @Test
+    void ppr_whenPresent_isUsedAsIs() {
+        FeedScorer.Facts post = TestFacts.startingAt(AS_OF.plus(Duration.ofDays(1))).ppr(0.9).build();
+
+        assertEquals(0.9, DEFAULT.score(post, AS_OF, 1).ppr());
     }
 
     @Test
     void score_whenSignalsAreMissing_usesNeutralValues() {
-        FeedScorer.Score score = DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 0, null, null), AS_OF, 7);
+        FeedScorer.Score score = DEFAULT.score(TestFacts.startingAt(AS_OF).build(), AS_OF, 7);
 
         assertEquals(0.5, score.affinity());
         assertEquals(0.5, score.proximity());
@@ -66,7 +77,7 @@ class FeedScorerTest {
 
     @Test
     void score_whenSimilarityIsNaN_treatsItAsMissing() {
-        FeedScorer.Score score = DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 0, Double.NaN, null), AS_OF, 7);
+        FeedScorer.Score score = DEFAULT.score(TestFacts.startingAt(AS_OF).similarity(Double.NaN).build(), AS_OF, 7);
 
         assertEquals(0.5, score.affinity());
         assertFalse(Double.isNaN(score.total()));
@@ -89,18 +100,18 @@ class FeedScorerTest {
     void aGoodMatch_cantBeOvertakenByJitterAlone() {
         // The 95th and 5th percentile of a new user's cosines, with the averages taken out.
         FeedScorer scorer = new FeedScorer(FeedConfig.parse("proximity=0,time=0,popularity=0,jitter=0"));
-        double good = scorer.score(facts(UUID.randomUUID(), AS_OF, 0, 0.273, null), AS_OF, 7).total();
-        double poor = scorer.score(facts(UUID.randomUUID(), AS_OF, 0, -0.176, null), AS_OF, 7).total();
+        double good = scorer.score(TestFacts.startingAt(AS_OF).similarity(0.273).build(), AS_OF, 7).total();
+        double poor = scorer.score(TestFacts.startingAt(AS_OF).similarity(-0.176).build(), AS_OF, 7).total();
 
         assertTrue(good - poor > FeedConfig.DEFAULTS.jitter());
     }
 
     private static double affinityOf(double similarity) {
-        return DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 0, similarity, null), AS_OF, 7).affinity();
+        return DEFAULT.score(TestFacts.startingAt(AS_OF).similarity(similarity).build(), AS_OF, 7).affinity();
     }
 
     private static FeedScorer.Facts marked(double similarity, double nearMark) {
-        return new FeedScorer.Facts(UUID.randomUUID(), AS_OF, null, 0, similarity, null, nearMark);
+        return TestFacts.startingAt(AS_OF).similarity(similarity).nearMark(nearMark).build();
     }
 
     @Test
@@ -121,7 +132,7 @@ class FeedScorerTest {
 
     @Test
     void notForMe_appliesWithoutAViewerVectorToo() {
-        FeedScorer.Facts noVector = new FeedScorer.Facts(UUID.randomUUID(), AS_OF, null, 0, null, null, 1);
+        FeedScorer.Facts noVector = TestFacts.startingAt(AS_OF).nearMark(1).build();
 
         assertEquals(FeedConfig.NEUTRAL - 0.5, DEFAULT.score(noVector, AS_OF, 7).affinity(), 1e-12);
     }
@@ -142,21 +153,21 @@ class FeedScorerTest {
 
     @Test
     void score_whenPopularityPassesTheCap_staysAtOne() {
-        assertEquals(1.0, DEFAULT.score(facts(UUID.randomUUID(), AS_OF, 5000, null, null), AS_OF, 7).popularity());
+        assertEquals(1.0, DEFAULT.score(TestFacts.startingAt(AS_OF).engagement(5000).build(), AS_OF, 7).popularity());
     }
 
     @Test
     void score_whenEventEnded_timeFadesWithTheDaysSinceItsEnd() {
         Instant start = AS_OF.minus(Duration.ofDays(40));
-        FeedScorer.Facts ended = new FeedScorer.Facts(UUID.randomUUID(), start, AS_OF.minus(Duration.ofDays(30)), 0, null, null);
+        FeedScorer.Facts ended = TestFacts.startingAt(start).endsAt(AS_OF.minus(Duration.ofDays(30))).build();
 
         assertEquals(Math.exp(-1), DEFAULT.score(ended, AS_OF, 7).time(), 1e-12);
     }
 
     /** As FeedRepository builds the facts of a dated run. */
     private static FeedScorer.Facts run(Instant start, Instant end, Double similarity) {
-        return new FeedScorer.Facts(UUID.randomUUID(), start, end, 0, similarity, null, 0,
-            EventTime.isStanding(start, end, false));
+        return TestFacts.startingAt(start).endsAt(end).similarity(similarity).standing(EventTime.isStanding(start, end, false))
+            .build();
     }
 
     @Test
@@ -176,9 +187,8 @@ class FeedScorerTest {
     @Test
     void score_aPostWithNoEndDate_isCapped_whileRunningAndBefore() {
         Instant start = AS_OF.minus(Duration.ofDays(400));
-        FeedScorer.Facts standing = new FeedScorer.Facts(UUID.randomUUID(), start, null, 0, null, null, 0, true);
-        FeedScorer.Facts tomorrow = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(1)), null, 0,
-            null, null, 0, true);
+        FeedScorer.Facts standing = TestFacts.startingAt(start).standing(true).build();
+        FeedScorer.Facts tomorrow = TestFacts.startingAt(AS_OF.plus(Duration.ofDays(1))).standing(true).build();
 
         assertEquals(FeedConfig.STANDING_TIME_CAP, DEFAULT.score(standing, AS_OF, 7).time());
         assertEquals(FeedConfig.STANDING_TIME_CAP, DEFAULT.score(tomorrow, AS_OF, 7).time());
@@ -187,7 +197,7 @@ class FeedScorerTest {
     @Test
     void score_aStandingEventFarAhead_keepsItsLowerTime() {
         Instant start = AS_OF.plus(Duration.ofDays(60));
-        FeedScorer.Facts far = new FeedScorer.Facts(UUID.randomUUID(), start, null, 0, null, null, 0, true);
+        FeedScorer.Facts far = TestFacts.startingAt(start).standing(true).build();
 
         assertEquals(Math.exp(-2), DEFAULT.score(far, AS_OF, 7).time(), 1e-12);
     }
@@ -195,8 +205,8 @@ class FeedScorerTest {
     @Test
     void score_theCapIsSoft_aStrongMatchStillLeads() {
         FeedScorer scorer = new FeedScorer(NO_JITTER);
-        FeedScorer.Facts exhibition = new FeedScorer.Facts(UUID.randomUUID(), AS_OF.minus(Duration.ofDays(100)), null, 0,
-            FeedConfig.AFFINITY_HIGH, null, 0, true);
+        FeedScorer.Facts exhibition = TestFacts.startingAt(AS_OF.minus(Duration.ofDays(100))).similarity(FeedConfig.AFFINITY_HIGH)
+            .standing(true).build();
         FeedScorer.Facts concertTonight = run(AS_OF.plus(Duration.ofHours(2)), null, 0.0);
 
         assertTrue(scorer.score(exhibition, AS_OF, 7).total() > scorer.score(concertTonight, AS_OF, 7).total());
@@ -204,7 +214,7 @@ class FeedScorerTest {
 
     @Test
     void score_whenEventHasStarted_timeIsAtItsMaximum() {
-        FeedScorer.Facts running = facts(UUID.randomUUID(), AS_OF.minus(Duration.ofDays(30)), 0, null, null);
+        FeedScorer.Facts running = TestFacts.startingAt(AS_OF.minus(Duration.ofDays(30))).build();
 
         assertEquals(1.0, DEFAULT.score(running, AS_OF, 7).time());
     }
@@ -221,8 +231,9 @@ class FeedScorerTest {
     @Test
     void aWeightOfZero_removesThatSignal() {
         FeedScorer scorer = new FeedScorer(FeedConfig.parse("affinity=0,proximity=0,popularity=0,jitter=0"));
-        FeedScorer.Facts plain = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(1)), 0, null, null);
-        FeedScorer.Facts favoured = facts(UUID.randomUUID(), AS_OF.plus(Duration.ofDays(1)), 500, 1.0, 0.0);
+        FeedScorer.Facts plain = TestFacts.startingAt(AS_OF.plus(Duration.ofDays(1))).build();
+        FeedScorer.Facts favoured = TestFacts.startingAt(AS_OF.plus(Duration.ofDays(1))).engagement(500).similarity(1.0).meters(0.0)
+            .build();
 
         assertEquals(scorer.score(plain, AS_OF, 1).total(), scorer.score(favoured, AS_OF, 2).total());
     }
@@ -250,8 +261,9 @@ class FeedScorerTest {
         FeedScorer scorer = new FeedScorer(NO_JITTER);
         Instant startsAt = AS_OF.plus(Duration.ofDays(3));
 
-        double closer = scorer.score(facts(UUID.randomUUID(), startsAt, 5, 0.2, 1_000.0), AS_OF, 1).total();
-        double farther = scorer.score(facts(UUID.randomUUID(), startsAt, 5, 0.2, 50_000.0), AS_OF, 1).total();
+        TestFacts near = TestFacts.startingAt(startsAt).engagement(5).similarity(0.2);
+        double closer = scorer.score(near.meters(1_000.0).build(), AS_OF, 1).total();
+        double farther = scorer.score(near.meters(50_000.0).build(), AS_OF, 1).total();
 
         assertTrue(closer > farther);
     }

@@ -58,6 +58,13 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 7
+  FeedWeights:
+    Type: String
+    Default: default
+    Description: The feed's FEED_WEIGHTS, such as ppr=0 for PageRank's shadow runs (FeedConfig)
+    # FeedConfig.parse's names. It falls back to every default on a bad entry, so a typo would turn PageRank on.
+    AllowedPattern: '^(default|(affinity|proximity|time|popularity|jitter|notForMe|ppr)=[0-9]+(\.[0-9]+)?(,(affinity|proximity|time|popularity|jitter|notForMe|ppr)=[0-9]+(\.[0-9]+)?)*)$'
+    ConstraintDescription: default, or name=number pairs joined by commas, with FeedConfig's weight names
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
@@ -467,7 +474,7 @@ Resources:
       Environment:
         Variables:
           DB_USERNAME: !If [IsAWS, !Ref DbReadUsername, !Ref DbUsername]
-          FEED_WEIGHTS: default
+          FEED_WEIGHTS: !Ref FeedWeights
       Policies:
         - !If [IsAWS, !Ref DbReadConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:

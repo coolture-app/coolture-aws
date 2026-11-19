@@ -94,6 +94,7 @@ Commenting doesn't hide a post. A post liked during a session stays where it is,
 |---|---|
 | User or post has no vector, or their vectors come from different embedding models | `RANKED`, similarity is neutral |
 | No location, or an online post | `RANKED`, distance is neutral |
+| No PageRank score for the viewer and post, or no run finished within `PPR_RUN_MAX_AGE_HOURS` before the session | `RANKED`, the PageRank part is neutral |
 | Guest | `RANKED`, on time, popularity and location |
 | Ranking query fails or takes over 5 seconds, or scoring throws | `200` with `mode: UPCOMING` in the order of `sortBy=UPCOMING` below, and a server log line with the reason |
 | The upcoming query also fails, or the database is down | `500` |

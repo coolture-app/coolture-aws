@@ -1,15 +1,17 @@
 # Recommender
 
-The Python side of the feed: a Lambda that embeds posts and interests. The feed turns those into the viewer's vector
-itself (see [Interests and user vectors](#interests-and-user-vectors)). Everything here reads the app's tables in `public`
+The Python side of the feed: a Lambda that embeds posts and interests, which the feed turns into the viewer's vector
+itself (see [Interests and user vectors](#interests-and-user-vectors)), and one that scores events with personalised PageRank
+(see [Personalised PageRank](#personalised-pagerank)). Everything here reads the app's tables in `public`
 directly. Its own tables are prefixed `rec_`, only the recommender writes them, and they're created by ordinary migrations
 in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post-read`'s
 [contract](../aws/lambdas/post-read/contracts/README.md).
 
 | Path | What it does |
 |---|---|
-| `embedding-workers/post-embedding/` | Container image: embeds a post's title and description, and interests, with `mmlw-roberta-base` |
-| `embedding-workers/template.yaml` | Its own stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
+| `post-embedding/` | Container image: embeds a post's title and description, and interests, with `mmlw-roberta-base` |
+| `ppr/` | Zip function: personalised PageRank for every user, into `rec_ppr_scores` |
+| `template.yaml` | Both functions' stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
 
 All commands below run from the repository root.
 
@@ -44,18 +46,18 @@ make embed-posts ALL=1               # every post that isn't deleted
 make embed-posts DRY_RUN=1           # print the SQS/S3 events it would send
 ```
 
-They build the worker on first use (`make build-embeddings`; run it again after changing it). `embed-posts`
-(`scripts/embed-posts.sh`) wraps posts in the same events AWS delivers, 50 per invocation (`BATCH_SIZE=`), and exits
-non-zero if any fails. `make test-python` runs the worker's unit tests.
+They build the worker on first use, and again when its code or the template changed (`make build-embeddings`).
+`embed-posts` (`scripts/embed-posts.sh`) wraps posts in the same events AWS delivers, 50 per invocation (`BATCH_SIZE=`),
+and exits non-zero if any fails. `make test-python` runs the worker's unit tests.
 
 ### Changing the model
 
-The model is `sdadas/mmlw-roberta-base`, pinned to a revision in `embedding-workers/post-embedding/Dockerfile`.
+The model is `sdadas/mmlw-roberta-base`, pinned to a revision in `post-embedding/Dockerfile`.
 Vectors of different models are never compared: the feed builds the viewer's vector from the vectors of
 `FeedConfig.EMBEDDING_MODEL` only, and gives a post of another model a neutral affinity of `0.5`, as for a post with no
 vector.
 
-1. Set the model in the `Dockerfile`, in `post-embedding/src/settings.py` and in `FeedConfig.EMBEDDING_MODEL`
+1. Set the model in the `Dockerfile`, in `post-embedding/src/settings.py`, in `ppr/src/app.py` and in `FeedConfig.EMBEDDING_MODEL`
    (`test_model_name.py` checks they agree). Keep it 768-dimensional, or add a migration for the vector columns.
 2. Re-embed interests, then posts.
 3. Measure `AFFINITY_LOW` and `AFFINITY_HIGH` in `FeedConfig` again. They cover the cosines this model gives between
@@ -113,3 +115,44 @@ weights and the decay are in `FeedConfig`.
 | Setting | Default | Where | Meaning |
 |---|---|---|---|
 | `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 3, 6 | `aws/backend.yaml` | Selection limits, also sent to the frontend |
+
+## Personalised PageRank
+
+The thesis's graph signal: where a user's friends go, and events like those. `PprFunction` runs personalised
+PageRank for every user over one graph of events and venues, the same for everyone:
+
+| Edges | From |
+|---|---|
+| Event–event | Each event to its nearest events by content (`EVENT_NEIGHBOURS` in `ppr.py`), among events that haven't ended |
+| Event–venue | `event_locations`, by lower-cased name and city |
+
+A user's walk starts, and restarts, on their friends' events:
+
+| Start | From |
+|---|---|
+| A friend's share | Friends: mutual follows, no block, who share their stances. By the square root of the friend's faded stances: fresh ones count more, and an active friend gets more say but less on each event |
+| An event's share of that | The friend's interested and going, weighed and faded as the feed weighs and fades them. Not likes |
+
+A user's own picks and stances start no walk: the feed's affinity holds them. No user is a node, so a walk reaches a
+friend's interested and going, as the cards show them, and nothing past them: not their friends, not strangers. A block
+ends the friendship. A user whose friends marked nothing gets no scores.
+
+The walk's mass is ranked from 0 to 1 among every event that hasn't ended, the user's own, reacted and blocked posts
+too: the feed leaves those out. Only each user's `SCORES_PER_USER` highest ranks above `NEUTRAL` get a row, and the
+feed reads a post with no row as `NEUTRAL` (weight `ppr` in `FeedConfig`), so PageRank lifts events and pushes none
+down. The feed reads the latest run finished `PPR_RUN_MARGIN_SECONDS` before the session's `asOf`, so a run landing
+mid-scroll doesn't move its pages, and ignores a run older than `PPR_RUN_MAX_AGE_HOURS`, whose friendships may have
+changed since, so locally PageRank's effect goes after a day unless `make ppr` runs again. The next run deletes runs
+the feed no longer reads.
+
+`load()` takes an `as_of` to replay an earlier moment, with the limits its docstring lists.
+
+```bash
+make ppr                           # one run locally; make seed ends with it
+make test-db                       # its database tests, with the others, after make seed
+```
+
+On AWS it runs on a schedule once deployed with `PPR_SCHEDULE=true make deploy-embeddings`, and keeps that setting on
+later deploys; it's off by default. To start a run by hand there, invoke it with `--invocation-type Event`: it runs one
+at a time, so a direct invoke during a run is refused. `FEED_WEIGHTS=ppr=0 make deploy-backend` keeps the runs but
+gives them no say in the feed, for shadow runs; later deploys keep the weights until `FEED_WEIGHTS=default`.
