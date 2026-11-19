@@ -82,14 +82,15 @@ def test_should_embed_title_only_when_post_has_no_description_or_place(model, co
     assert model.encode.call_args_list == [call("Jazz night", normalize_embeddings=True)]
 
 
-@pytest.mark.parametrize("venue, city, text", [
-    ("Klub Żak", None, "Jazz night Live jazz Klub Żak"),
-    (None, "Gdańsk", "Jazz night Live jazz Gdańsk"),
-    ("", "Gdańsk", "Jazz night Live jazz Gdańsk"),
+@pytest.mark.parametrize("description, venue, city, text", [
+    ("Live jazz", "Klub Żak", None, "Jazz night Live jazz Klub Żak"),
+    ("Live jazz", None, "Gdańsk", "Jazz night Live jazz Gdańsk"),
+    ("Live jazz", "", "Gdańsk", "Jazz night Live jazz Gdańsk"),
+    ("Live jazz\n", None, None, "Jazz night Live jazz"),
 ])
-def test_should_embed_only_the_parts_of_the_place_it_has(model, conn, venue, city, text):
+def test_should_embed_only_the_parts_it_has(model, conn, description, venue, city, text):
     # given
-    conn.execute.return_value.fetchone.return_value = ("Jazz night", "Live jazz", venue, city)
+    conn.execute.return_value.fetchone.return_value = ("Jazz night", description, venue, city)
     event = sqs_event(s3_body(POST_KEY))
 
     # when
