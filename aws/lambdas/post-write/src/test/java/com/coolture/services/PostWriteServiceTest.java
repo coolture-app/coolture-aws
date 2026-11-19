@@ -461,39 +461,21 @@ class PostWriteServiceTest {
     }
 
     @Test
-    void updatePost_whenEmbeddedContentChanged_publishesEmbeddingMessage() throws SQLException {
+    void updatePost_publishesEmbeddingMessage() throws SQLException {
         UUID postId = UUID.randomUUID();
         UUID authorId = UUID.randomUUID();
         PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         UpdatePostRequest req = new UpdatePostRequest(
-            "New Title", null, null, null, null, null, null, null, null, null
-        );
-        PostDetailDto updated = postDetail(postId, "New Title", "Desc");
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
-
-        service.updatePost(postId, authorId, req, Set.of());
-
-        verify(embeddingPublisher).requestPost(postId);
-    }
-
-    @Test
-    void updatePost_whenEmbeddedContentUnchanged_doesNotPublish() throws SQLException {
-        UUID postId = UUID.randomUUID();
-        UUID authorId = UUID.randomUUID();
-        PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
-        when(repository.findById(postId)).thenReturn(Optional.of(existing));
-
-        UpdatePostRequest req = new UpdatePostRequest(
-            "Title", null, "https://new.example.com", null, null, null, null, null, null, null
+            null, null, "https://new.example.com", null, null, null, null, null, null, null
         );
         PostDetailDto updated = postDetail(postId, "Title", "Desc");
         when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
 
         service.updatePost(postId, authorId, req, Set.of());
 
-        verifyNoInteractions(embeddingPublisher);
+        verify(embeddingPublisher).requestPost(postId);
     }
 
     private PostWriteRepository.ExistingPost activeExistingPost(UUID postId, UUID authorId) {
