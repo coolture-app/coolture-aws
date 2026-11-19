@@ -15,16 +15,12 @@ logger.setLevel(logging.INFO)
 
 EMBEDDING_MODEL = "sdadas/mmlw-roberta-base"
 
-# The feed's own rules, from FeedConfig and EventTime. tests/test_feed_constants.py checks they agree.
+# The feed's own rules, from FeedConfig. tests/test_feed_constants.py checks they agree.
 # Not likes: friends see only interested and going on the cards, and through the graph a like would reach them.
 STANCE_WEIGHTS = {"INTERESTED": 1.5, "TAKES_PART": 2.0}
 STANCE_HALF_LIFE_DAYS = 14
 STANCE_MAX_AGE_DAYS = 112
-DEFAULT_EVENT_HOURS = 3
 RUN_MAX_AGE_HOURS = 24
-
-EVENT_END = ("CASE WHEN p.open_ended THEN 'infinity'::timestamptz "
-             f"ELSE COALESCE(p.ends_at, p.starts_at + interval '{DEFAULT_EVENT_HOURS} hours') END")
 
 POST_AVERAGE = """
 SELECT avg(pe.embedding)::real[]
@@ -34,17 +30,17 @@ WHERE pe.model = %(model)s AND p.created_at <= %(as_of)s
 """
 
 # Ended events stay while their stances count, to connect people and places.
-EVENTS = f"""
+EVENTS = """
 SELECT p.id,
        vector_send(pe.embedding) AS vector,
-       {EVENT_END} >= %(as_of)s AS not_ended,
+       event_end(p.starts_at, p.ends_at, p.open_ended) >= %(as_of)s AS not_ended,
        CASE WHEN btrim(coalesce(el.venue_name, '')) <> ''
             THEN lower(btrim(el.venue_name)) || ' | ' || lower(btrim(coalesce(el.city, ''))) END AS venue
 FROM posts p
 JOIN post_embeddings pe ON pe.post_id = p.id AND pe.model = %(model)s
 LEFT JOIN event_locations el ON el.id = p.event_location_id
 WHERE p.created_at <= %(as_of)s AND (p.deleted_at IS NULL OR p.deleted_at > %(as_of)s)
-  AND {EVENT_END} >= %(as_of)s - make_interval(days => %(max_age_days)s)
+  AND event_end(p.starts_at, p.ends_at, p.open_ended) >= %(as_of)s - make_interval(days => %(max_age_days)s)
 ORDER BY p.id
 """
 

@@ -137,7 +137,10 @@ def test_the_job_and_the_feed_have_their_grants(conn):
         """SELECT has_table_privilege('coolture_app', 'rec_ppr_scores', 'INSERT'),
                   has_table_privilege('coolture_app', 'rec_ppr_runs', 'INSERT, UPDATE, DELETE'),
                   has_table_privilege('coolture_reader', 'rec_ppr_scores', 'SELECT'),
-                  has_table_privilege('coolture_reader', 'rec_ppr_runs', 'SELECT')""").fetchone()
+                  has_table_privilege('coolture_reader', 'rec_ppr_runs', 'SELECT'),
+                  has_function_privilege('coolture_app', 'event_end(timestamptz, timestamptz, boolean)', 'EXECUTE'),
+                  has_function_privilege('coolture_reader', 'event_end(timestamptz, timestamptz, boolean)', 'EXECUTE')
+        """).fetchone()
     assert all(granted)
 
 

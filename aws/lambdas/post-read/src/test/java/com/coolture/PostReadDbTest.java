@@ -1,6 +1,7 @@
 package com.coolture;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.EventTime;
 import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
@@ -925,6 +926,25 @@ class PostReadDbTest {
     }
 
     // ===== Dates by overlap and events with no end date =====
+
+    @ParameterizedTest
+    @CsvSource(nullValues = "null", value = {"2026-11-16T18:00:00Z, false", "null, false", "null, true"})
+    void eventEnd_inTheDatabase_isEventTimeEnd(String endsAt, boolean openEnded) throws SQLException {
+        Instant start = Instant.parse("2026-11-14T18:00:00Z");
+        Instant end = endsAt == null ? null : Instant.parse(endsAt);
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "SELECT CASE WHEN isfinite(e) THEN e END FROM (SELECT event_end(?::timestamptz, ?::timestamptz, ?) AS e) x")) {
+            stmt.setTimestamp(1, Timestamp.from(start));
+            stmt.setTimestamp(2, end == null ? null : Timestamp.from(end));
+            stmt.setBoolean(3, openEnded);
+            try (ResultSet rs = stmt.executeQuery()) {
+                rs.next();
+                Timestamp got = rs.getTimestamp(1);
+                assertEquals(EventTime.end(start, end, openEnded), got == null ? null : got.toInstant());
+            }
+        }
+    }
 
     private static final UUID TIMEKEEPER = UUID.fromString("a0000000-0000-0000-0000-000000000011");
     private static final UUID RHYTHM = UUID.fromString("a0000000-0000-0000-0000-000000000012");
