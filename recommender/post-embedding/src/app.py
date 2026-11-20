@@ -4,9 +4,11 @@ from typing import Any
 from urllib.parse import unquote_plus
 from uuid import UUID
 
+import numpy as np
 import psycopg
 from psycopg import errors
 
+import kinds
 from models import PostContent, PostEmbeddingRecord
 from settings import settings
 
@@ -15,6 +17,7 @@ logger.setLevel(logging.INFO)
 
 KEY_PREFIX = "posts/"
 EMBED_INTERESTS_ACTION = "embed-interests"
+DERIVE_KINDS_ACTION = "derive-kinds"
 
 _model = None
 _conn: psycopg.Connection | None = None
@@ -121,6 +124,92 @@ def process_post(post_id: UUID) -> None:
 
     logger.info("stored embedding for post %s", post_id)
 
+    kind_vectors = find_kind_vectors(conn)
+    if kind_vectors is None:
+        logger.warning("kinds have no vectors for %s yet, run embed-interests; post %s has no kinds", settings.embedding_model, post_id)
+        return
+    post_kinds = kinds.derive(kinds.cosines(vector, kind_vectors))
+    try:
+        upsert_post_kinds(conn, [(post_id, post_kinds)])
+    except errors.ForeignKeyViolation:
+        logger.warning("post %s no longer exists, skipping its kinds", post_id)
+        return
+    logger.info("stored kinds %s for post %s", post_kinds, post_id)
+
+
+def find_kind_vectors(conn: psycopg.Connection) -> dict[str, list[float]] | None:
+    """None until every kind has a vector of the current model and texts, since a missing kind would never be derived."""
+    rows = conn.execute(
+        """
+        SELECT k.key, ke.embedding::real[]
+        FROM event_kinds k
+        LEFT JOIN event_kind_embeddings ke
+            ON ke.kind_key = k.key AND ke.model = %s AND ke.embedded_texts = k.embedding_texts
+        ORDER BY k.position, k.key
+        """,
+        (settings.embedding_model,),
+    ).fetchall()
+    if not rows or any(vector is None for _, vector in rows):
+        return None
+    return dict(rows)
+
+
+def upsert_post_kinds(conn: psycopg.Connection, rows: list[tuple[UUID, list[str]]]) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO rec_post_kinds (post_id, kinds, model)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (post_id) DO UPDATE
+                SET kinds      = EXCLUDED.kinds,
+                    model      = EXCLUDED.model,
+                    updated_at = now()
+            """,
+            [(str(post_id), post_kinds, settings.embedding_model) for post_id, post_kinds in rows],
+        )
+
+
+def derive_all_kinds(conn: psycopg.Connection) -> int:
+    """Every post with a vector of the current model, from that vector. Kinds of posts without one are removed."""
+    kind_vectors = find_kind_vectors(conn)
+    if kind_vectors is None:
+        raise RuntimeError(f"kinds have no vectors for {settings.embedding_model}, run embed-interests first")
+    posts = conn.execute(
+        "SELECT post_id, embedding::real[] FROM post_embeddings WHERE model = %s",
+        (settings.embedding_model,),
+    ).fetchall()
+    with conn.transaction():
+        upsert_post_kinds(conn, [(post_id, kinds.derive(kinds.cosines(vector, kind_vectors))) for post_id, vector in posts])
+        conn.execute("DELETE FROM rec_post_kinds WHERE model <> %s", (settings.embedding_model,))
+    return len(posts)
+
+
+def embed_kinds(conn: psycopg.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT k.key, k.embedding_texts
+        FROM event_kinds k
+        LEFT JOIN event_kind_embeddings ke ON ke.kind_key = k.key
+        WHERE ke.model IS DISTINCT FROM %s OR ke.embedded_texts IS DISTINCT FROM k.embedding_texts
+        """,
+        (settings.embedding_model,),
+    ).fetchall()
+    for key, texts in rows:
+        mean = np.asarray(_get_model().encode(texts, normalize_embeddings=True), dtype=np.float64).mean(axis=0)
+        conn.execute(
+            """
+            INSERT INTO event_kind_embeddings (kind_key, embedding, model, embedded_texts)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (kind_key) DO UPDATE
+                SET embedding      = EXCLUDED.embedding,
+                    model          = EXCLUDED.model,
+                    embedded_texts = EXCLUDED.embedded_texts,
+                    updated_at     = now()
+            """,
+            (key, (mean / np.linalg.norm(mean)).tolist(), settings.embedding_model, texts),
+        )
+    return len(rows)
+
 
 def embed_interests(conn: psycopg.Connection) -> int:
     rows = conn.execute(
@@ -150,7 +239,13 @@ def embed_interests(conn: psycopg.Connection) -> int:
 
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     if event.get("action") == EMBED_INTERESTS_ACTION:
-        return {"interests": embed_interests(_get_connection())}
+        conn = _get_connection()
+        result = {"interests": embed_interests(conn), "kinds": embed_kinds(conn)}
+        if result["kinds"]:
+            result["posts"] = derive_all_kinds(conn)
+        return result
+    if event.get("action") == DERIVE_KINDS_ACTION:
+        return {"posts": derive_all_kinds(_get_connection())}
 
     failures = []
     for record in event.get("Records", []):

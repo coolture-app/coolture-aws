@@ -167,7 +167,7 @@ seed-reactions: $(VENV_PY) ## Demo users react to posts close to their interests
 seed-friends: $(VENV_PY) ## Friends of the demo users mark the soonest posts, one shape of the cards' friends line each (after seed-events)
 	@$(VENV_PY) scraper/seed.py friends
 
-seed: seed-events embed-interests embed-posts seed-reactions seed-friends ppr ## All realistic data: events, embeddings, reactions, friends, PageRank scores. Waits for the API
+seed: seed-events embed-interests embed-posts derive-kinds seed-reactions seed-friends ppr ## All realistic data: events, embeddings, kinds, reactions, friends, PageRank scores. Waits for the API
 	@echo "Seeded. Run npm start in ../coolture-frontend and open http://localhost:4200"
 
 .NOTPARALLEL: seed
@@ -197,8 +197,11 @@ require-embeddings-build:
 		$(MAKE) --no-print-directory build-embeddings; \
 	fi
 
-embed-interests: require-embeddings-build ## Embed interests missing vectors locally
+embed-interests: require-embeddings-build ## Embed interests and kinds missing vectors locally; re-derives posts' kinds when a kind changed
 	@$(call invoke-worker,PostEmbeddingFunction,{"action":"embed-interests"})
+
+derive-kinds: require-embeddings-build ## Derive every post's kinds from its stored vector locally (after embed-interests)
+	@$(call invoke-worker,PostEmbeddingFunction,{"action":"derive-kinds"})
 
 ppr: require-embeddings-build ## Score every user's events with personalised PageRank locally (after embed-posts)
 	@$(call invoke-worker,PprFunction,{})
