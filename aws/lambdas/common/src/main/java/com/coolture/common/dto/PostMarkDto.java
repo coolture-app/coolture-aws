@@ -25,7 +25,7 @@ public record PostMarkDto(
     GeoPointDto coordinates,
     String venueName,
     String city,
-    /** The kind the pin names, {@link com.coolture.common.db.PostKinds#SHOWN}. Null until derived. */
+    /** The kind the pin names, {@link com.coolture.common.db.PostKinds#shown}. Null until derived. */
     String kind,
     /** Every kind, best first, for the preview's words. Null until derived. */
     List<String> kinds,

@@ -65,7 +65,7 @@ public class PostReadRepository {
 
             // Blocks
             b.bindNullableUUID(callerId)
-             .bindNullableUUID(callerId);
+                .bindNullableUUID(callerId);
 
             // Past events
             b.bindBoolean(f.showsAllPastEvents());
@@ -101,7 +101,7 @@ public class PostReadRepository {
              .bindUUID(callerId);
             PostFilterSql.bind(b, f, callerId);
             b.bindNullableUUID(callerId)
-             .bindNullableUUID(callerId);
+                .bindNullableUUID(callerId);
             bindParticipationAndReaction(b, f, callerId);
         });
         try (Connection conn = DatabaseConfig.getConnection()) {
@@ -230,8 +230,6 @@ public class PostReadRepository {
                    ST_X(el.coordinates::geometry) AS longitude,
                    cover_m.object_key AS cover_url,
                    el.venue_name, el.city,
-                   """ + PostKinds.SHOWN + """
-                   AS kind,
                    """ + PostKinds.OF_POST + """
                    AS kinds,
                    pr_my.type AS my_reaction,
@@ -262,18 +260,16 @@ public class PostReadRepository {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            ParamBinder b = new ParamBinder(stmt, conn)
-                .bindVarcharArray(f.kinds() == null ? null : f.kinds().toArray(new String[0]));
-
             // The viewer's own reaction and stance
-            b.bindNullableUUID(callerId)
-             .bindNullableUUID(callerId);
+            ParamBinder b = new ParamBinder(stmt, conn)
+                .bindNullableUUID(callerId)
+                .bindNullableUUID(callerId);
 
             PostFilterSql.bind(b, f, callerId);
 
             // Blocks
             b.bindNullableUUID(callerId)
-             .bindNullableUUID(callerId);
+                .bindNullableUUID(callerId);
 
             // Past events
             b.bindBoolean(f.showsAllPastEvents());
@@ -293,6 +289,7 @@ public class PostReadRepository {
             List<PostMarkDto> list = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
+                    List<String> kinds = mapStringList(rs, "kinds");
                     list.add(new PostMarkDto(
                         (UUID) rs.getObject("id"),
                         rs.getString("title"),
@@ -307,8 +304,8 @@ public class PostReadRepository {
                         new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
                         rs.getString("venue_name"),
                         rs.getString("city"),
-                        rs.getString("kind"),
-                        mapStringList(rs, "kinds"),
+                        PostKinds.shown(kinds, f.kinds()),
+                        kinds,
                         mapMyReaction(rs),
                         mapMyParticipation(rs),
                         null
