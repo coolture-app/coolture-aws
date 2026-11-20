@@ -70,11 +70,12 @@ FROM fx;
 INSERT INTO posts (author_id, title, starts_at, type, created_at)
 VALUES ('a0000000-0000-0000-0000-000000000002', 'created_after_as_of', now() + interval '2 days', 'ONLINE', now() + interval '1 hour');
 
-INSERT INTO post_reactions (post_id, user_id, type)
-SELECT id, 'a0000000-0000-0000-0000-000000000001', 'LIKE'
+-- ME's stances are made a minute back, so they're before any session a test starts (sessionStart() is 10 seconds
+-- back). The like is ME's only vector: after the session's asOf, ME would have none.
+INSERT INTO post_reactions (post_id, user_id, type, created_at)
+SELECT id, 'a0000000-0000-0000-0000-000000000001', 'LIKE', now() - interval '1 minute'
 FROM posts WHERE title = 'liked';
 
--- "Nie dla mnie" is marked a minute back, so it's before any session a test starts.
 INSERT INTO post_participations (post_id, user_id, type, created_at)
 SELECT id, 'a0000000-0000-0000-0000-000000000001',
        CASE title WHEN 'interested' THEN 'INTERESTED' WHEN 'attending' THEN 'TAKES_PART' ELSE 'NOT_INTERESTED' END,

@@ -18,6 +18,6 @@ ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     HF_HOME=/tmp/hf \
     TOKENIZERS_PARALLELISM=false
 
-COPY src/app.py src/models.py src/settings.py ${LAMBDA_TASK_ROOT}/
+COPY src/app.py src/kinds.py src/models.py src/settings.py ${LAMBDA_TASK_ROOT}/
 
 CMD ["app.lambda_handler"]

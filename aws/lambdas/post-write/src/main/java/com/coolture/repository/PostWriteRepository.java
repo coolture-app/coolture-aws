@@ -1,6 +1,7 @@
 package com.coolture.repository;
 
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.PostKinds;
 import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
@@ -316,7 +317,9 @@ public class PostWriteRepository {
                    el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
                    el.street, el.postal_code, el.city,
                    ST_Y(el.coordinates::geometry) AS latitude,
-                   ST_X(el.coordinates::geometry) AS longitude
+                   ST_X(el.coordinates::geometry) AS longitude,
+                   """ + PostKinds.OF_POST + """
+                   AS kinds
             FROM posts p
             JOIN users u ON u.id = p.author_id
             """ + StanceCounts.JOIN + """
@@ -356,6 +359,7 @@ public class PostWriteRepository {
                     rs.getInt("comments_count"),
                     mapEnum(rs, "type", PostType.class),
                     mapEnum(rs, "status", PostStatus.class),
+                    mapStringList(rs, "kinds"),
                     mapInstant(rs, "created_at"),
                     mapInstant(rs, "last_modified_at"),
                     mapInstant(rs, "deleted_at"),

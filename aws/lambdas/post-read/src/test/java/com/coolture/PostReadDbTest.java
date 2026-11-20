@@ -370,6 +370,47 @@ class PostReadDbTest {
         }
     }
 
+    /** Written by the post-embedding worker, so this checks the read side of that table's contract. */
+    @Test
+    void kinds_narrowListsAndTheMap_andShowOnTheMarkAndThePage() throws SQLException {
+        UUID concert = postTitled("future_public");
+        UUID kidsConcert = postTitled("multi_day_running");
+        UUID play = postTitled("commented");
+        UUID onTheMap = postTitled("map_open");
+        String kinds = "INSERT INTO rec_post_kinds (post_id, kinds, model) VALUES (?, ?::varchar[], 'test')";
+        writeAsTheApp(kinds, concert, "{concerts}");
+        writeAsTheApp(kinds, kidsConcert, "{kids,concerts}");
+        writeAsTheApp(kinds, play, "{stage,kids}");
+        writeAsTheApp(kinds, onTheMap, "{exhibitions,talks}");
+        try {
+            assertEquals(Set.of("future_public", "multi_day_running"), ruleTitles(walkPosts(ME, ofKinds(List.of("concerts"), false), 100)));
+            assertEquals(Set.of("future_public", "multi_day_running", "commented"),
+                ruleTitles(walkPosts(ME, ofKinds(List.of("concerts", "stage"), false), 100)));
+            assertEquals(Set.of("multi_day_running"), ruleTitles(walkPosts(ME, ofKinds(List.of("concerts"), true), 100)));
+            assertEquals(Set.of("multi_day_running", "commented"), ruleTitles(walkPosts(ME, ofKinds(null, true), 100)));
+            assertEquals(Set.of(), ruleTitles(walkPosts(ME, ofKinds(List.of("no_such_kind"), false), 100)));
+
+            assertEquals(Set.of("map_open"), marks(postRepository.findPostMarks(ofKinds(List.of("talks"), false), AROUND_THE_FIXTURES, ME, false)));
+            PostMarkDto mark = postRepository.findPostMarks(ofKinds(null, false), AROUND_THE_FIXTURES, ME, false).stream()
+                .filter(m -> m.id().equals(onTheMap)).findFirst().orElseThrow();
+            assertEquals("exhibitions", mark.kind());
+            assertEquals(List.of("exhibitions", "talks"), mark.kinds());
+            PostMarkDto foundAsTalk = postRepository.findPostMarks(ofKinds(List.of("concerts", "talks"), false), AROUND_THE_FIXTURES, ME, false)
+                .stream().filter(m -> m.id().equals(onTheMap)).findFirst().orElseThrow();
+            assertEquals("talks", foundAsTalk.kind(), "a filtered pin names the kind it was found by");
+
+            assertEquals(List.of("kids", "concerts"), postRepository.findById(kidsConcert, ME).orElseThrow().kinds());
+            assertNull(postRepository.findById(postTitled("by_followed"), ME).orElseThrow().kinds(), "not derived yet");
+        } finally {
+            writeAsTheApp("DELETE FROM rec_post_kinds WHERE post_id IN (?, ?, ?, ?)", concert, kidsConcert, play, onTheMap);
+        }
+    }
+
+    private static PostFeedFilters ofKinds(List<String> kinds, boolean kids) {
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, "RECENT", false, kinds, kids);
+    }
+
     private Double pprOf(UUID post, Instant asOf) throws SQLException {
         return candidates(asOf).stream().filter(f -> f.id().equals(post)).findFirst().orElseThrow().ppr();
     }

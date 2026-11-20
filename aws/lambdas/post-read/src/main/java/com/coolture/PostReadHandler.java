@@ -24,8 +24,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
+
+    private static final Pattern KIND_KEY = Pattern.compile("[a-z_]{1,64}");
+    private static final int MAX_KINDS = 32;
 
     private final PostReadService service;
     private final FeedService feedService;
@@ -157,11 +161,13 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         int limit = parseLimit(qp.get("limit"), 20);
         String sortBy = qp.get("sortBy");
         boolean includePast = parseIncludePast(qp.get("includePast"));
+        List<String> kinds = parseKinds(qp.get("kinds"));
+        boolean kids = parseBoolean(qp.get("kids"), "kids");
 
         return new PostFeedFilters(
             q, authorId, status, followed, type,
             from, to, lat, lng, radiusKm,
-            partTypes, reactionType, cursor, limit, sortBy, includePast
+            partTypes, reactionType, cursor, limit, sortBy, includePast, kinds, kids
         );
     }
 
@@ -216,6 +222,15 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
     private Double parseDouble(Map<String, String> qp, String key) {
         String value = qp.get(key);
         return value == null || value.isBlank() ? null : Double.parseDouble(value);
+    }
+
+    /** Keys only by their form: a kind no post has matches nothing, like any filter. */
+    private List<String> parseKinds(String raw) {
+        List<String> kinds = parseList(raw);
+        if (kinds != null && (kinds.size() > MAX_KINDS || !kinds.stream().allMatch(k -> KIND_KEY.matcher(k).matches()))) {
+            throw new IllegalArgumentException("Invalid kinds");
+        }
+        return kinds;
     }
 
     private List<String> parseList(String raw) {

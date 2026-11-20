@@ -71,12 +71,12 @@ class ContractTest {
     }
 
     private static UserProfileDto minimalProfile(UUID id) {
-        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false, false, List.of());
+        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false, false, List.of(), List.of());
     }
 
     private static UserProfileDto fullProfile(UUID id) {
         return new UserProfileDto(id, "jan", "Jan", "Demo", avatar(), 1, 2, "Teatr", Instant.now(), true, false, true,
-            List.of("theatre", "cinema"));
+            List.of("theatre", "cinema"), List.of("stage", "cinema"));
     }
 
     private static CursorPage<UserListItemDto> page() {
@@ -143,7 +143,7 @@ class ContractTest {
     @Test
     void theBlockersSlimProfile_matches() throws Exception {
         when(users.getByIdForCaller(OTHER, CALLER)).thenReturn(
-            new UserProfileDto(OTHER, "jan", "Jan", "Demo", avatar(), null, null, null, null, false, true, false, null));
+            new UserProfileDto(OTHER, "jan", "Jan", "Demo", avatar(), null, null, null, null, false, true, false, null, null));
 
         assertMatches(report("/users/" + OTHER, Request.Method.GET, signedIn("GET", "/users/" + OTHER, null, OTHER)));
     }
@@ -204,12 +204,14 @@ class ContractTest {
 
     @Test
     void interests_match() throws Exception {
-        when(interests.getCatalog()).thenReturn(new InterestCatalogDto(3, 6, List.of(new InterestCatalogDto.Category(
-            "culture", "Kultura", "Culture", List.of(new InterestCatalogDto.Interest("theatre", "Teatr", "Theatre"))))));
+        when(interests.getCatalog()).thenReturn(new InterestCatalogDto(1, 0, 6,
+            List.of(new InterestCatalogDto.Kind("stage", "Scena", "Stage")),
+            List.of(new InterestCatalogDto.Category("culture", "Kultura", "Culture",
+                List.of(new InterestCatalogDto.Interest("theatre", "Teatr", "Theatre"))))));
         UUID nobody = UUID.randomUUID();
-        when(interests.getSelection(eq(OTHER), any())).thenReturn(new UserInterestsDto(List.of("theatre")));
+        when(interests.getSelection(eq(OTHER), any())).thenReturn(new UserInterestsDto(List.of("stage"), List.of("theatre")));
         when(interests.getSelection(eq(nobody), any())).thenThrow(new IllegalArgumentException("User " + nobody + " not found"));
-        when(interests.replaceSelection(eq(CALLER), eq(CALLER), any())).thenReturn(new UserInterestsDto(List.of("theatre", "cinema", "jazz")));
+        when(interests.replaceSelection(eq(CALLER), eq(CALLER), any())).thenReturn(new UserInterestsDto(List.of("stage"), List.of("theatre", "cinema", "jazz")));
         String path = "/users/" + CALLER + "/interests";
 
         String others = "/users/" + OTHER + "/interests";
@@ -218,7 +220,7 @@ class ContractTest {
         assertMatches(report("/dicts/interests", Request.Method.GET, signedIn("GET", "/dicts/interests", null, null)));
         assertMatches(report(others, Request.Method.GET, signedIn("GET", others, null, OTHER)));
         assertMatches(report(nobodys, Request.Method.GET, signedIn("GET", nobodys, null, nobody)));
-        assertMatches(report(path, Request.Method.PUT, signedIn("PUT", path, "{\"interests\":[\"theatre\",\"cinema\",\"jazz\"]}", CALLER)));
+        assertMatches(report(path, Request.Method.PUT, signedIn("PUT", path, "{\"kinds\":[\"stage\"],\"interests\":[\"theatre\",\"cinema\",\"jazz\"]}", CALLER)));
     }
 
     @Test
@@ -251,7 +253,7 @@ class ContractTest {
     @Test
     void anUndocumentedField_failsTheCheck() {
         String extraOnMe = "{\"id\":\"" + CALLER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interests\":[],\"interestsSelected\":true,\"email\":\"jan@example.com\"}";
+            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interests\":[],\"kinds\":[],\"onboarded\":true,\"email\":\"jan@example.com\"}";
         String homeOnAPublicProfile = "{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
             + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interests\":[],\"home\":{\"name\":\"Gdynia\",\"coordinates\":{\"latitude\":54.5,\"longitude\":18.5}}}";
 
@@ -264,7 +266,7 @@ class ContractTest {
     @Test
     void meWithoutInterests_failsTheCheck() {
         String withoutInterests = "{\"id\":\"" + CALLER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interestsSelected\":false,\"shareStances\":true}";
+            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"kinds\":[],\"onboarded\":false,\"shareStances\":true}";
 
         assertTrue(VALIDATOR.validateResponse("/auth/me", Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(withoutInterests).build()).hasErrors());

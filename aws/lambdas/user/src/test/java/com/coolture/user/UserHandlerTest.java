@@ -96,7 +96,7 @@ class UserHandlerTest {
     void replaceInterests_passesTheSelection() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
                 "PUT", "/users/" + USER_ID + "/interests",
-                "{\"interests\":[\"jazz\",\"opera\"]}", Map.of("userId", USER_ID.toString()));
+                "{\"kinds\":[\"concerts\"],\"interests\":[\"jazz\",\"opera\"]}", Map.of("userId", USER_ID.toString()));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
@@ -104,7 +104,7 @@ class UserHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            verify(interestService).replaceSelection(USER_ID, USER_ID, new UserInterestsDto(List.of("jazz", "opera")));
+            verify(interestService).replaceSelection(USER_ID, USER_ID, new UserInterestsDto(List.of("concerts"), List.of("jazz", "opera")));
         }
     }
 
@@ -479,12 +479,12 @@ class UserHandlerTest {
             assertEquals(200, response.getStatusCode());
             assertTrue(response.getBody().contains("\"username\":\"" + FAKE_USERNAME + "\""));
             assertTrue(response.getBody().contains("\"interests\":[\"theatre\",\"cinema\"]"));
-            assertTrue(response.getBody().contains("\"interestsSelected\":true"));
+            assertTrue(response.getBody().contains("\"onboarded\":true"));
         }
     }
 
     @Test
-    void getMe_withNoInterests_isNotSelected() throws Exception {
+    void getMe_withInterestsButNoKind_isNotSelected() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/auth/me", null, null);
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
@@ -493,13 +493,13 @@ class UserHandlerTest {
             security.when(() -> SecurityContext.getClaim(eq(event), any())).thenReturn(java.util.Optional.empty());
 
             when(service.getMe(eq(CALLER_ID), eq(FAKE_USERNAME), any(), any())).thenReturn(new UserProfileDto(
-                    CALLER_ID, FAKE_USERNAME, null, null, null, 0, 0, null, Instant.now(), false, false, false, List.of()));
+                    CALLER_ID, FAKE_USERNAME, null, null, null, 0, 0, null, Instant.now(), false, false, false, List.of("jazz"), List.of()));
 
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            assertTrue(response.getBody().contains("\"interests\":[]"));
-            assertTrue(response.getBody().contains("\"interestsSelected\":false"));
+            assertTrue(response.getBody().contains("\"kinds\":[]"));
+            assertTrue(response.getBody().contains("\"onboarded\":false"));
         }
     }
 
@@ -661,6 +661,6 @@ class UserHandlerTest {
     private static UserProfileDto profile(UUID id, String username) {
         return new UserProfileDto(
                 id, username, "Kunegunda", "Kowalska", null,
-                0, 0, "Bio", Instant.now(), false, false, false, List.of("theatre", "cinema"));
+                0, 0, "Bio", Instant.now(), false, false, false, List.of("theatre", "cinema"), List.of("stage"));
     }
 }

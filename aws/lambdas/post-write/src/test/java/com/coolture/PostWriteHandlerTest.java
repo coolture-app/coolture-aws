@@ -84,7 +84,7 @@ class PostWriteHandlerTest {
         PostDetailDto createdPost = new PostDetailDto(
             postId, null, null, "Cool Event", "A very cool event", null,
             Instant.parse("2026-09-01T12:00:00Z"), null, false, 0, 0, 0, 0, 0,
-            PostType.ONLINE, PostStatus.ACTIVE,
+            PostType.ONLINE, PostStatus.ACTIVE, null,
             Instant.now(), null, null, null, List.of(), null, null, null
         );
 
@@ -216,7 +216,7 @@ class PostWriteHandlerTest {
         PostDetailDto updatedPost = new PostDetailDto(
             postId, null, null, "Updated Title", "Desc", null,
             Instant.parse("2026-09-01T12:00:00Z"), null, false, 0, 0, 0, 0, 0,
-            PostType.ONLINE, PostStatus.EDITED,
+            PostType.ONLINE, PostStatus.EDITED, null,
             Instant.now(), Instant.now(), null, null, List.of(), null, null, null
         );
 

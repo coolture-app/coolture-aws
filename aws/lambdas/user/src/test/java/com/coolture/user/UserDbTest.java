@@ -4,6 +4,7 @@ import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.dto.UserProfileDto;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.storage.S3StorageService;
+import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.UserRepository;
@@ -40,8 +41,8 @@ class UserDbTest {
     private static final UUID OLA = UUID.fromString("e0000000-0000-0000-0000-000000000003");
     private static final String ALL = "'" + ANNA + "', '" + JAN + "', '" + OLA + "'";
 
-    private final UserService users = new UserService(new UserRepository(), mock(S3StorageService.class));
-    private final InterestService interests = new InterestService(new InterestRepository(), 3, 6);
+    private final UserService users = new UserService(new UserRepository(), new InterestRepository(), mock(S3StorageService.class));
+    private final InterestService interests = new InterestService(new InterestRepository());
 
     @BeforeEach
     void addRows() throws SQLException {
@@ -59,7 +60,22 @@ class UserDbTest {
     void removeRows() throws SQLException {
         execute("DELETE FROM user_relations WHERE source_user_id IN (" + ALL + ") OR target_user_id IN (" + ALL + ")");
         execute("DELETE FROM user_interests WHERE user_id IN (" + ALL + ")");
+        execute("DELETE FROM user_kinds WHERE user_id IN (" + ALL + ")");
         execute("DELETE FROM users WHERE id IN (" + ALL + ")");
+    }
+
+    @Test
+    void kindsAndInterests_roundTrip_andAHiddenInterestIsRefused() throws SQLException {
+        assertTrue(interests.getCatalog().categories().stream()
+            .flatMap(c -> c.interests().stream()).noneMatch(i -> i.key().equals("astrology") || i.key().equals("concerts")));
+        execute("INSERT INTO user_interests (user_id, interest_key) VALUES ('" + ANNA + "', 'astrology')");
+        assertThrows(IllegalArgumentException.class,
+            () -> interests.replaceSelection(ANNA, ANNA, new UserInterestsDto(List.of("stage"), List.of("astrology"))));
+
+        interests.replaceSelection(ANNA, ANNA, new UserInterestsDto(List.of("cinema", "stage"), List.of("jazz")));
+
+        assertEquals(new UserInterestsDto(List.of("stage", "cinema"), List.of("jazz")), interests.getSelection(ANNA, JAN));
+        assertEquals(List.of("stage", "cinema"), users.getByIdForCaller(ANNA, ANNA).kinds());
     }
 
     @Test

@@ -2,6 +2,7 @@
 
     python scraper/seed.py events       # make seed-events
     python scraper/seed.py reactions    # make seed-reactions, after make embed-interests and make embed-posts
+    python scraper/seed.py reactions --reset   # make seed-reactions RESET=1: seeds them again from current picks
     python scraper/seed.py friends      # make seed-friends, after make seed-events
 
 Each can run again. events and reactions add only what's missing; friends puts its cases back as they were.
@@ -52,6 +53,10 @@ NOT_FOR_ME_FROM_THE_END = 2
 # The API stamps a reaction with the time it's made. The feed lets older stances fade, so the demo users get a past,
 # 2 to 6 weeks back, and what someone likes in the app leads their taste, as it would for a real user.
 HISTORY_DAYS = (14, 42)
+# The friends line's cases are props for cards, whoever the friends are, and every friend is a persona. Fresh, a case's
+# stances led its friends' own feeds; dated as far back as reactions go, they fade there like old reactions and still
+# count for the friends line and PageRank.
+FRIEND_DAYS = HISTORY_DAYS[1]
 
 RANKING_SQL = """
 WITH taste AS (
@@ -112,6 +117,19 @@ LIMIT {count}
 """
 FRIEND_STANCES_SQL = """
 SELECT pp.post_id || ',' || pp.user_id FROM post_participations pp WHERE pp.user_id = ANY('{{{friends}}}'::uuid[])
+"""
+STANCES_SQL = """
+SELECT 'reaction,' || r.post_id FROM post_reactions r JOIN posts p ON p.id = r.post_id
+WHERE r.user_id = '{user_id}' AND p.deleted_at IS NULL
+UNION ALL
+SELECT 'participation,' || r.post_id FROM post_participations r JOIN posts p ON p.id = r.post_id
+WHERE r.user_id = '{user_id}' AND p.deleted_at IS NULL
+"""
+# The API refuses a deleted post, and a deleted post has no counts left to keep.
+ON_DELETED_SQL = """
+DELETE FROM post_reactions WHERE user_id = '{user_id}' AND post_id IN (SELECT id FROM posts WHERE deleted_at IS NOT NULL);
+DELETE FROM post_participations WHERE user_id = '{user_id}'
+  AND post_id IN (SELECT id FROM posts WHERE deleted_at IS NOT NULL);
 """
 HAS_REACTED_SQL = """
 SELECT (SELECT count(*) FROM post_reactions WHERE user_id = '{user_id}')
@@ -229,10 +247,21 @@ def history(count: int) -> list[int]:
 
 
 def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
-                   session_factory: Callable[[], requests.Session] = http_session) -> Counter:
+                   session_factory: Callable[[], requests.Session] = http_session, reset: bool = False) -> Counter:
+    """With reset, first takes back every reaction and stance of the demo users, so their picks lead again after they
+    change, at the cost of what was done as them in the app."""
     stats: Counter = Counter()
     for user_id, username in DEMO_USERS.items():
-        if int(query(HAS_REACTED_SQL.format(user_id=user_id))[0]):
+        session = session_factory()
+        session.headers.update({'X-User-Id': user_id, 'X-User-Name': username})
+        if reset:
+            for row in query(STANCES_SQL.format(user_id=user_id)):
+                path, post_id = row.split(',')
+                _sent(session.delete(f'{base_url}/posts/{post_id}/{path}', timeout=TIMEOUT_S),
+                      f'DELETE /posts/{post_id}/{path}', username)
+                stats['taken_back'] += 1
+            query(ON_DELETED_SQL.format(user_id=user_id))
+        elif int(query(HAS_REACTED_SQL.format(user_id=user_id))[0]):
             # Their reactions were seeded before, or made in the app, so they're left as they are.
             stats['users_skipped'] += 1
             continue
@@ -240,8 +269,6 @@ def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
         if not ranking:
             raise SeedError(f'No ranked posts for {username}. Load events and embed them first: '
                             '`make seed-events embed-interests embed-posts`.')
-        session = session_factory()
-        session.headers.update({'X-User-Id': user_id, 'X-User-Name': username})
         chosen = picks(ranking)
         for post_id, path, kind in chosen:
             response = session.put(f'{base_url}/posts/{post_id}/{path}', json={'type': kind}, timeout=TIMEOUT_S)
@@ -302,6 +329,8 @@ def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
         _sent(session(name).put(f'{base_url}/posts/{post_id}/participation', json={'type': kind}, timeout=TIMEOUT_S),
               f'PUT /posts/{post_id}/participation', name)
         stats[kind.lower()] += 1
+    query(''.join(DATED_SQL.format(table='participation', days=FRIEND_DAYS, user_id=FRIENDS[name], post_id=post_id)
+                  for post_id, name, _ in planned))
 
     new_api = api_factory or (lambda user_id: CooltureApi(http_session(), http_session(), base_url, user_id=user_id))
     for name, colour in AVATARS.items():
@@ -325,6 +354,8 @@ def main() -> int:
     parser.add_argument('step', choices=['events', 'reactions', 'friends'])
     parser.add_argument('--snapshot', type=Path, default=DEFAULT_DIR, metavar='DIR', help='the snapshot to load')
     parser.add_argument('--workers', type=int, default=WORKERS, help=f'posts loaded at a time (default {WORKERS})')
+    parser.add_argument('--reset', action='store_true',
+                        help="reactions: take back the demo users' reactions and stances first, then seed them again")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', stream=sys.stderr)
     logging.getLogger('urllib3').setLevel(logging.ERROR)
@@ -336,7 +367,7 @@ def main() -> int:
         if args.step == 'events':
             stats = seed_events(args.snapshot, base_url, args.workers)
         else:
-            stats = seed_reactions(base_url) if args.step == 'reactions' else seed_friends(base_url)
+            stats = seed_reactions(base_url, reset=args.reset) if args.step == 'reactions' else seed_friends(base_url)
     except (SeedError, ApiError) as error:
         log.error('%s', error)
         return 1

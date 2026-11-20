@@ -15,6 +15,7 @@ POST_ROW = ("Jazz night", "Live jazz", "Klub Żak", "Gdańsk")
 EMBEDDING = [0.5, 0.25, 1.0]
 MODEL = "sdadas/mmlw-roberta-base"
 NO_FAILURES = {"batchItemFailures": []}
+KIND_ROWS = [("concerts", [1.0, 0.0, 0.0]), ("stage", [0.0, 0.0, 1.0])]
 
 
 def s3_body(*keys: str) -> str:
@@ -50,6 +51,7 @@ def model(monkeypatch):
 def conn(monkeypatch):
     c = MagicMock()
     c.execute.return_value.fetchone.return_value = POST_ROW
+    c.execute.return_value.fetchall.return_value = KIND_ROWS
     monkeypatch.setattr(app, "_get_connection", lambda: c)
     return c
 
@@ -67,7 +69,24 @@ def test_should_store_embedding_of_current_post_content_when_post_exists(model, 
     assert conn.execute.call_args_list == [
         call(ANY, (POST_ID,)),
         call(ANY, (POST_ID, EMBEDDING, MODEL)),
+        call(ANY, (MODEL,)),
     ]
+    assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
+        call(ANY, [(POST_ID, ["stage"], MODEL)]),
+    ]
+
+
+def test_should_store_no_kinds_when_a_kind_has_no_vector_yet(model, conn):
+    # given
+    conn.execute.return_value.fetchall.return_value = [("concerts", [1.0, 0.0, 0.0]), ("stage", None)]
+    event = sqs_event(s3_body(POST_KEY))
+
+    # when
+    result = app.lambda_handler(event, None)
+
+    # then
+    assert result == NO_FAILURES
+    assert conn.cursor.call_args_list == []
 
 
 def test_should_embed_title_only_when_post_has_no_description_or_place(model, conn):
@@ -128,7 +147,8 @@ def test_should_ignore_message_when_it_is_s3_test_event(model, conn):
 
 def test_should_report_only_failed_record_when_db_write_fails_for_one_message(model, conn):
     # given
-    conn.execute.side_effect = [conn.execute.return_value, None, conn.execute.return_value, RuntimeError("db down")]
+    rv = conn.execute.return_value
+    conn.execute.side_effect = [rv, None, rv, rv, RuntimeError("db down")]
     event = sqs_event(s3_body(POST_KEY), s3_body(POST_KEY))
 
     # when
@@ -210,12 +230,12 @@ def test_should_sign_iam_token_and_require_ssl_when_iam_auth_is_enabled(monkeypa
 
 def test_should_embed_only_interests_returned_when_invoked_with_embed_interests(model, monkeypatch):
     conn = MagicMock()
-    conn.execute.return_value.fetchall.return_value = [("jazz", "Jazz: koncerty")]
+    conn.execute.return_value.fetchall.side_effect = [[("jazz", "Jazz: koncerty")], []]
     monkeypatch.setattr(app, "_get_connection", lambda: conn)
 
     result = app.lambda_handler({"action": "embed-interests"}, None)
 
-    assert result == {"interests": 1}
+    assert result == {"interests": 1, "kinds": 0}
     assert model.encode.call_args_list == [call("Jazz: koncerty", normalize_embeddings=True)]
     assert conn.execute.call_args_list[1] == call(ANY, ("jazz", EMBEDDING, MODEL, "Jazz: koncerty"))
 
@@ -227,3 +247,50 @@ def test_should_use_default_database_address_when_it_is_empty(monkeypatch):
     settings = type(app.settings)()
 
     assert (settings.db_host, settings.db_port) == ("host.docker.internal", 5430)
+
+
+def test_should_embed_changed_kinds_as_their_texts_mean(model, monkeypatch):
+    # given
+    conn = MagicMock()
+    texts = ["Koncert w klubie", "Recital"]
+    conn.execute.return_value.fetchall.side_effect = [[], [("concerts", texts)]]
+    model.encode.return_value = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
+    monkeypatch.setattr(app, "_get_connection", lambda: conn)
+
+    # when
+    result = app.lambda_handler({"action": "embed-interests"}, None)
+
+    # then
+    assert result == {"interests": 0, "kinds": 1}
+    assert model.encode.call_args_list == [call(texts, normalize_embeddings=True)]
+    stored = conn.execute.call_args_list[2].args[1]
+    assert (stored[0], np.round(stored[1], 6).tolist(), stored[2:]) == ("concerts", [0.707107, 0.707107, 0.0], (MODEL, texts))
+
+
+def test_should_rederive_every_post_and_drop_other_models_kinds_when_invoked_with_derive_kinds(monkeypatch):
+    # given
+    conn = MagicMock()
+    other = "22222222-2222-2222-2222-222222222222"
+    conn.execute.return_value.fetchall.side_effect = [KIND_ROWS, [(POST_ID, [1.0, 0.0, 0.0]), (other, [0.0, 0.0, 1.0])]]
+    monkeypatch.setattr(app, "_get_connection", lambda: conn)
+
+    # when
+    result = app.lambda_handler({"action": "derive-kinds"}, None)
+
+    # then
+    assert result == {"posts": 2}
+    assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
+        call(ANY, [(POST_ID, ["concerts"], MODEL), (other, ["stage"], MODEL)]),
+    ]
+    assert conn.execute.call_args_list[-1] == call(ANY, (MODEL,))
+
+
+def test_should_fail_derive_kinds_when_kinds_have_no_vectors(monkeypatch):
+    # given
+    conn = MagicMock()
+    conn.execute.return_value.fetchall.return_value = [("concerts", None)]
+    monkeypatch.setattr(app, "_get_connection", lambda: conn)
+
+    # when, then
+    with pytest.raises(RuntimeError):
+        app.lambda_handler({"action": "derive-kinds"}, None)

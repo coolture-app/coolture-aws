@@ -6,7 +6,7 @@ import java.time.Instant;
 
 /**
  * When an event ends. A post with no end date (open_ended) never ends. In SQL the rule is the database's event_end
- * (V20), which the PageRank job and the seed call too; {@link #end} is the same rule for rows already read, and
+ * (V10), which the PageRank job and the seed call too; {@link #end} is the same rule for rows already read, and
  * PostReadDbTest checks the two agree.
  */
 public final class EventTime {

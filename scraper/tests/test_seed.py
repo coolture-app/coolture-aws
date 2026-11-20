@@ -8,8 +8,9 @@ import requests
 import seed
 from api import Outcome
 from images import Image
-from seed import (AVATAR_SIZES, AVATARS, BOT_ID, FRIEND_CASES, FRIENDS, HISTORY_DAYS, SeedError, friend_stances, history,
-                  moved, picks, seed_events, seed_friends, seed_reactions, shift_days, shifted, wait_for_api)
+from seed import (AVATAR_SIZES, AVATARS, BOT_ID, DEMO_USERS, FRIEND_CASES, FRIENDS, HISTORY_DAYS, SeedError,
+                  friend_stances, history, moved, picks, seed_events, seed_friends, seed_reactions, shift_days, shifted,
+                  wait_for_api)
 from snapshot import Snapshot
 
 UTC = timezone.utc
@@ -113,17 +114,26 @@ class FakeSession:
 
     def put(self, url, json, timeout):
         self.sent.append((self.headers['X-User-Name'], url, json['type']))
+        return self._response()
+
+    def delete(self, url, timeout):
+        self.sent.append((self.headers['X-User-Name'], url, 'DELETE'))
+        return self._response()
+
+    def _response(self):
         response = requests.Response()
         response.status_code = self.status
         return response
 
 
-def fake_query(reacted=(), updates=None):
+def fake_query(reacted=(), updates=None, held=()):
     def query(sql):
-        if sql.lstrip().startswith('UPDATE'):
+        if sql.lstrip().startswith(('UPDATE', 'DELETE')):
             if updates is not None:
                 updates.append(sql)
             return []
+        if 'UNION ALL' in sql:
+            return list(held)
         if 'count(*)' in sql:
             return ['1' if any(user_id in sql for user_id in reacted) else '0']
         assert BOT_ID in sql
@@ -166,6 +176,23 @@ def test_a_user_who_already_reacted_is_left_alone():
 
     assert stats['users_skipped'] == 1
     assert not [sent for sent in session.sent if sent[0] == 'anna_demo']
+
+
+def test_a_reset_takes_back_what_they_hold_and_seeds_them_again():
+    session = FakeSession()
+
+    held = ['reaction,old', 'participation,gone']
+    updates = []
+
+    stats = seed_reactions('http://api.test', query=fake_query(reacted=list(DEMO_USERS), updates=updates, held=held),
+                           session_factory=lambda: session, reset=True)
+
+    assert stats['taken_back'] == 6 and stats['users'] == 3 and not stats['users_skipped']
+    assert len([sql for sql in updates if 'deleted_at IS NOT NULL' in sql]) == 3
+    assert ('anna_demo', 'http://api.test/posts/old/reaction', 'DELETE') in session.sent
+    assert ('anna_demo', 'http://api.test/posts/gone/participation', 'DELETE') in session.sent
+    assert session.sent.index(('anna_demo', 'http://api.test/posts/old/reaction', 'DELETE')) < session.sent.index(
+        ('anna_demo', 'http://api.test/posts/p3/reaction', 'LIKE'))
 
 
 def test_reactions_before_embeddings_say_what_to_run():
@@ -260,8 +287,12 @@ class FakeAvatarApi:
         self.set.append((user_id, full.width, thumbnail.width))
 
 
-def friends_query(post_count=len(FRIEND_CASES), stances=()):
+def friends_query(post_count=len(FRIEND_CASES), stances=(), updates=None):
     def query(sql):
+        if sql.lstrip().startswith('UPDATE'):
+            if updates is not None:
+                updates.append(sql)
+            return []
         if 'ORDER BY p.starts_at' in sql:
             assert BOT_ID in sql and FRIENDS['iza_demo'] in sql
             return [f'p{number}' for number in range(post_count)]
@@ -297,6 +328,18 @@ def test_a_second_run_takes_back_stray_stances_and_keeps_photos():
         ('DELETE', 'kasia_demo', 'http://api.test/posts/old/participation', None)]
     assert stats['taken_back'] == 1
     assert not api.set
+
+
+def test_friends_stances_are_dated_back_so_their_own_picks_lead():
+    updates = []
+
+    seed_friends('http://api.test', query=friends_query(updates=updates),
+                 session_factory=lambda: FakeFriendSession([]), api_factory=lambda user_id: FakeAvatarApi())
+
+    planned = friend_stances([f'p{number}' for number in range(len(FRIEND_CASES))])
+    assert len(updates) == 1 and updates[0].count('UPDATE post_participations') == len(planned)
+    assert f"make_interval(days => {HISTORY_DAYS[1]})" in updates[0]
+    assert f"user_id = '{FRIENDS['kasia_demo']}' AND post_id = 'p0'" in updates[0]
 
 
 def test_friends_without_enough_posts_say_what_to_run():

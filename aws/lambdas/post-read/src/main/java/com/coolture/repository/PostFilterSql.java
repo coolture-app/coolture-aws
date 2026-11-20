@@ -3,13 +3,14 @@ package com.coolture.repository;
 import com.coolture.common.db.EventTime;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostKinds;
 import com.coolture.common.dto.PostFeedFilters;
 
 import java.sql.SQLException;
 import java.util.UUID;
 
 /**
- * The filters a person sets: search, author, status, people I follow, type, dates and a radius. /posts, /posts/map
+ * The filters a person sets: search, author, status, people I follow, type, dates, a radius and kinds of event. /posts, /posts/map
  * and /feed all narrow their posts with exactly this, so a filter means the same everywhere. Needs `p` and `el`
  * (posts and event_locations) in the query.
  */
@@ -38,7 +39,11 @@ public final class PostFilterSql {
 
           AND (?::double precision IS NULL
                OR (el.coordinates IS NOT NULL AND ST_DWithin(el.coordinates, """ + POINT + """
-        , ?::double precision)))""";
+        , ?::double precision)))
+          AND (?::varchar[] IS NULL OR """ + PostKinds.OF_POST + """
+         && ?::varchar[])
+          AND (?::boolean IS NOT TRUE OR """ + PostKinds.OF_POST + """
+         @> ARRAY[?::varchar])""";
 
     public static void bind(ParamBinder b, PostFeedFilters f, UUID viewer) throws SQLException {
         b.bindStringFilterPair(blankToNull(f.q()));
@@ -61,6 +66,12 @@ public final class PostFilterSql {
          .bindDouble(radius ? f.longitude() : null)
          .bindDouble(radius ? f.latitude() : null)
          .bindDouble(meters);
+
+        String[] kinds = f.kinds() == null ? null : f.kinds().toArray(new String[0]);
+        b.bindVarcharArray(kinds)
+         .bindVarcharArray(kinds)
+         .bindBoolean(f.kids())
+         .bindString(PostKinds.KIDS);
     }
 
     /** A radius counts only with a full position. The handler rejects half a position. */

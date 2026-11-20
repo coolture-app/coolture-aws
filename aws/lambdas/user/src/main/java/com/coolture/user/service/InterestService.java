@@ -3,9 +3,11 @@ package com.coolture.user.service;
 import com.coolture.user.dto.InterestCatalogDto;
 import com.coolture.user.dto.InterestCatalogDto.Category;
 import com.coolture.user.dto.InterestCatalogDto.Interest;
+import com.coolture.user.dto.InterestCatalogDto.Kind;
 import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.InterestRepository.InterestEntity;
+import com.coolture.user.repository.InterestRepository.KindEntity;
 
 import java.sql.SQLException;
 import java.util.LinkedHashSet;
@@ -17,83 +19,88 @@ import java.util.stream.Collectors;
 
 public class InterestService {
 
-    private static final int DEFAULT_MIN_SELECTIONS = 3;
-    private static final int DEFAULT_MAX_SELECTIONS = 6;
+    private static final int MIN_KINDS = 1;
+    private static final int MIN_INTERESTS = 0;
+    private static final int MAX_INTERESTS = 6;
 
     private final InterestRepository repository;
-    private final int minSelections;
-    private final int maxSelections;
 
     public InterestService() {
-        this(
-                new InterestRepository(),
-                intFromEnv("INTERESTS_MIN_SELECTIONS", DEFAULT_MIN_SELECTIONS),
-                intFromEnv("INTERESTS_MAX_SELECTIONS", DEFAULT_MAX_SELECTIONS)
-        );
+        this(new InterestRepository());
     }
 
-    public InterestService(InterestRepository repository, int minSelections, int maxSelections) {
+    public InterestService(InterestRepository repository) {
         this.repository = repository;
-        this.minSelections = minSelections;
-        this.maxSelections = maxSelections;
     }
 
     public InterestCatalogDto getCatalog() throws SQLException {
+        List<Kind> kinds = repository.findKinds().stream()
+                .map(kind -> new Kind(kind.key(), kind.labelPl(), kind.labelEn()))
+                .toList();
         Map<String, List<Interest>> interestsByCategory = repository.findInterests().stream()
+                .filter(InterestEntity::offered)
                 .collect(Collectors.groupingBy(
                         InterestEntity::categoryKey,
                         Collectors.mapping(
                                 interest -> new Interest(interest.key(), interest.labelPl(), interest.labelEn()),
                                 Collectors.toList())));
         List<Category> categories = repository.findCategories().stream()
+                .filter(category -> interestsByCategory.containsKey(category.key()))
                 .map(category -> new Category(
                         category.key(),
                         category.labelPl(),
                         category.labelEn(),
-                        interestsByCategory.getOrDefault(category.key(), List.of())))
+                        interestsByCategory.get(category.key())))
                 .toList();
-        return new InterestCatalogDto(minSelections, maxSelections, categories);
+        return new InterestCatalogDto(MIN_KINDS, MIN_INTERESTS, MAX_INTERESTS, kinds, categories);
     }
 
     public UserInterestsDto getSelection(UUID targetId, UUID callerId) throws SQLException {
         if (repository.isBlockedPair(targetId, callerId)) {
             throw new IllegalArgumentException("User " + targetId + " not found");
         }
-        List<String> keys = repository.findSelectedKeys(targetId);
+        UserInterestsDto picks = repository.findPicks(targetId);
         // Someone who picked nothing has no rows either, so only then is the user looked up.
-        if (keys.isEmpty() && !repository.userExists(targetId)) {
+        if (picks.kinds().isEmpty() && picks.interests().isEmpty() && !repository.userExists(targetId)) {
             throw new IllegalArgumentException("User " + targetId + " not found");
         }
-        return new UserInterestsDto(keys);
+        return picks;
     }
 
     public UserInterestsDto replaceSelection(UUID targetId, UUID callerId, UserInterestsDto request) throws SQLException {
         requireOwner(targetId, callerId);
 
-        Set<String> known = repository.findInterests().stream()
-                .map(InterestEntity::key)
+        Set<String> knownKinds = repository.findKinds().stream()
+                .map(KindEntity::key)
                 .collect(Collectors.toSet());
-        Set<String> keys = new LinkedHashSet<>(request.interests());
-        if (!known.containsAll(keys)) {
-            throw new IllegalArgumentException("Unknown interest");
+        Set<String> kinds = new LinkedHashSet<>(request.kinds());
+        if (!knownKinds.containsAll(kinds)) {
+            throw new IllegalArgumentException("Unknown kind");
         }
-        if (keys.size() < minSelections || keys.size() > maxSelections) {
-            throw new IllegalArgumentException(
-                    "Select between " + minSelections + " and " + maxSelections + " interests");
+        if (kinds.size() < MIN_KINDS) {
+            throw new IllegalArgumentException("Select at least " + MIN_KINDS + " kind");
         }
 
-        repository.replaceSelection(targetId, keys);
-        return new UserInterestsDto(List.copyOf(keys));
+        Set<String> selectable = repository.findInterests().stream()
+                .filter(InterestEntity::offered)
+                .map(InterestEntity::key)
+                .collect(Collectors.toSet());
+        Set<String> interests = new LinkedHashSet<>(request.interests());
+        if (!selectable.containsAll(interests)) {
+            throw new IllegalArgumentException("Unknown interest");
+        }
+        if (interests.size() < MIN_INTERESTS || interests.size() > MAX_INTERESTS) {
+            throw new IllegalArgumentException(
+                    "Select between " + MIN_INTERESTS + " and " + MAX_INTERESTS + " interests");
+        }
+
+        repository.replaceSelection(targetId, kinds, interests);
+        return new UserInterestsDto(List.copyOf(kinds), List.copyOf(interests));
     }
 
     private static void requireOwner(UUID targetId, UUID callerId) {
         if (!targetId.equals(callerId)) {
             throw new SecurityException("You can only access your own interests");
         }
-    }
-
-    private static int intFromEnv(String name, int defaultValue) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? defaultValue : Integer.parseInt(value.trim());
     }
 }

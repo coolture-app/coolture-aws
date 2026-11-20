@@ -11,8 +11,10 @@ import com.coolture.common.storage.S3StorageService;
 import com.coolture.user.dto.HomeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
+import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.dto.UserProfileUpdateRequest;
+import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.repository.UserRepository.AvatarRecord;
 import com.coolture.user.repository.UserRepository.HomeRecord;
@@ -28,14 +30,16 @@ public class UserService {
     private static final int MAX_USERNAME_LENGTH = 32;
 
     private final UserRepository userRepository;
+    private final InterestRepository interestRepository;
     private final S3StorageService s3StorageService;
 
     public UserService() {
-        this(new UserRepository(), new S3StorageService());
+        this(new UserRepository(), new InterestRepository(), new S3StorageService());
     }
 
-    public UserService(UserRepository userRepository, S3StorageService s3StorageService) {
+    public UserService(UserRepository userRepository, InterestRepository interestRepository, S3StorageService s3StorageService) {
         this.userRepository = userRepository;
+        this.interestRepository = interestRepository;
         this.s3StorageService = s3StorageService;
     }
 
@@ -84,7 +88,7 @@ public class UserService {
         if (callerId != null && !callerId.equals(user.id())) {
             if (userRepository.isBlocked(callerId, user.id())) {
                 return new UserProfileDto(user.id(), user.username(), user.firstName(), user.lastName(), avatarOf(user.id()),
-                    null, null, null, null, false, true, false, null);
+                    null, null, null, null, false, true, false, null, null);
             }
             if (userRepository.isBlocked(user.id(), callerId)) {
                 throw new IllegalArgumentException("User " + asked + " not found");
@@ -374,6 +378,8 @@ public class UserService {
         boolean isBlocked = callerId != null && !callerId.equals(user.id()) && userRepository.isBlocked(callerId, user.id());
         boolean followsYou = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(user.id(), callerId);
 
+        UserInterestsDto picks = interestRepository.findPicks(user.id());
+
         return new UserProfileDto(
                 user.id(),
                 user.username(),
@@ -387,7 +393,8 @@ public class UserService {
                 isFollowing,
                 isBlocked,
                 followsYou,
-                userRepository.findInterestKeys(user.id())
+                picks.interests(),
+                picks.kinds()
         );
     }
 

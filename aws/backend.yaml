@@ -392,10 +392,6 @@ Resources:
         LogGroup: !Ref UserLogGroup
       CodeUri: lambdas/user/
       Handler: com.coolture.user.UserHandler::handleRequest
-      Environment:
-        Variables:
-          INTERESTS_MIN_SELECTIONS: '3'
-          INTERESTS_MAX_SELECTIONS: '6'
       Policies:
         - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:

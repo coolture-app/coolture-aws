@@ -40,6 +40,8 @@ public record FeedConfig(double affinity, double proximity, double time, double 
      */
     public static final Map<String, Double> STANCE_WEIGHTS = Map.of("LIKE", 1.0, "INTERESTED", 1.5, "TAKES_PART", 2.0);
     public static final double INTEREST_CATEGORY_WEIGHT = 0.25;
+    /** A picked kind of event, beside a picked interest's 1. Measured at 1 in benchmarks/event-kinds. */
+    public static final double KIND_WEIGHT = 1.0;
     public static final double INTEREST_SHARE_MIN = 0.2;
     public static final double INTEREST_DECAY = 5;
     /** A stance this many days old counts half, in the vector, in engagement and as a mark, so recent taste leads. */

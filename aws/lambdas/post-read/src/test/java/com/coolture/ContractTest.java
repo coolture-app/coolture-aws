@@ -148,8 +148,8 @@ class ContractTest {
         when(posts.getMapMarks(any(), any(), any(), anyBoolean())).thenReturn(List.of(
             new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"),
                 Instant.parse("2026-12-01T21:00:00Z"), false, "http://localhost/c.png", "Koncert w hali.", 3, 7, 5, new GeoPointDto(54.35, 18.65),
-                "Hala", "Gdańsk", ReactionType.LIKE, ParticipationType.INTERESTED, friendStances()),
-            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"), null, false, null, null, 0, 0, 0, new GeoPointDto(54.35, 18.65), null, null, null, null, null)));
+                "Hala", "Gdańsk", "concerts", List.of("concerts", "stage"), ReactionType.LIKE, ParticipationType.INTERESTED, friendStances()),
+            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"), null, false, null, null, 0, 0, 0, new GeoPointDto(54.35, 18.65), null, null, null, null, null, null, null)));
 
         assertMatches(responseReport("/posts/map", ApiGatewayEvents.get("/posts/map", Map.of(
             "leftUpper.latitude", "54.5", "leftUpper.longitude", "18.0",

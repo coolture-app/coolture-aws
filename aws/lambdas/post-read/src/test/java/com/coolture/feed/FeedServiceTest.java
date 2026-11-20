@@ -56,7 +56,7 @@ class FeedServiceTest {
 
         @Override
         public UserVector.Parts findVectorParts(UUID viewer, Instant asOf) {
-            return new UserVector.Parts(List.of(), null, List.of(), null, postAverage);
+            return new UserVector.Parts(List.of(), null, null, List.of(), null, postAverage);
         }
 
         @Override

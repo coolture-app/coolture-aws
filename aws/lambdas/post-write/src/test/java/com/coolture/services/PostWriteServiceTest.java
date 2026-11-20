@@ -490,7 +490,7 @@ class PostWriteServiceTest {
         return new PostDetailDto(
             postId, null, null, title, description, null,
             Instant.now(), null, false, 0, 0, 0, 0, 0,
-            PostType.ONLINE, PostStatus.ACTIVE,
+            PostType.ONLINE, PostStatus.ACTIVE, null,
             Instant.now(), null, null, null, null, null, null, null
         );
     }

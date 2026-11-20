@@ -13,7 +13,7 @@ X-User-Name: anna_demo
 HTTP 200
 [Asserts]
 jsonpath "$.username" == "anna_demo"
-jsonpath "$.interestsSelected" == true
+jsonpath "$.onboarded" == true
 
 # X-Anonymous is a guest: no profile, but public lists still work.
 GET {{api}}/auth/me
