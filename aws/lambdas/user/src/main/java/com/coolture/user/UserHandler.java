@@ -239,7 +239,7 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         String firstName = SecurityContext.getClaim(event, "given_name").orElse(null);
         String lastName = SecurityContext.getClaim(event, "family_name").orElse(null);
         UserProfileDto profile = service.getMe(callerId, username, firstName, lastName);
-        return ApiResponse.ok(new MeDto(profile, !profile.interests().isEmpty(), service.sharesStances(callerId),
+        return ApiResponse.ok(new MeDto(profile, !profile.kinds().isEmpty(), service.sharesStances(callerId),
             service.getHome(callerId).orElse(null)));
     }
 

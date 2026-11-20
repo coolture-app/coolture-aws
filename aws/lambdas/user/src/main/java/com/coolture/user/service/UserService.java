@@ -84,7 +84,7 @@ public class UserService {
         if (callerId != null && !callerId.equals(user.id())) {
             if (userRepository.isBlocked(callerId, user.id())) {
                 return new UserProfileDto(user.id(), user.username(), user.firstName(), user.lastName(), avatarOf(user.id()),
-                    null, null, null, null, false, true, false, null);
+                    null, null, null, null, false, true, false, null, null);
             }
             if (userRepository.isBlocked(user.id(), callerId)) {
                 throw new IllegalArgumentException("User " + asked + " not found");
@@ -387,7 +387,8 @@ public class UserService {
                 isFollowing,
                 isBlocked,
                 followsYou,
-                userRepository.findInterestKeys(user.id())
+                userRepository.findInterestKeys(user.id()),
+                userRepository.findKindKeys(user.id())
         );
     }
 

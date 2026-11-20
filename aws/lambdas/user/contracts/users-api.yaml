@@ -49,6 +49,7 @@ paths:
                     isBlocked: false
                     followsYou: false
                     interests: [theatre, stand_up, cinema]
+                    kinds: [stage, cinema]
                     interestsSelected: true
                     shareStances: true
                     home: {name: Gdynia, coordinates: {latitude: 54.52, longitude: 18.54}}
@@ -105,6 +106,7 @@ paths:
                     isBlocked: false
                     followsYou: true
                     interests: [theatre, stand_up, cinema]
+                    kinds: [stage, cinema]
                 blockedByCaller:
                   value:
                     id: 00000000-0000-0000-0000-000000000003
@@ -222,7 +224,10 @@ paths:
     get:
       tags: [Interests]
       operationId: getInterestCatalog
-      summary: Every interest a person can pick, by category, with how many they must pick
+      summary: Onboarding's choices, kinds of event then interests by category, with how many to pick
+      description: >
+        Only offered interests are listed; a hidden one is still accepted from someone who already holds it. A category
+        with no offered interest is left out.
       responses:
         '200':
           description: The catalogue
@@ -236,12 +241,12 @@ paths:
     get:
       tags: [Interests]
       operationId: getUserInterests
-      summary: Someone's picked interests
+      summary: Someone's picked kinds and interests
       description: >
         Any signed-in user can read anyone's, for their profile, except across a block (404).
       responses:
         '200':
-          description: Interest keys
+          description: Kind and interest keys
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UserInterests'}
@@ -250,17 +255,19 @@ paths:
     put:
       tags: [Interests]
       operationId: replaceUserInterests
-      summary: Replaces the caller's interests
-      description: Between the catalogue's minSelections and maxSelections keys, all from the catalogue, or 400.
+      summary: Replaces the caller's kinds and interests
+      description: >
+        At least the catalogue's minKinds kinds, and between its minInterests and maxInterests interests, each offered
+        or already held by the caller; otherwise 400.
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/UserInterests'}
-            example: {interests: [theatre, stand_up, cinema]}
+            example: {kinds: [stage, cinema], interests: [theatre, stand_up, cinema]}
       responses:
         '200':
-          description: The interests as stored, without repeats
+          description: The kinds and interests as stored, without repeats
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UserInterests'}
@@ -423,8 +430,8 @@ components:
       type: object
       additionalProperties: false
       description: >
-        followersCount, followingCount, bio, createdAt and interests are left out of a blocker's slim profile, and only
-        there.
+        followersCount, followingCount, bio, createdAt, interests and kinds are left out of a blocker's slim profile, and
+        only there.
       required: [id, username, isFollowing, isBlocked, followsYou]
       properties:
         id: {type: string, format: uuid}
@@ -445,11 +452,15 @@ components:
           description: >
             The keys picked, in the catalogue's order, empty if none. In the profile so the page needs no second request.
             A guest gets them too: they're no more private than the rest of the profile.
+        kinds:
+          type: array
+          items: {type: string}
+          description: The kinds of event picked, in the catalogue's order, empty if none.
     Me:
       description: UserProfile's fields, plus what only the caller sees.
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests, interestsSelected, shareStances]
+      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests, kinds, interestsSelected, shareStances]
       properties:
         id: {type: string, format: uuid}
         username: {type: string, maxLength: 32}
@@ -464,7 +475,12 @@ components:
         isBlocked: {type: boolean}
         followsYou: {type: boolean, description: "Always false, as you can't follow yourself."}
         interests: {type: array, items: {type: string}}
-        interestsSelected: {type: boolean, description: False until onboarding's interests are saved.}
+        kinds: {type: array, items: {type: string}}
+        interestsSelected:
+          type: boolean
+          description: >
+            Whether the caller has a kind of event. False until onboarding is saved, and for accounts from before kinds,
+            which onboarding then asks again.
         shareStances: {type: boolean, description: Whether friends (mutual follows) see the caller's Interesuje mnie and Biorę udział. True until turned off.}
         home: {$ref: '#/components/schemas/Home'}
     Home:
@@ -531,10 +547,12 @@ components:
     InterestCatalog:
       type: object
       additionalProperties: false
-      required: [minSelections, maxSelections, categories]
+      required: [minKinds, minInterests, maxInterests, kinds, categories]
       properties:
-        minSelections: {type: integer}
-        maxSelections: {type: integer}
+        minKinds: {type: integer}
+        minInterests: {type: integer}
+        maxInterests: {type: integer}
+        kinds: {type: array, items: {$ref: '#/components/schemas/Kind'}}
         categories: {type: array, items: {$ref: '#/components/schemas/InterestCategory'}}
     InterestCategory:
       type: object
@@ -545,6 +563,14 @@ components:
         labelPl: {type: string}
         labelEn: {type: string}
         interests: {type: array, items: {$ref: '#/components/schemas/Interest'}}
+    Kind:
+      type: object
+      additionalProperties: false
+      required: [key, labelPl, labelEn]
+      properties:
+        key: {type: string}
+        labelPl: {type: string}
+        labelEn: {type: string}
     Interest:
       type: object
       additionalProperties: false
@@ -556,8 +582,9 @@ components:
     UserInterests:
       type: object
       additionalProperties: false
-      required: [interests]
+      required: [kinds, interests]
       properties:
+        kinds: {type: array, items: {type: string}}
         interests: {type: array, items: {type: string}}
     GeoPoint:
       type: object

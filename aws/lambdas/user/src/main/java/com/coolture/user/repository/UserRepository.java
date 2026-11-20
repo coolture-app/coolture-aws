@@ -305,16 +305,29 @@ public class UserRepository {
         return 0;
     }
 
-    /** In the order /dicts/interests lists them. */
+    /** In the order /dicts/interests lists them, hidden ones among them. */
     public List<String> findInterestKeys(UUID userId) throws SQLException {
-        String sql = """
+        return findKeys("""
             SELECT ui.interest_key
             FROM user_interests ui
             JOIN interests i ON i.key = ui.interest_key
             JOIN interest_categories c ON c.key = i.category_key
             WHERE ui.user_id = ?
             ORDER BY c.position, c.key, i.position, i.key
-            """;
+            """, userId);
+    }
+
+    public List<String> findKindKeys(UUID userId) throws SQLException {
+        return findKeys("""
+            SELECT uk.kind_key
+            FROM user_kinds uk
+            JOIN event_kinds k ON k.key = uk.kind_key
+            WHERE uk.user_id = ?
+            ORDER BY k.position, k.key
+            """, userId);
+    }
+
+    private List<String> findKeys(String sql, UUID userId) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, userId);
