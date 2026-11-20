@@ -3,7 +3,7 @@ set -euo pipefail
 
 ALL_STACKS=(auth backend embeddings geocoder scraper waf frontend)
 WAF_REGION=us-east-1
-EMBED_INTERESTS_MAX_ATTEMPTS=3
+WORKER_MAX_ATTEMPTS=3
 
 usage() {
     cat <<EOF
@@ -219,7 +219,9 @@ deploy_stack() {
     sam deploy "${deploy_args[@]}"
 
     if [[ "$stack" == embeddings ]]; then
-        embed_interests
+        # Without kinds derived, every post would have none until edited.
+        invoke_worker embed-interests "selections will not reach recommendations"
+        invoke_worker derive-kinds "posts have no kinds"
     fi
     if [[ "$stack" == geocoder ]] && ! aws s3api head-object \
         --bucket "$(stack_output "coolture-geocoder-$ENVIRONMENT" IndexBucketName)" --key photon/index.tar.gz > /dev/null 2>&1; then
@@ -231,19 +233,19 @@ deploy_stack() {
     fi
 }
 
-embed_interests() {
-    local response function_error attempt
+invoke_worker() {
+    local action="$1" consequence="$2" response function_error attempt
     response="$(mktemp)"
-    echo "==> [embeddings] embed interests"
-    for ((attempt = 1; attempt <= EMBED_INTERESTS_MAX_ATTEMPTS; attempt++)); do
+    echo "==> [embeddings] $action"
+    for ((attempt = 1; attempt <= WORKER_MAX_ATTEMPTS; attempt++)); do
         function_error="$(aws lambda invoke --function-name "coolture-$ENVIRONMENT-post-embedding" \
             --region "$AWS_DEFAULT_REGION" --cli-binary-format raw-in-base64-out --cli-read-timeout 150 \
-            --query FunctionError --output text --payload '{"action":"embed-interests"}' "$response")" || function_error=Failed
+            --query FunctionError --output text --payload "{\"action\":\"$action\"}" "$response")" || function_error=Failed
         cat "$response"
         echo
         [[ "$function_error" == None ]] && return 0
     done
-    echo "Embedding interests failed: selections will not reach recommendations." >&2
+    echo "The worker's $action failed: $consequence." >&2
     return 1
 }
 
