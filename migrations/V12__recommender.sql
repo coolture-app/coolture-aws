@@ -1,3 +1,10 @@
+-- The recommender's tables, beside the interests (V9) and kinds of event (V13).
+
+-- The feed builds the viewer's vector itself, from their stances and interests up to the session's start, so nothing stores
+-- or reads user vectors any more.
+
+DROP TABLE user_embeddings;
+
 -- Written by recommender/ppr; see recommender/README.md, Personalised PageRank. No foreign keys: rows are rebuilt every
 -- run, the job deletes a run's scores with the run, and a check per row made writing a run four times slower.
 

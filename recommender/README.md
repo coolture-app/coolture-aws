@@ -109,7 +109,7 @@ of it don't count towards the viewer's vector.
 
 ## Interests and user vectors
 
-`GET /dicts/interests` returns the kinds of event (`event_kinds`, V21), then the interests from V9 (`interest_categories`
+`GET /dicts/interests` returns the kinds of event (`event_kinds`, V13), then the interests from V9 (`interest_categories`
 group `interests`) that are offered. `GET` and `PUT /users/{userId}/interests` read and replace the caller's kinds and
 interests together: at least 1 kind, and interests that are offered or already held. `/auth/me`'s `interestsSelected`
 says whether the user has a kind, and the frontend blocks the page with onboarding until they have one. V9's interests,

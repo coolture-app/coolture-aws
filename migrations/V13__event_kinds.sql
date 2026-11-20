@@ -1,6 +1,7 @@
 -- Kinds of event: formats such as concerts or workshops, beside the V9 interests (topics). Users pick kinds in
 -- onboarding, the post-embedding worker derives each post's kinds, and the feed filters by them.
--- V9's interests, their texts, groups and vectors stay as they are: the survey's answers were given on them.
+-- V9's interests keep their texts and vectors: the survey's answers were given on them. Medytacja's group is the
+-- one change, below.
 
 CREATE TABLE event_kinds (
     key VARCHAR(64) PRIMARY KEY,
@@ -34,9 +35,17 @@ CREATE TABLE rec_post_kinds (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Interests with no event behind them leave onboarding but keep their rows, vectors and holders.
+-- Topics leave onboarding but keep their rows, vectors and holders, since the survey stores respondents' picks as these
+-- keys: those with no event behind them, and those named like a kind, which the kind covers.
 ALTER TABLE interests ADD COLUMN offered BOOLEAN NOT NULL DEFAULT true;
 UPDATE interests SET offered = false WHERE key IN ('true_crime', 'series', 'crime_novels', 'road_trips', 'camping', 'cats', 'minimalism', 'astrology', 'spirituality');
+UPDATE interests SET offered = false WHERE key IN ('concerts', 'cinema', 'parties', 'wellness');
+
+-- The Sport group shares its kind's name. Medytacja joins it beside Joga and Pilates: with Wellness hidden it was the
+-- only topic Styl życia offered. Not only a label: a pick adds 0.25 of its group's mean, so the move changes the taste
+-- of anyone holding a topic in either group.
+UPDATE interest_categories SET label_pl = 'Aktywność i sport', label_en = 'Activity and sport' WHERE key = 'sports';
+UPDATE interests SET category_key = 'sports', position = 3 WHERE key = 'meditation';
 
 INSERT INTO event_kinds (key, label_pl, label_en, position, embedding_texts) VALUES
     ('concerts', 'Koncerty', 'Concerts', 0, ARRAY[
@@ -84,7 +93,7 @@ INSERT INTO event_kinds (key, label_pl, label_en, position, embedding_texts) VAL
         'Kolacja degustacyjna w restauracji: menu szefa kuchni, kilka dań, kuchnie świata.',
         'Festiwal jedzenia: food trucki, street food, smaki regionu.',
         'Warsztaty kulinarne: gotowanie, pieczenie, wspólne przygotowywanie potraw.']),
-    ('sports', 'Sport', 'Sports', 9, ARRAY[
+    ('sports', 'Aktywność i sport', 'Activity and sport', 9, ARRAY[
         'Mecz: piłka nożna, siatkówka, koszykówka, hokej, kibicowanie na stadionie lub w hali.',
         'Bieg uliczny, maraton, zawody sportowe, zapisy dla uczestników, pakiet startowy.',
         'Trening dla amatorów: fitness, crossfit, bieganie z trenerem, zajęcia sportowe w hali lub w plenerze.',
