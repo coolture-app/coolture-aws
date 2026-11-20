@@ -10,11 +10,14 @@ import com.coolture.common.storage.S3StorageService;
 import com.coolture.user.dto.HomeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
+import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.dto.UserProfileUpdateRequest;
+import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.repository.UserRepository.AvatarRecord;
 import com.coolture.user.repository.UserRepository.UserEntity;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
@@ -32,10 +35,16 @@ import static org.mockito.Mockito.*;
 class UserServiceTest {
 
     private final UserRepository repository = mock(UserRepository.class);
+    private final InterestRepository interestRepository = mock(InterestRepository.class);
     private final S3StorageService s3Storage = mock(S3StorageService.class);
-    private final UserService service = new UserService(repository, s3Storage);
+    private final UserService service = new UserService(repository, interestRepository, s3Storage);
 
     private static final UUID USER_ID = UUID.randomUUID();
+
+    @BeforeEach
+    void noPicks() throws SQLException {
+        when(interestRepository.findPicks(any())).thenReturn(new UserInterestsDto(List.of(), List.of()));
+    }
     private static final UUID CALLER_ID = UUID.randomUUID();
     private static final UUID FULL_ID = UUID.randomUUID();
     private static final UUID THUMBNAIL_ID = UUID.randomUUID();
@@ -168,7 +177,7 @@ class UserServiceTest {
         when(repository.isFollowing(CALLER_ID, USER_ID)).thenReturn(true);
         when(repository.isFollowing(USER_ID, CALLER_ID)).thenReturn(true);
         when(repository.isBlocked(CALLER_ID, USER_ID)).thenReturn(false);
-        when(repository.findInterestKeys(USER_ID)).thenReturn(List.of("theatre", "cinema"));
+        when(interestRepository.findPicks(USER_ID)).thenReturn(new UserInterestsDto(List.of("concerts"), List.of("theatre", "cinema")));
 
         UserProfileDto profile = service.getByIdForCaller(USER_ID, CALLER_ID);
 
@@ -397,7 +406,7 @@ class UserServiceTest {
         assertNull(profile.followingCount());
         assertNull(profile.bio());
         assertNull(profile.interests());
-        verify(repository, never()).findInterestKeys(any());
+        verify(interestRepository, never()).findPicks(any());
     }
 
     @Test

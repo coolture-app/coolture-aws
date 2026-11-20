@@ -126,8 +126,6 @@ class InterestServiceTest {
 
     @Test
     void replaceSelection_rejectsAHiddenInterest_evenOneTheUserHolds() throws SQLException {
-        when(repository.findSelectedKeys(USER_ID)).thenReturn(List.of("astrology"));
-
         assertThrows(IllegalArgumentException.class,
                 () -> service.replaceSelection(USER_ID, USER_ID, request(A_KIND, "astrology", "jazz")));
 
@@ -144,8 +142,7 @@ class InterestServiceTest {
 
     @Test
     void getSelection_readsAnyonesKindsAndInterests() throws SQLException {
-        when(repository.findSelectedKinds(USER_ID)).thenReturn(List.of("concerts"));
-        when(repository.findSelectedKeys(USER_ID)).thenReturn(List.of("jazz", "opera"));
+        when(repository.findPicks(USER_ID)).thenReturn(new UserInterestsDto(List.of("concerts"), List.of("jazz", "opera")));
 
         assertEquals(new UserInterestsDto(List.of("concerts"), List.of("jazz", "opera")), service.getSelection(USER_ID, null));
         verify(repository, never()).userExists(any());
@@ -154,8 +151,7 @@ class InterestServiceTest {
     @Test
     void getSelection_isEmptyForSomeoneWhoPickedNothing_andNotFoundForNobody() throws SQLException {
         UUID nobody = UUID.randomUUID();
-        when(repository.findSelectedKinds(any())).thenReturn(List.of());
-        when(repository.findSelectedKeys(any())).thenReturn(List.of());
+        when(repository.findPicks(any())).thenReturn(new UserInterestsDto(List.of(), List.of()));
         when(repository.userExists(USER_ID)).thenReturn(true);
 
         assertEquals(new UserInterestsDto(List.of(), List.of()), service.getSelection(USER_ID, null));
@@ -171,7 +167,7 @@ class InterestServiceTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> service.getSelection(USER_ID, caller));
 
         assertTrue(e.getMessage().contains("not found"));
-        verify(repository, never()).findSelectedKeys(any());
+        verify(repository, never()).findPicks(any());
     }
 
     private static UserInterestsDto request(List<String> kinds, String... interests) {

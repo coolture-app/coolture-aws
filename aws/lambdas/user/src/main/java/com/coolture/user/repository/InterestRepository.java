@@ -2,6 +2,7 @@ package com.coolture.user.repository;
 
 import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.user.dto.UserInterestsDto;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -73,23 +74,30 @@ public class InterestRepository {
         }
     }
 
-    public List<String> findSelectedKeys(UUID userId) throws SQLException {
-        return findKeys("SELECT interest_key FROM user_interests WHERE user_id = ? ORDER BY interest_key", userId);
+    /** A user's picks, each in the order /dicts/interests lists them, hidden interests among them. */
+    public UserInterestsDto findPicks(UUID userId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            List<String> kinds = findKeys(conn, """
+                    SELECT uk.kind_key
+                    FROM user_kinds uk
+                    JOIN event_kinds k ON k.key = uk.kind_key
+                    WHERE uk.user_id = ?
+                    ORDER BY k.position, k.key
+                    """, userId);
+            List<String> interests = findKeys(conn, """
+                    SELECT ui.interest_key
+                    FROM user_interests ui
+                    JOIN interests i ON i.key = ui.interest_key
+                    JOIN interest_categories c ON c.key = i.category_key
+                    WHERE ui.user_id = ?
+                    ORDER BY c.position, c.key, i.position, i.key
+                    """, userId);
+            return new UserInterestsDto(kinds, interests);
+        }
     }
 
-    public List<String> findSelectedKinds(UUID userId) throws SQLException {
-        return findKeys("""
-                SELECT uk.kind_key
-                FROM user_kinds uk
-                JOIN event_kinds k ON k.key = uk.kind_key
-                WHERE uk.user_id = ?
-                ORDER BY k.position, k.key
-                """, userId);
-    }
-
-    private List<String> findKeys(String sql, UUID userId) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+    private static List<String> findKeys(Connection conn, String sql, UUID userId) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, userId);
             try (ResultSet rs = stmt.executeQuery()) {
                 List<String> keys = new ArrayList<>();

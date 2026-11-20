@@ -41,7 +41,7 @@ class UserDbTest {
     private static final UUID OLA = UUID.fromString("e0000000-0000-0000-0000-000000000003");
     private static final String ALL = "'" + ANNA + "', '" + JAN + "', '" + OLA + "'";
 
-    private final UserService users = new UserService(new UserRepository(), mock(S3StorageService.class));
+    private final UserService users = new UserService(new UserRepository(), new InterestRepository(), mock(S3StorageService.class));
     private final InterestService interests = new InterestService(new InterestRepository(), 0, 6);
 
     @BeforeEach

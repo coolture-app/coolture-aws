@@ -67,13 +67,12 @@ public class InterestService {
         if (repository.isBlockedPair(targetId, callerId)) {
             throw new IllegalArgumentException("User " + targetId + " not found");
         }
-        List<String> kinds = repository.findSelectedKinds(targetId);
-        List<String> interests = repository.findSelectedKeys(targetId);
+        UserInterestsDto picks = repository.findPicks(targetId);
         // Someone who picked nothing has no rows either, so only then is the user looked up.
-        if (kinds.isEmpty() && interests.isEmpty() && !repository.userExists(targetId)) {
+        if (picks.kinds().isEmpty() && picks.interests().isEmpty() && !repository.userExists(targetId)) {
             throw new IllegalArgumentException("User " + targetId + " not found");
         }
-        return new UserInterestsDto(kinds, interests);
+        return picks;
     }
 
     public UserInterestsDto replaceSelection(UUID targetId, UUID callerId, UserInterestsDto request) throws SQLException {
