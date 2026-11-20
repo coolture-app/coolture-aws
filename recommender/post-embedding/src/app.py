@@ -184,41 +184,29 @@ def derive_all_kinds(conn: psycopg.Connection) -> int:
     return len(posts)
 
 
-def _unit(vector: np.ndarray) -> np.ndarray:
-    return vector / np.linalg.norm(vector)
-
-
 def embed_kinds(conn: psycopg.Connection) -> int:
-    """A kind's vector: its texts' mean, blended with its labelled posts' mean where the model has one."""
     rows = conn.execute(
         """
-        SELECT k.key, k.embedding_texts, pm.embedding::real[], pm.updated_at
+        SELECT k.key, k.embedding_texts
         FROM event_kinds k
         LEFT JOIN event_kind_embeddings ke ON ke.kind_key = k.key
-        LEFT JOIN event_kind_post_means pm ON pm.kind_key = k.key AND pm.model = %s
-        WHERE ke.model IS DISTINCT FROM %s
-           OR ke.embedded_texts IS DISTINCT FROM k.embedding_texts
-           OR ke.post_mean_updated_at IS DISTINCT FROM pm.updated_at
+        WHERE ke.model IS DISTINCT FROM %s OR ke.embedded_texts IS DISTINCT FROM k.embedding_texts
         """,
-        (settings.embedding_model, settings.embedding_model),
+        (settings.embedding_model,),
     ).fetchall()
-    for key, texts, post_mean, post_mean_at in rows:
-        vector = _unit(np.asarray(_get_model().encode(texts, normalize_embeddings=True), dtype=np.float64).mean(axis=0))
-        if post_mean is not None:
-            weight = settings.kind_texts_weight
-            vector = _unit(weight * vector + (1 - weight) * _unit(np.asarray(post_mean, dtype=np.float64)))
+    for key, texts in rows:
+        mean = np.asarray(_get_model().encode(texts, normalize_embeddings=True), dtype=np.float64).mean(axis=0)
         conn.execute(
             """
-            INSERT INTO event_kind_embeddings (kind_key, embedding, model, embedded_texts, post_mean_updated_at)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO event_kind_embeddings (kind_key, embedding, model, embedded_texts)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (kind_key) DO UPDATE
-                SET embedding            = EXCLUDED.embedding,
-                    model                = EXCLUDED.model,
-                    embedded_texts       = EXCLUDED.embedded_texts,
-                    post_mean_updated_at = EXCLUDED.post_mean_updated_at,
-                    updated_at           = now()
+                SET embedding      = EXCLUDED.embedding,
+                    model          = EXCLUDED.model,
+                    embedded_texts = EXCLUDED.embedded_texts,
+                    updated_at     = now()
             """,
-            (key, vector.tolist(), settings.embedding_model, texts, post_mean_at),
+            (key, (mean / np.linalg.norm(mean)).tolist(), settings.embedding_model, texts),
         )
     return len(rows)
 

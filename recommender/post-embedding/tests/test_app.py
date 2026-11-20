@@ -253,8 +253,7 @@ def test_should_embed_changed_kinds_as_their_texts_mean_and_rederive_every_post(
     # given
     conn = MagicMock()
     texts = ["Koncert w klubie", "Recital"]
-    conn.execute.return_value.fetchall.side_effect = [[], [("concerts", texts, None, None)], KIND_ROWS,
-                                                      [(POST_ID, EMBEDDING)]]
+    conn.execute.return_value.fetchall.side_effect = [[], [("concerts", texts)], KIND_ROWS, [(POST_ID, EMBEDDING)]]
     model.encode.return_value = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
     monkeypatch.setattr(app, "_get_connection", lambda: conn)
 
@@ -265,29 +264,10 @@ def test_should_embed_changed_kinds_as_their_texts_mean_and_rederive_every_post(
     assert result == {"interests": 0, "kinds": 1, "posts": 1}
     assert model.encode.call_args_list == [call(texts, normalize_embeddings=True)]
     stored = conn.execute.call_args_list[2].args[1]
-    assert (stored[0], np.round(stored[1], 6).tolist(), stored[2:]) == (
-        "concerts", [0.707107, 0.707107, 0.0], (MODEL, texts, None))
+    assert (stored[0], np.round(stored[1], 6).tolist(), stored[2:]) == ("concerts", [0.707107, 0.707107, 0.0], (MODEL, texts))
     assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
         call(ANY, [(POST_ID, ["stage"], MODEL)]),
     ]
-
-
-def test_should_blend_a_kinds_texts_mean_with_its_posts_mean_when_the_model_has_one(model, monkeypatch):
-    # given
-    conn = MagicMock()
-    texts = ["Koncert w klubie"]
-    post_mean_at = "2026-11-20T00:00:00Z"
-    conn.execute.return_value.fetchall.side_effect = [[], [("concerts", texts, [0.0, 0.0, 2.0], post_mean_at)],
-                                                      KIND_ROWS, []]
-    model.encode.return_value = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
-    monkeypatch.setattr(app, "_get_connection", lambda: conn)
-
-    # when
-    app.lambda_handler({"action": "embed-interests"}, None)
-
-    # then
-    stored = conn.execute.call_args_list[2].args[1]
-    assert (np.round(stored[1], 6).tolist(), stored[4]) == ([0.707107, 0.0, 0.707107], post_mean_at)
 
 
 def test_should_rederive_every_post_and_drop_other_models_kinds_when_invoked_with_derive_kinds(monkeypatch):
