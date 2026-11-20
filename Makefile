@@ -161,8 +161,8 @@ $(SNAPSHOT_DIR)/complete:
 seed-events: $(VENV_PY) $(SNAPSHOT_DIR)/complete ## Load the snapshot through the local API as the bot, dates moved to come
 	@$(VENV_PY) scraper/seed.py events --snapshot $(SNAPSHOT_DIR)
 
-seed-reactions: $(VENV_PY) ## Demo users react to posts close to their interests (after embed-interests and embed-posts)
-	@$(VENV_PY) scraper/seed.py reactions
+seed-reactions: $(VENV_PY) ## Demo users react to posts close to their interests (after embed-interests and embed-posts); RESET=1 takes theirs back first
+	@$(VENV_PY) scraper/seed.py reactions $(if $(RESET),--reset)
 
 seed-friends: $(VENV_PY) ## Friends of the demo users mark the soonest posts, one shape of the cards' friends line each (after seed-events)
 	@$(VENV_PY) scraper/seed.py friends

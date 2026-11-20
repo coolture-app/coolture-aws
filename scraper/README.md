@@ -43,11 +43,15 @@ A local stack gets its events from a snapshot, so nobody waits for a live scrape
   embedding and the mean of a demo user's interest embeddings. The user likes the posts ranked 4, 7, 10, 13 and 16,
   marks 5 and 11 as interesting, and the two farthest as "Nie dla mnie". The closest three stay unreacted, because reacted posts
   leave the feed. A user who has any reaction or participation already is skipped, so a second run adds nothing.
+  With `RESET=1` (`--reset`) it first takes back all of their reactions and stances, so after their picks change in
+  `db/local-dev-seed.sql` their history follows them again; what was done as them in the app goes too.
 - **`seed.py friends`** (`make seed-friends`) takes the soonest posts of the Upcoming sort that nobody else marked, and
   has the demo users' friends from `db/local-dev-seed.sql` mark them, one shape of a card's friends line per post: one
   going, one interested, one of each, two going, five going, three going and four interested, and one marked only by
   Bartek and Iza, which shows no line. Kasia, Tomek and Magda get a plain coloured photo, so faces show both photos and
   initials. Any other stance of these friends is taken back, so each run puts the cases on the posts soonest then.
+  The cases' stances are dated 6 weeks back: every friend is a persona, and fresh stances on whatever is soonest
+  would lead their own Dla Ciebie.
 
 The snapshot is gitignored, like the ledger, because scraped text and photos stay out of the public repository.
 
