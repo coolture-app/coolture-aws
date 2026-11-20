@@ -11,50 +11,13 @@ INSERT INTO users (id, username, first_name, last_name, bio) VALUES
     ('00000000-0000-0000-0000-00000000b07a', 'coolture_bot', 'Coolture', 'Bot', 'Imports events from trojmiasto.pl')
 ON CONFLICT (id) DO NOTHING;
 
--- Three regular users with different tastes, so their feeds differ. Their reactions come from `make seed-reactions`,
--- because the events they react to are loaded later, by `make seed-events`.
+-- Three regular users with a history: their reactions come from `make seed-reactions`, because the events they react
+-- to are loaded later, by `make seed-events`.
 INSERT INTO users (id, username, first_name, last_name, bio) VALUES
     ('00000000-0000-0000-0000-000000000002', 'anna_demo', 'Anna', 'Demo', 'Koncerty, indie i elektronika, a w weekendy kluby'),
     ('00000000-0000-0000-0000-000000000003', 'jan_demo', 'Jan', 'Demo', 'Teatr, stand-up i kino autorskie'),
     ('00000000-0000-0000-0000-000000000004', 'ola_demo', 'Ola', 'Demo', 'Galerie, fotografia, bieganie i dobre jedzenie')
 ON CONFLICT (id) DO NOTHING;
-
--- Only for a user with no interests yet, so a choice made in the app survives the next `make up`.
-INSERT INTO user_interests (user_id, interest_key)
-SELECT picks.user_id::uuid, picks.interest_key
-FROM (VALUES
-    ('00000000-0000-0000-0000-000000000002', 'concerts'),
-    ('00000000-0000-0000-0000-000000000002', 'indie'),
-    ('00000000-0000-0000-0000-000000000002', 'electronic'),
-    ('00000000-0000-0000-0000-000000000002', 'clubbing'),
-    ('00000000-0000-0000-0000-000000000002', 'parties'),
-    ('00000000-0000-0000-0000-000000000003', 'theatre'),
-    ('00000000-0000-0000-0000-000000000003', 'stand_up'),
-    ('00000000-0000-0000-0000-000000000003', 'cinema'),
-    ('00000000-0000-0000-0000-000000000003', 'arthouse'),
-    ('00000000-0000-0000-0000-000000000003', 'author_meetings'),
-    ('00000000-0000-0000-0000-000000000004', 'galleries'),
-    ('00000000-0000-0000-0000-000000000004', 'museums'),
-    ('00000000-0000-0000-0000-000000000004', 'photography'),
-    ('00000000-0000-0000-0000-000000000004', 'running'),
-    ('00000000-0000-0000-0000-000000000004', 'walks'),
-    ('00000000-0000-0000-0000-000000000004', 'foodie'),
-    ('00000000-0000-0000-0000-000000000004', 'family_events')
-) AS picks (user_id, interest_key)
-WHERE NOT EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = picks.user_id::uuid);
-
-INSERT INTO user_kinds (user_id, kind_key)
-SELECT picks.user_id::uuid, picks.kind_key
-FROM (VALUES
-    ('00000000-0000-0000-0000-000000000002', 'concerts'),
-    ('00000000-0000-0000-0000-000000000002', 'nightlife'),
-    ('00000000-0000-0000-0000-000000000003', 'stage'),
-    ('00000000-0000-0000-0000-000000000003', 'cinema'),
-    ('00000000-0000-0000-0000-000000000004', 'exhibitions'),
-    ('00000000-0000-0000-0000-000000000004', 'sports'),
-    ('00000000-0000-0000-0000-000000000004', 'food')
-) AS picks(user_id, kind_key)
-WHERE NOT EXISTS (SELECT 1 FROM user_kinds uk WHERE uk.user_id = picks.user_id::uuid);
 
 -- Anna and Jan follow each other, so they're friends and see each other's stances. Ola and Jan follow one way.
 INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
@@ -78,6 +41,94 @@ INSERT INTO users (id, username, first_name, last_name, share_stances) VALUES
     ('00000000-0000-0000-0000-000000000012', 'bartek_demo', 'Bartek', 'Mazur', false),
     ('00000000-0000-0000-0000-000000000013', 'iza_demo', 'Iza', 'Krawczyk', true)
 ON CONFLICT (id) DO NOTHING;
+
+-- Each demo account is a persona, so a feed can be tried for a taste: Anna indie and clubs, Jan theatre and arthouse
+-- film, Ola galleries, running and food, Kasia rock, Piotr classical music and opera, Ewa a parent (children's
+-- workshops, fairs), Tomek games and sci-fi, Zofia history talks and walks, Marek tech talks and causes, Magda dancing
+-- and nightlife, Bartek kinds only (sport, outdoors), Iza yoga and crafts. Together they cover every kind. local_dev has
+-- none, for onboarding. Only offered topics, at most 6. Each set goes in only for a user with none yet, so a choice made
+-- in the app survives the next `make up`.
+INSERT INTO user_interests (user_id, interest_key)
+SELECT picks.user_id::uuid, picks.interest_key
+FROM (VALUES
+    ('00000000-0000-0000-0000-000000000002', 'indie'),
+    ('00000000-0000-0000-0000-000000000002', 'electronic'),
+    ('00000000-0000-0000-0000-000000000002', 'clubbing'),
+    ('00000000-0000-0000-0000-000000000002', 'music_festivals'),
+    ('00000000-0000-0000-0000-000000000003', 'theatre'),
+    ('00000000-0000-0000-0000-000000000003', 'stand_up'),
+    ('00000000-0000-0000-0000-000000000003', 'arthouse'),
+    ('00000000-0000-0000-0000-000000000003', 'author_meetings'),
+    ('00000000-0000-0000-0000-000000000004', 'galleries'),
+    ('00000000-0000-0000-0000-000000000004', 'museums'),
+    ('00000000-0000-0000-0000-000000000004', 'photography'),
+    ('00000000-0000-0000-0000-000000000004', 'running'),
+    ('00000000-0000-0000-0000-000000000004', 'foodie'),
+    ('00000000-0000-0000-0000-000000000004', 'walks'),
+    ('00000000-0000-0000-0000-000000000005', 'rock'),
+    ('00000000-0000-0000-0000-000000000005', 'metal'),
+    ('00000000-0000-0000-0000-000000000005', 'craft_beer'),
+    ('00000000-0000-0000-0000-000000000006', 'classical_music'),
+    ('00000000-0000-0000-0000-000000000006', 'opera'),
+    ('00000000-0000-0000-0000-000000000006', 'ballet'),
+    ('00000000-0000-0000-0000-000000000007', 'family_events'),
+    ('00000000-0000-0000-0000-000000000007', 'diy'),
+    ('00000000-0000-0000-0000-000000000007', 'markets'),
+    ('00000000-0000-0000-0000-000000000008', 'board_games'),
+    ('00000000-0000-0000-0000-000000000008', 'rpg'),
+    ('00000000-0000-0000-0000-000000000008', 'sci_fi'),
+    ('00000000-0000-0000-0000-000000000008', 'pub_quiz'),
+    ('00000000-0000-0000-0000-000000000009', 'history'),
+    ('00000000-0000-0000-0000-000000000009', 'architecture'),
+    ('00000000-0000-0000-0000-000000000009', 'walks'),
+    ('00000000-0000-0000-0000-000000000009', 'science'),
+    ('00000000-0000-0000-0000-000000000010', 'technology'),
+    ('00000000-0000-0000-0000-000000000010', 'business'),
+    ('00000000-0000-0000-0000-000000000010', 'volunteering'),
+    ('00000000-0000-0000-0000-000000000010', 'ecology'),
+    ('00000000-0000-0000-0000-000000000011', 'salsa'),
+    ('00000000-0000-0000-0000-000000000011', 'cocktails'),
+    ('00000000-0000-0000-0000-000000000011', 'hip_hop'),
+    ('00000000-0000-0000-0000-000000000013', 'yoga'),
+    ('00000000-0000-0000-0000-000000000013', 'meditation'),
+    ('00000000-0000-0000-0000-000000000013', 'ceramics'),
+    ('00000000-0000-0000-0000-000000000013', 'vegan'),
+    ('00000000-0000-0000-0000-000000000013', 'tea')
+) AS picks (user_id, interest_key)
+WHERE NOT EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = picks.user_id::uuid)
+  AND NOT EXISTS (SELECT 1 FROM user_kinds uk WHERE uk.user_id = picks.user_id::uuid);
+
+INSERT INTO user_kinds (user_id, kind_key)
+SELECT picks.user_id::uuid, picks.kind_key
+FROM (VALUES
+    ('00000000-0000-0000-0000-000000000002', 'concerts'),
+    ('00000000-0000-0000-0000-000000000002', 'nightlife'),
+    ('00000000-0000-0000-0000-000000000003', 'stage'),
+    ('00000000-0000-0000-0000-000000000003', 'cinema'),
+    ('00000000-0000-0000-0000-000000000004', 'exhibitions'),
+    ('00000000-0000-0000-0000-000000000004', 'sports'),
+    ('00000000-0000-0000-0000-000000000004', 'food'),
+    ('00000000-0000-0000-0000-000000000005', 'concerts'),
+    ('00000000-0000-0000-0000-000000000006', 'concerts'),
+    ('00000000-0000-0000-0000-000000000006', 'stage'),
+    ('00000000-0000-0000-0000-000000000007', 'kids'),
+    ('00000000-0000-0000-0000-000000000007', 'workshops'),
+    ('00000000-0000-0000-0000-000000000007', 'fairs'),
+    ('00000000-0000-0000-0000-000000000008', 'games'),
+    ('00000000-0000-0000-0000-000000000008', 'cinema'),
+    ('00000000-0000-0000-0000-000000000009', 'talks'),
+    ('00000000-0000-0000-0000-000000000009', 'outdoors'),
+    ('00000000-0000-0000-0000-000000000010', 'talks'),
+    ('00000000-0000-0000-0000-000000000010', 'causes'),
+    ('00000000-0000-0000-0000-000000000011', 'nightlife'),
+    ('00000000-0000-0000-0000-000000000011', 'workshops'),
+    ('00000000-0000-0000-0000-000000000012', 'sports'),
+    ('00000000-0000-0000-0000-000000000012', 'outdoors'),
+    ('00000000-0000-0000-0000-000000000013', 'wellbeing'),
+    ('00000000-0000-0000-0000-000000000013', 'workshops'),
+    ('00000000-0000-0000-0000-000000000013', 'food')
+) AS picks(user_id, kind_key)
+WHERE NOT EXISTS (SELECT 1 FROM user_kinds uk WHERE uk.user_id = picks.user_id::uuid);
 
 INSERT INTO user_relations (source_user_id, target_user_id, type)
 SELECT pair.source_user_id::uuid, pair.target_user_id::uuid, 'FOLLOW'

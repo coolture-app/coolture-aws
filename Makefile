@@ -151,11 +151,11 @@ require-geocoder:
 scrape: $(VENV_PY) require-geocoder ## Import trojmiasto.pl events live through the local API, needs `make local` (ARGS="--limit 20")
 	@SCRAPER_USER_ID=$${SCRAPER_USER_ID:-00000000-0000-0000-0000-00000000b07a} $(VENV_PY) scraper/scrape.py $(ARGS)
 
-scrape-snapshot: $(VENV_PY) require-geocoder ## Save about 120 events of every category, with photos, to scraper/snapshot (~12 min once; ALL=1 for all)
-	@$(VENV_PY) scraper/scrape.py --snapshot $(SNAPSHOT_DIR) $(if $(ALL),--all,$(if $(SIZE),--size $(SIZE)))
+scrape-snapshot: $(VENV_PY) require-geocoder ## Save every listed event, with photos, to scraper/snapshot (~30 min once; SIZE=120 for a sample across categories)
+	@$(VENV_PY) scraper/scrape.py --snapshot $(SNAPSHOT_DIR) $(if $(SIZE),--size $(SIZE),--all)
 
 $(SNAPSHOT_DIR)/complete:
-	@echo "No snapshot yet, so scraping one first (about 12 minutes, once)."
+	@echo "No snapshot yet, so scraping one first (about 30 minutes, once)."
 	@$(MAKE) --no-print-directory scrape-snapshot
 
 seed-events: $(VENV_PY) $(SNAPSHOT_DIR)/complete ## Load the snapshot through the local API as the bot, dates moved to come

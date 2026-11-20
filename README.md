@@ -6,8 +6,8 @@ The API, database, photo storage, recommender and event scraper of Coolture: Jav
 
 ## Run locally
 
-The whole app on your machine, with about 120 real events from trojmiasto.pl, three demo users with their own tastes,
-and a guest. It works on Windows (Git Bash or PowerShell), WSL, Linux and macOS.
+The whole app on your machine, with every event listed on trojmiasto.pl (a few hundred), twelve demo users with their
+own tastes, and a guest. It works on Windows (Git Bash or PowerShell), WSL, Linux and macOS.
 
 ### 1. Install the tools, once
 
@@ -39,7 +39,8 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 
 `make seed` skips whatever is already done:
 
-1. Scrapes a snapshot of trojmiasto.pl into the gitignored `scraper/snapshot/`, if there's none yet. About 12 minutes, once.
+1. Scrapes a snapshot of trojmiasto.pl into the gitignored `scraper/snapshot/`, if there's none yet: every listed event, about 30 minutes, once.
+   `SIZE=120` takes a sample across categories instead. An older, smaller snapshot stays until it's deleted.
 2. Loads it through the API as `coolture_bot`, with every date moved forward so all events are ahead. About 5 minutes.
 3. Embeds interests and posts. The first run builds the embedding image (3.5 GB, about 10 minutes).
 4. Lets the demo users react to posts close to their interests, so their feeds are personal.

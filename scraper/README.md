@@ -14,7 +14,7 @@ local geocoder, the same Photon and index the app uses on AWS, so `make geo-inde
 started it. That holds when the run sends to AWS too.
 
 ```bash
-make scrape-snapshot                                  # saves ~120 events of every category to scraper/snapshot, no API needed
+make scrape-snapshot                                  # saves every listed event to scraper/snapshot, no API needed (SIZE=120: a sample)
 make seed                                             # loads the snapshot into the local stack, see README.md "Run locally"
 
 make local                                            # in another terminal

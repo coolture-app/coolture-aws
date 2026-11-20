@@ -107,7 +107,8 @@ HTTP *
 [Asserts]
 status < 300
 
-# The catalogue: kinds of event, then interests by category. Interests with no event behind them are hidden.
+# The catalogue: kinds of event, then interests by category. Interests with no event behind them, or named like a kind,
+# are hidden.
 GET {{api}}/dicts/interests
 HTTP 200
 [Asserts]
@@ -115,12 +116,13 @@ jsonpath "$.kinds" count == 15
 jsonpath "$.minKinds" == 1
 jsonpath "$.categories" count > 0
 jsonpath "$.categories[*].interests[*].key" not contains "astrology"
+jsonpath "$.categories[*].interests[*].key" not contains "concerts"
 
 # PUT replaces both: at least 1 kind, and 0 to 6 interests. This sends Anna's seed picks back.
 PUT {{api}}/users/{{anna}}/interests
 X-User-Id: {{anna}}
 X-User-Name: anna_demo
-{ "kinds": ["concerts", "nightlife"], "interests": ["concerts", "indie", "electronic", "clubbing", "parties"] }
+{ "kinds": ["concerts", "nightlife"], "interests": ["indie", "electronic", "clubbing", "music_festivals"] }
 HTTP 200
 [Asserts]
 jsonpath "$.kinds" count == 2
@@ -128,10 +130,10 @@ jsonpath "$.kinds" count == 2
 PUT {{api}}/users/{{anna}}/interests
 X-User-Id: {{anna}}
 X-User-Name: anna_demo
-{ "kinds": [], "interests": ["concerts"] }
+{ "kinds": [], "interests": ["indie"] }
 HTTP 400
 
-# A hidden interest is refused from someone who doesn't hold it already.
+# A hidden interest is refused.
 PUT {{api}}/users/{{anna}}/interests
 X-User-Id: {{anna}}
 X-User-Name: anna_demo
@@ -144,7 +146,7 @@ X-User-Id: {{jan}}
 X-User-Name: jan_demo
 HTTP 200
 [Asserts]
-jsonpath "$.interests" contains "concerts"
+jsonpath "$.interests" contains "indie"
 jsonpath "$.kinds" contains "nightlife"
 
 GET {{api}}/users/{{anna}}/interests
@@ -157,7 +159,7 @@ X-User-Id: {{jan}}
 X-User-Name: jan_demo
 HTTP 200
 [Asserts]
-jsonpath "$.interests" contains "concerts"
+jsonpath "$.interests" contains "indie"
 
 # Ola says where she lives. Only she sees it: in /auth/me, never on her profile, and nobody else can change it.
 PUT {{api}}/users/{{ola}}/home
