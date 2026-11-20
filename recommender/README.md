@@ -32,8 +32,10 @@ post-write (create, or a change to title or description)
   when it runs, so duplicated or late events still embed the latest text. Deleted posts and `s3:TestEvent` are skipped.
   Request objects expire after a day.
 - `{"action":"embed-interests"}` to `PostEmbeddingFunction` embeds every interest with no vector, or whose
-  `embedding_text` or model changed, and every kind of event the same way (a kind's vector is the normalised mean of its
-  `embedding_texts`, in `event_kind_embeddings`). When a kind changed, it re-derives every post's kinds.
+  `embedding_text` or model changed, and every kind of event the same way. A kind's vector, in `event_kind_embeddings`,
+  is half the normalised mean of its `embedding_texts` and half its labelled posts' mean (`event_kind_post_means`, for
+  the model that embedded them); a kind with no posts' mean for the model keeps its texts' mean. A changed text or
+  posts' mean re-embeds the kind, and a changed kind re-derives every post's kinds.
   `{"action":"derive-kinds"}` re-derives them all from the stored post vectors. `scripts/deploy.sh` sends both after
   deploying this stack.
 - **Kinds of event.** After storing a post's vector the worker writes its kinds to `rec_post_kinds`, best first: the
