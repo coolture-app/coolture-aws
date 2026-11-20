@@ -5,6 +5,7 @@ import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostKinds;
 import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.StanceCounts;
 import com.coolture.common.dto.FriendStancesDto;
@@ -143,7 +144,9 @@ public class PostReadRepository {
                    ST_Y(el.coordinates::geometry) AS latitude,
                    ST_X(el.coordinates::geometry) AS longitude,
                    pr_my.type AS my_reaction,
-                   pp_my.type AS my_participation
+                   pp_my.type AS my_participation,
+                   """ + PostKinds.OF_POST + """
+                   AS kinds
             FROM posts p
             JOIN users u ON u.id = p.author_id
             """ + StanceCounts.JOIN + """
@@ -189,6 +192,7 @@ public class PostReadRepository {
                         rs.getInt("comments_count"),
                         mapEnum(rs, "type", PostType.class),
                         mapEnum(rs, "status", PostStatus.class),
+                        mapStringList(rs, "kinds"),
                         mapInstant(rs, "created_at"),
                         mapInstant(rs, "last_modified_at"),
                         mapInstant(rs, "deleted_at"),
@@ -226,6 +230,8 @@ public class PostReadRepository {
                    ST_X(el.coordinates::geometry) AS longitude,
                    cover_m.object_key AS cover_url,
                    el.venue_name, el.city,
+                   """ + PostKinds.OF_POST + """
+                   [1] AS kind,
                    pr_my.type AS my_reaction,
                    pp_my.type AS my_participation
             FROM posts p
@@ -298,6 +304,7 @@ public class PostReadRepository {
                         new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
                         rs.getString("venue_name"),
                         rs.getString("city"),
+                        rs.getString("kind"),
                         mapMyReaction(rs),
                         mapMyParticipation(rs),
                         null

@@ -32,6 +32,8 @@ paths:
         - $ref: '#/components/parameters/AuthorId'
         - $ref: '#/components/parameters/Status'
         - $ref: '#/components/parameters/Followed'
+        - $ref: '#/components/parameters/Kinds'
+        - $ref: '#/components/parameters/Kids'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
@@ -83,6 +85,8 @@ paths:
         - $ref: '#/components/parameters/AuthorId'
         - $ref: '#/components/parameters/Status'
         - $ref: '#/components/parameters/Followed'
+        - $ref: '#/components/parameters/Kinds'
+        - $ref: '#/components/parameters/Kids'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/From'
         - $ref: '#/components/parameters/To'
@@ -115,6 +119,8 @@ paths:
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/RadiusKm'
         - $ref: '#/components/parameters/Followed'
+        - $ref: '#/components/parameters/Kinds'
+        - $ref: '#/components/parameters/Kids'
         - name: excludeMine
           in: query
           description: >
@@ -214,6 +220,19 @@ components:
         Only posts by people the viewer follows, and posts a friend (a mutual follow) marked Interesuje mnie or Biorę
         udział, unless that friend stopped sharing their stances. Nothing for a guest. Every post is public, so there's no
         visibility filter; an older client's visibility parameter is ignored.
+      schema: {type: boolean, default: false}
+    Kinds:
+      name: kinds
+      in: query
+      description: >
+        Kinds of event as comma-separated keys from /dicts/interests (kinds=concerts,stage); a post matches any of them.
+        A post's kinds are derived from its text after it's saved, so for a few seconds a new post has none and matches
+        no kind. A key no post has matches nothing; a key that isn't lowercase letters and underscores is a 400.
+      schema: {type: string, pattern: '^[a-z_]{1,64}(,[a-z_]{1,64}){0,31}$'}
+    Kids:
+      name: kids
+      in: query
+      description: Only posts for children, whatever their other kinds, so kinds=concerts&kids=true gives kids' concerts.
       schema: {type: boolean, default: false}
     Type:
       name: type
@@ -358,6 +377,7 @@ components:
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
         venueName: {type: string}
         city: {type: string}
+        kind: {type: string, description: "The post's first kind of event, for the pin's icon. Left out until derived."}
         myReaction: {$ref: '#/components/schemas/ReactionType'}
         myParticipation: {$ref: '#/components/schemas/ParticipationType'}
         friendStances: {$ref: '#/components/schemas/FriendStances'}

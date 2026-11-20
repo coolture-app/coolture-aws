@@ -29,6 +29,8 @@ public record PostDetailDto(
     int commentsCount,
     PostType type,
     PostStatus status,
+    /** Kinds of event, best first. Null until derived. */
+    List<String> kinds,
     Instant createdAt,
     Instant lastModifiedAt,
     Instant deletedAt,

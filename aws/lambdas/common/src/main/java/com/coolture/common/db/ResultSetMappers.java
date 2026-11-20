@@ -162,6 +162,12 @@ public final class ResultSetMappers {
         return mapEnum(rs, "my_participation", ParticipationType.class);
     }
 
+    /** A text array as a list, null when SQL NULL. */
+    public static java.util.List<String> mapStringList(ResultSet rs, String column) throws SQLException {
+        Array array = rs.getArray(column);
+        return array == null ? null : java.util.List.of((String[]) array.getArray());
+    }
+
     /**
      * Maps ancestor_ids uuid[] to a UUID array (null when SQL NULL).
      */

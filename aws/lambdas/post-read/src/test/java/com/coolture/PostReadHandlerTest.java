@@ -264,6 +264,9 @@ class PostReadHandlerTest {
     @CsvSource({
         "limit, abc",
         "includePast, maybe",
+        "kinds, Concerts",
+        "kinds, concerts;stage",
+        "kids, maybe",
         "latitude, 54.35",
         "longitude, 18.65",
     })
@@ -299,6 +302,18 @@ class PostReadHandlerTest {
 
         assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
         org.junit.jupiter.api.Assertions.assertTrue(filters.getValue().includePast());
+    }
+
+    @Test
+    void getFeed_whenKindsAreSet_thenPassesEachKindAndTheKidsSwitch() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("kinds", "concerts, stage", "kids", "true"));
+        ArgumentCaptor<PostFeedFilters> filters = ArgumentCaptor.forClass(PostFeedFilters.class);
+        when(postReadService.getFeed(any(), filters.capture(), any(), anyInt()))
+            .thenReturn(CursorPage.of(List.<PostCardDto>of(), 20, PostCardDto::id, PostCardDto::createdAt));
+
+        assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
+        assertEquals(List.of("concerts", "stage"), filters.getValue().kinds());
+        org.junit.jupiter.api.Assertions.assertTrue(filters.getValue().kids());
     }
 
     @Test
