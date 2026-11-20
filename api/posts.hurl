@@ -352,11 +352,18 @@ HTTP 200
 jsonpath "$" count > 0
 jsonpath "$[0].kind" exists
 
-# A filtered pin names the kind it was found by, even where that kind is the post's second.
+# A filtered pin names the kind it was found by, even where that kind is the post's second: every pin says concerts.
+GET {{api}}/posts/map?leftUpper.latitude=55&leftUpper.longitude=18&rightBottom.latitude=54&rightBottom.longitude=19.2&kinds=concerts&includePast=true
+X-Anonymous: true
+HTTP 200
+[Captures]
+concert_pins: jsonpath "$" count
+[Asserts]
+jsonpath "$" count > 0
+jsonpath "$[0].kinds" contains "concerts"
+
 GET {{api}}/posts/map?leftUpper.latitude=55&leftUpper.longitude=18&rightBottom.latitude=54&rightBottom.longitude=19.2&kinds=concerts&includePast=true
 X-Anonymous: true
 HTTP 200
 [Asserts]
-jsonpath "$" count > 0
-jsonpath "$[?(@.kind != 'concerts')]" count == 0
-jsonpath "$[0].kinds" contains "concerts"
+jsonpath "$[?(@.kind == 'concerts')]" count == {{concert_pins}}
