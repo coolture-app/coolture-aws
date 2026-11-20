@@ -125,14 +125,13 @@ class InterestServiceTest {
     }
 
     @Test
-    void replaceSelection_rejectsAHiddenInterest_unlessTheUserHoldsItAlready() throws SQLException {
-        assertThrows(IllegalArgumentException.class,
-                () -> service.replaceSelection(USER_ID, USER_ID, request(A_KIND, "astrology")));
-
+    void replaceSelection_rejectsAHiddenInterest_evenOneTheUserHolds() throws SQLException {
         when(repository.findSelectedKeys(USER_ID)).thenReturn(List.of("astrology"));
-        service.replaceSelection(USER_ID, USER_ID, request(A_KIND, "astrology", "jazz"));
 
-        verify(repository).replaceSelection(USER_ID, Set.of("concerts"), Set.of("astrology", "jazz"));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.replaceSelection(USER_ID, USER_ID, request(A_KIND, "astrology", "jazz")));
+
+        verify(repository, never()).replaceSelection(any(), any(), any());
     }
 
     @Test

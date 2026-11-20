@@ -10,7 +10,6 @@ import com.coolture.user.repository.InterestRepository.InterestEntity;
 import com.coolture.user.repository.InterestRepository.KindEntity;
 
 import java.sql.SQLException;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -91,12 +90,10 @@ public class InterestService {
             throw new IllegalArgumentException("Select at least " + MIN_KINDS + " kind");
         }
 
-        // A hidden interest stays selectable for whoever already holds it, so saving again doesn't drop it.
-        Set<String> selectable = new HashSet<>(repository.findSelectedKeys(targetId));
-        repository.findInterests().stream()
+        Set<String> selectable = repository.findInterests().stream()
                 .filter(InterestEntity::offered)
                 .map(InterestEntity::key)
-                .forEach(selectable::add);
+                .collect(Collectors.toSet());
         Set<String> interests = new LinkedHashSet<>(request.interests());
         if (!selectable.containsAll(interests)) {
             throw new IllegalArgumentException("Unknown interest");

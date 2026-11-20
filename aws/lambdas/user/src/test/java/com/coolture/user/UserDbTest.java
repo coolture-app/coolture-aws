@@ -65,16 +65,16 @@ class UserDbTest {
     }
 
     @Test
-    void kindsAndInterests_roundTrip_andAHiddenInterestStaysOnlyWithWhoeverHeldIt() throws SQLException {
+    void kindsAndInterests_roundTrip_andAHiddenInterestIsRefused() throws SQLException {
         assertTrue(interests.getCatalog().categories().stream()
-            .flatMap(c -> c.interests().stream()).noneMatch(i -> i.key().equals("astrology")));
+            .flatMap(c -> c.interests().stream()).noneMatch(i -> i.key().equals("astrology") || i.key().equals("concerts")));
+        execute("INSERT INTO user_interests (user_id, interest_key) VALUES ('" + ANNA + "', 'astrology')");
         assertThrows(IllegalArgumentException.class,
             () -> interests.replaceSelection(ANNA, ANNA, new UserInterestsDto(List.of("stage"), List.of("astrology"))));
 
-        execute("INSERT INTO user_interests (user_id, interest_key) VALUES ('" + ANNA + "', 'astrology')");
-        interests.replaceSelection(ANNA, ANNA, new UserInterestsDto(List.of("cinema", "stage"), List.of("astrology", "jazz")));
+        interests.replaceSelection(ANNA, ANNA, new UserInterestsDto(List.of("cinema", "stage"), List.of("jazz")));
 
-        assertEquals(new UserInterestsDto(List.of("stage", "cinema"), List.of("astrology", "jazz")), interests.getSelection(ANNA, JAN));
+        assertEquals(new UserInterestsDto(List.of("stage", "cinema"), List.of("jazz")), interests.getSelection(ANNA, JAN));
         assertEquals(List.of("stage", "cinema"), users.getByIdForCaller(ANNA, ANNA).kinds());
     }
 
