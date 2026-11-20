@@ -50,7 +50,7 @@ paths:
                     followsYou: false
                     interests: [theatre, stand_up, jazz]
                     kinds: [stage, cinema]
-                    interestsSelected: true
+                    onboarded: true
                     shareStances: true
                     home: {name: Gdynia, coordinates: {latitude: 54.52, longitude: 18.54}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -460,7 +460,7 @@ components:
       description: UserProfile's fields, plus what only the caller sees.
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests, kinds, interestsSelected, shareStances]
+      required: [id, username, followersCount, followingCount, isFollowing, isBlocked, followsYou, interests, kinds, onboarded, shareStances]
       properties:
         id: {type: string, format: uuid}
         username: {type: string, maxLength: 32}
@@ -476,11 +476,11 @@ components:
         followsYou: {type: boolean, description: "Always false, as you can't follow yourself."}
         interests: {type: array, items: {type: string}}
         kinds: {type: array, items: {type: string}}
-        interestsSelected:
+        onboarded:
           type: boolean
           description: >
-            Whether the caller has a kind of event. False until onboarding is saved, and for accounts from before kinds,
-            which onboarding then asks again.
+            Whether the caller has picked their kinds of event. False until onboarding is saved, and for accounts from before
+            kinds, which onboarding then asks again.
         shareStances: {type: boolean, description: Whether friends (mutual follows) see the caller's Interesuje mnie and Biorę udział. True until turned off.}
         home: {$ref: '#/components/schemas/Home'}
     Home:

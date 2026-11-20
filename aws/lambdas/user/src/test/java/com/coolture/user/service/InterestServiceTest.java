@@ -30,7 +30,7 @@ class InterestServiceTest {
     private static final List<String> A_KIND = List.of("concerts");
 
     private final InterestRepository repository = mock(InterestRepository.class);
-    private final InterestService service = new InterestService(repository, 0, 3);
+    private final InterestService service = new InterestService(repository);
 
     @BeforeEach
     void catalogue() throws SQLException {
@@ -48,6 +48,10 @@ class InterestServiceTest {
                 new InterestEntity("rock", "music", "Rock", "Rock", true),
                 new InterestEntity("opera", "music", "Opera", "Opera", true),
                 new InterestEntity("hip_hop", "music", "Hip-hop", "Hip-hop", true),
+                new InterestEntity("blues", "music", "Blues", "Blues", true),
+                new InterestEntity("folk", "music", "Folk", "Folk", true),
+                new InterestEntity("punk", "music", "Punk", "Punk", true),
+                new InterestEntity("metal", "music", "Metal", "Metal", true),
                 new InterestEntity("astrology", "wellbeing", "Astrologia", "Astrology", false)
         ));
     }
@@ -56,10 +60,10 @@ class InterestServiceTest {
     void getCatalog_listsKinds_thenOfferedInterestsUnderCategoriesThatHaveAny() throws SQLException {
         InterestCatalogDto catalog = service.getCatalog();
 
-        assertEquals(List.of(1, 0, 3), List.of(catalog.minKinds(), catalog.minInterests(), catalog.maxInterests()));
+        assertEquals(List.of(1, 0, 6), List.of(catalog.minKinds(), catalog.minInterests(), catalog.maxInterests()));
         assertEquals(List.of("concerts", "stage"), catalog.kinds().stream().map(k -> k.key()).toList());
         assertEquals(List.of("music"), catalog.categories().stream().map(c -> c.key()).toList());
-        assertEquals(List.of("jazz", "rock", "opera", "hip_hop"),
+        assertEquals(List.of("jazz", "rock", "opera", "hip_hop", "blues", "folk", "punk", "metal"),
                 catalog.categories().getFirst().interests().stream().map(i -> i.key()).toList());
     }
 
@@ -104,7 +108,7 @@ class InterestServiceTest {
     @Test
     void replaceSelection_rejectsTooManyInterests() throws SQLException {
         assertThrows(IllegalArgumentException.class,
-                () -> service.replaceSelection(USER_ID, USER_ID, request(A_KIND, "jazz", "rock", "opera", "hip_hop")));
+                () -> service.replaceSelection(USER_ID, USER_ID, request(A_KIND, "jazz", "rock", "opera", "hip_hop", "blues", "folk", "punk")));
 
         verify(repository, never()).replaceSelection(any(), any(), any());
     }

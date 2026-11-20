@@ -479,7 +479,7 @@ class UserHandlerTest {
             assertEquals(200, response.getStatusCode());
             assertTrue(response.getBody().contains("\"username\":\"" + FAKE_USERNAME + "\""));
             assertTrue(response.getBody().contains("\"interests\":[\"theatre\",\"cinema\"]"));
-            assertTrue(response.getBody().contains("\"interestsSelected\":true"));
+            assertTrue(response.getBody().contains("\"onboarded\":true"));
         }
     }
 
@@ -499,7 +499,7 @@ class UserHandlerTest {
 
             assertEquals(200, response.getStatusCode());
             assertTrue(response.getBody().contains("\"kinds\":[]"));
-            assertTrue(response.getBody().contains("\"interestsSelected\":false"));
+            assertTrue(response.getBody().contains("\"onboarded\":false"));
         }
     }
 

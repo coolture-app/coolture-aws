@@ -20,25 +20,17 @@ import java.util.stream.Collectors;
 public class InterestService {
 
     private static final int MIN_KINDS = 1;
-    private static final int DEFAULT_MIN_INTERESTS = 0;
-    private static final int DEFAULT_MAX_INTERESTS = 6;
+    private static final int MIN_INTERESTS = 0;
+    private static final int MAX_INTERESTS = 6;
 
     private final InterestRepository repository;
-    private final int minInterests;
-    private final int maxInterests;
 
     public InterestService() {
-        this(
-                new InterestRepository(),
-                intFromEnv("INTERESTS_MIN_SELECTIONS", DEFAULT_MIN_INTERESTS),
-                intFromEnv("INTERESTS_MAX_SELECTIONS", DEFAULT_MAX_INTERESTS)
-        );
+        this(new InterestRepository());
     }
 
-    public InterestService(InterestRepository repository, int minInterests, int maxInterests) {
+    public InterestService(InterestRepository repository) {
         this.repository = repository;
-        this.minInterests = minInterests;
-        this.maxInterests = maxInterests;
     }
 
     public InterestCatalogDto getCatalog() throws SQLException {
@@ -60,7 +52,7 @@ public class InterestService {
                         category.labelEn(),
                         interestsByCategory.get(category.key())))
                 .toList();
-        return new InterestCatalogDto(MIN_KINDS, minInterests, maxInterests, kinds, categories);
+        return new InterestCatalogDto(MIN_KINDS, MIN_INTERESTS, MAX_INTERESTS, kinds, categories);
     }
 
     public UserInterestsDto getSelection(UUID targetId, UUID callerId) throws SQLException {
@@ -97,9 +89,9 @@ public class InterestService {
         if (!selectable.containsAll(interests)) {
             throw new IllegalArgumentException("Unknown interest");
         }
-        if (interests.size() < minInterests || interests.size() > maxInterests) {
+        if (interests.size() < MIN_INTERESTS || interests.size() > MAX_INTERESTS) {
             throw new IllegalArgumentException(
-                    "Select between " + minInterests + " and " + maxInterests + " interests");
+                    "Select between " + MIN_INTERESTS + " and " + MAX_INTERESTS + " interests");
         }
 
         repository.replaceSelection(targetId, kinds, interests);
@@ -110,10 +102,5 @@ public class InterestService {
         if (!targetId.equals(callerId)) {
             throw new SecurityException("You can only access your own interests");
         }
-    }
-
-    private static int intFromEnv(String name, int defaultValue) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? defaultValue : Integer.parseInt(value.trim());
     }
 }

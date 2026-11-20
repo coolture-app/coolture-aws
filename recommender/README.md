@@ -110,7 +110,7 @@ of it don't count towards the viewer's vector.
 
 `GET /dicts/interests` returns the kinds of event (`event_kinds`, V13), then the interests from V9 (`interest_categories`
 group `interests`) that are offered. `GET` and `PUT /users/{userId}/interests` read and replace the caller's kinds and
-interests together: at least 1 kind, and interests that are offered or already held. `/auth/me`'s `interestsSelected`
+interests together: at least 1 kind, and interests that are offered. `/auth/me`'s `onboarded`
 says whether the user has a kind, and the frontend blocks the page with onboarding until they have one. V9's interests,
 their texts, groups and vectors stay as the survey's respondents picked them; kinds are never rows of `interests`.
 
@@ -121,10 +121,6 @@ average post and the interests the average interest before they're blended, and 
 it's compared, so what every text shares doesn't decide the order (`UserVector` says why). Nothing is stored, so
 a reaction or a new pick counts from the next session, and every page of a session ranks with the same vector. The
 weights and the decay are in `FeedConfig`.
-
-| Setting | Default | Where | Meaning |
-|---|---|---|---|
-| `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 0, 6 | `aws/backend.yaml` | Interest limits, also sent to the frontend. At least 1 kind is fixed in `InterestService` |
 
 ## Personalised PageRank
 

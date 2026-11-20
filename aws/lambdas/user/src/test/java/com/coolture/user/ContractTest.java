@@ -253,7 +253,7 @@ class ContractTest {
     @Test
     void anUndocumentedField_failsTheCheck() {
         String extraOnMe = "{\"id\":\"" + CALLER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interests\":[],\"kinds\":[],\"interestsSelected\":true,\"email\":\"jan@example.com\"}";
+            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interests\":[],\"kinds\":[],\"onboarded\":true,\"email\":\"jan@example.com\"}";
         String homeOnAPublicProfile = "{\"id\":\"" + OTHER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
             + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"interests\":[],\"home\":{\"name\":\"Gdynia\",\"coordinates\":{\"latitude\":54.5,\"longitude\":18.5}}}";
 
@@ -266,7 +266,7 @@ class ContractTest {
     @Test
     void meWithoutInterests_failsTheCheck() {
         String withoutInterests = "{\"id\":\"" + CALLER + "\",\"username\":\"jan\",\"followersCount\":0,\"followingCount\":0,"
-            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"kinds\":[],\"interestsSelected\":false,\"shareStances\":true}";
+            + "\"isFollowing\":false,\"isBlocked\":false,\"followsYou\":false,\"kinds\":[],\"onboarded\":false,\"shareStances\":true}";
 
         assertTrue(VALIDATOR.validateResponse("/auth/me", Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(withoutInterests).build()).hasErrors());
