@@ -9,7 +9,7 @@ in [`../migrations/`](../migrations/). How the feed uses the vectors is in `post
 
 | Path | What it does |
 |---|---|
-| `post-embedding/` | Container image: embeds a post's title, description, venue and city, and interests, with `mmlw-roberta-base` |
+| `post-embedding/` | Container image: embeds a post's title, description, venue and city, interests and kinds of event, with `mmlw-roberta-base`, and derives each post's kinds into `rec_post_kinds` |
 | `ppr/` | Zip function: personalised PageRank for every user, into `rec_ppr_scores` |
 | `template.yaml` | Both functions' stack, `coolture-embeddings-<env>`, deployed, rebuilt or removed on its own |
 
@@ -32,14 +32,21 @@ post-write (create, or a change to title or description)
   when it runs, so duplicated or late events still embed the latest text. Deleted posts and `s3:TestEvent` are skipped.
   Request objects expire after a day.
 - `{"action":"embed-interests"}` to `PostEmbeddingFunction` embeds every interest with no vector, or whose
-  `embedding_text` or model changed. `scripts/deploy.sh` sends it after deploying this stack.
+  `embedding_text` or model changed, and every kind of event the same way (a kind's vector is the normalised mean of its
+  `embedding_texts`, in `event_kind_embeddings`). When a kind changed, it re-derives every post's kinds.
+  `{"action":"derive-kinds"}` re-derives them all from the stored post vectors. `scripts/deploy.sh` sends both after
+  deploying this stack.
+- **Kinds of event.** After storing a post's vector the worker writes its kinds to `rec_post_kinds`, best first: the
+  closest kind, plus the second within a margin, with Dla dzieci kept or added only when close enough to the best other
+  kind (`post-embedding/src/kinds.py`; constants in `settings.py`). Until every kind has a vector, posts get none.
 - Building `PostEmbeddingFunction` needs Docker: it's a container image with CPU-only torch and the model baked in.
 
 **Locally** there are no S3 notifications or SQS triggers, and `post-write` skips the publish. `make seed` embeds
-interests, then posts. One at a time:
+interests and kinds, then posts, then derives kinds. One at a time:
 
 ```bash
-make embed-interests                 # interests with no vector, or a changed text or model
+make embed-interests                 # interests and kinds with no vector, or a changed text or model
+make derive-kinds                    # every post's kinds, from its stored vector
 make embed-posts                     # posts with no vector, another model's, or edited since
 make embed-posts POST_ID=<uuid>      # one post
 make embed-posts ALL=1               # every post that isn't deleted
@@ -62,10 +69,12 @@ vector.
 2. Re-embed interests, then posts.
 3. Measure `AFFINITY_LOW` and `AFFINITY_HIGH` in `FeedConfig` again. They cover the cosines this model gives between
    the viewer's vector and posts once the average post and the average interest are taken out (`UserVector`), so they
-   belong to the model. So does `NOT_FOR_ME_FROM`, the p95 cosine between two posts with the average post taken out.
+   belong to the model. So does `NOT_FOR_ME_FROM`, the p95 cosine between two posts with the average post taken out,
+   and the kinds' margin and Dla dzieci's threshold in `post-embedding/src/settings.py`.
 
 A new model name is what marks a vector as old. A new revision, or a change to how text is encoded, isn't visible that
-way: locally, clear `interest_embeddings` and run `make embed-posts ALL=1`. There's no equivalent on AWS yet.
+way: locally, clear `interest_embeddings` and `event_kind_embeddings` and run `make embed-interests`, then
+`make embed-posts ALL=1`. There's no equivalent on AWS yet.
 
 Locally: `make build-embeddings embed-interests embed-posts`. On AWS (untested: none of this has run on AWS yet; replace
 `dev` for another environment):
@@ -100,13 +109,15 @@ of it don't count towards the viewer's vector.
 
 ## Interests and user vectors
 
-`GET /dicts/interests` returns the catalogue from migration V9 (`interest_categories` group `interests`), and `GET` and
-`PUT /users/{userId}/interests` read and replace the caller's picks. `/auth/me` returns `interestsSelected`, and the
-frontend blocks the page with the interest picker until a user has some.
+`GET /dicts/interests` returns the kinds of event (`event_kinds`, V21), then the interests from V9 (`interest_categories`
+group `interests`) that are offered. `GET` and `PUT /users/{userId}/interests` read and replace the caller's kinds and
+interests together: at least 1 kind, and interests that are offered or already held. `/auth/me`'s `interestsSelected`
+says whether the user has a kind, and the frontend blocks the page with onboarding until they have one. V9's interests,
+their texts, groups and vectors stay as the survey's respondents picked them; kinds are never rows of `interests`.
 
 The feed builds the viewer's vector on every page, in `post-read` (`FeedRepository.findVectorParts`, then `UserVector`):
 the posts they liked, are interested in or going to, up to the session's `asOf`, blended with their picks, each pick with
-a share of its category's average. Interests give way as the viewer engages more, down to a floor. The stances lose the
+a share of its category's average, and each picked kind's vector at the weight of a pick. Interests give way as the viewer engages more, down to a floor. The stances lose the
 average post and the interests the average interest before they're blended, and each post loses the average post before
 it's compared, so what every text shares doesn't decide the order (`UserVector` says why). Nothing is stored, so
 a reaction or a new pick counts from the next session, and every page of a session ranks with the same vector. The
@@ -114,7 +125,7 @@ weights and the decay are in `FeedConfig`.
 
 | Setting | Default | Where | Meaning |
 |---|---|---|---|
-| `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 3, 6 | `aws/backend.yaml` | Selection limits, also sent to the frontend |
+| `INTERESTS_MIN_SELECTIONS`, `INTERESTS_MAX_SELECTIONS` | 0, 6 | `aws/backend.yaml` | Interest limits, also sent to the frontend. At least 1 kind is fixed in `InterestService` |
 
 ## Personalised PageRank
 
