@@ -89,7 +89,7 @@ public class FeedRepository {
      * gets the same vector. Each fades with its age in whole days by asOf, half every STANCE_HALF_LIFE_DAYS: summed per
      * day first, then each day's sum weighed once, so a stance type comes back as one row; past STANCE_MAX_AGE_DAYS
      * they'd weigh next to nothing and are left out. Interests have no time and count as they are. Each row is a part: a stance, with the sum of its fading
-     * weights as the amount, the picked interests, one category picked from with all of its interests, or the average of
+     * weights as the amount, the picked interests, the picked kinds, one category picked from with all of its interests, or the average of
      * every interest or every post. The post average counts posts created up to asOf, ended and deleted ones too, so
      * nothing done during a session moves it.
      */
@@ -121,6 +121,12 @@ public class FeedRepository {
         GROUP BY type
         UNION ALL
         SELECT 'INTERESTS', sum(embedding)::real[], count(*) FROM picks HAVING count(*) > 0
+        UNION ALL
+        SELECT 'KINDS', sum(ke.embedding)::real[], count(*)
+        FROM user_kinds uk
+        JOIN event_kind_embeddings ke ON ke.kind_key = uk.kind_key AND ke.model = ?
+        WHERE uk.user_id = ?::uuid
+        HAVING count(*) > 0
         UNION ALL
         SELECT 'CATEGORY', sum(ie.embedding)::real[], max(chosen.picks)
         FROM (SELECT category_key, count(*) AS picks FROM picks GROUP BY category_key) chosen
@@ -173,10 +179,11 @@ public class FeedRepository {
         List<UserVector.Stance> stances = new ArrayList<>();
         List<UserVector.Category> categories = new ArrayList<>();
         double[] interests = null;
+        double[] kinds = null;
         double[] interestAverage = null;
         double[] postAverage = null;
         if (viewer == null) {
-            return new UserVector.Parts(stances, null, categories, null, null);
+            return new UserVector.Parts(stances, null, null, categories, null, null);
         }
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -196,6 +203,8 @@ public class FeedRepository {
                 .bindString(model)
                 .bindUUID(viewer)
                 .bindString(model)
+                .bindUUID(viewer)
+                .bindString(model)
                 .bindString(model)
                 .bindString(model)
                 .bindTimestamp(asOf);
@@ -207,6 +216,7 @@ public class FeedRepository {
                     double amount = rs.getDouble("amount");
                     switch (part) {
                         case "INTERESTS" -> interests = total;
+                        case "KINDS" -> kinds = total;
                         case "CATEGORY" -> categories.add(new UserVector.Category(total, (int) amount));
                         case "INTEREST_AVERAGE" -> interestAverage = total;
                         case "POST_AVERAGE" -> postAverage = total;
@@ -215,7 +225,7 @@ public class FeedRepository {
                 }
             }
         }
-        return new UserVector.Parts(stances, interests, categories, interestAverage, postAverage);
+        return new UserVector.Parts(stances, interests, kinds, categories, interestAverage, postAverage);
     }
 
     private static double[] doubles(Array array) throws SQLException {

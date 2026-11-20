@@ -24,11 +24,12 @@ public final class UserVector {
     public record Category(double[] sum, int picks) {}
 
     /**
-     * What the database adds up for one viewer. {@code interests} is null when they picked none with a vector. The
-     * averages are over every interest and every post of the model, null when there are none.
+     * What the database adds up for one viewer. {@code interests} and {@code kinds} are the sums of the picked ones'
+     * vectors, null when they picked none with a vector. The averages are over every interest and every post of the
+     * model, null when there are none. Kinds stay out of the interest average, which is the survey's.
      */
-    public record Parts(List<Stance> stances, double[] interests, List<Category> categories, double[] interestAverage,
-                        double[] postAverage) {}
+    public record Parts(List<Stance> stances, double[] interests, double[] kinds, List<Category> categories,
+                        double[] interestAverage, double[] postAverage) {}
 
     private static final double ZERO = 1e-9;
 
@@ -46,6 +47,7 @@ public final class UserVector {
         behaviour = centred(normalized(behaviour), parts.postAverage());
 
         double[] interests = scaled(parts.interests(), 1);
+        interests = addScaled(interests, parts.kinds(), FeedConfig.KIND_WEIGHT);
         for (Category category : parts.categories()) {
             double[] average = normalized(category.sum());
             if (average != null) {

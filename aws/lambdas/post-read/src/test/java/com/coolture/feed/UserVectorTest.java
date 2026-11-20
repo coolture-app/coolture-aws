@@ -19,11 +19,11 @@ class UserVectorTest {
     }
 
     private static UserVector.Parts stances(UserVector.Stance... stances) {
-        return new UserVector.Parts(List.of(stances), null, List.of(), null, null);
+        return new UserVector.Parts(List.of(stances), null, null, List.of(), null, null);
     }
 
     private static UserVector.Parts withInterests(double[] interests, UserVector.Stance... stances) {
-        return new UserVector.Parts(List.of(stances), interests, List.of(), null, null);
+        return new UserVector.Parts(List.of(stances), interests, null, List.of(), null, null);
     }
 
     @Test
@@ -49,11 +49,30 @@ class UserVectorTest {
     @Test
     void blend_addsTheCategoryAverageToEachPick_atALowerWeight() {
         double[] music = {1, 1};
-        UserVector.Parts parts = new UserVector.Parts(List.of(), A, List.of(new UserVector.Category(music, 1)), null, null);
+        UserVector.Parts parts = new UserVector.Parts(List.of(), A, null, List.of(new UserVector.Category(music, 1)), null, null);
 
         double[] expected = {1 + 0.25 / Math.sqrt(2), 0.25 / Math.sqrt(2)};
         double norm = Math.hypot(expected[0], expected[1]);
         assertArrayEquals(new double[]{expected[0] / norm, expected[1] / norm}, UserVector.blend(parts), 1e-12);
+    }
+
+    @Test
+    void blend_addsPickedKindsToTheInterests_atTheSameWeight_beforeCentring() {
+        double[] kind = {0, 1};
+        double[] average = {0, 0.5};
+        UserVector.Parts parts = new UserVector.Parts(List.of(), A, kind, List.of(), average, null);
+
+        double[] expected = {1 / Math.sqrt(2), 1 / Math.sqrt(2) - 0.5};
+        double norm = Math.hypot(expected[0], expected[1]);
+        assertArrayEquals(new double[]{expected[0] / norm, expected[1] / norm}, UserVector.blend(parts), 1e-12);
+    }
+
+    @Test
+    void blend_usesKindsAlone_whenNoInterestIsPicked() {
+        double[] kind = {0, 2};
+        UserVector.Parts parts = new UserVector.Parts(List.of(), null, kind, List.of(), null, null);
+
+        assertArrayEquals(new double[]{0, 1}, UserVector.blend(parts), 1e-12);
     }
 
     @Test
@@ -100,14 +119,14 @@ class UserVectorTest {
 
     @Test
     void blend_takesThePostAverageOutOfTheStances() {
-        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", LIKED, 1)), null, List.of(), SHARED, SHARED);
+        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", LIKED, 1)), null, null, List.of(), SHARED, SHARED);
 
         assertArrayEquals(X, UserVector.blend(parts), 1e-12);
     }
 
     @Test
     void blend_takesTheInterestAverageOutOfTheInterests() {
-        UserVector.Parts parts = new UserVector.Parts(List.of(), PICKED, List.of(), SHARED, SHARED);
+        UserVector.Parts parts = new UserVector.Parts(List.of(), PICKED, null, List.of(), SHARED, SHARED);
 
         assertArrayEquals(Z, UserVector.blend(parts), 1e-12);
     }
@@ -116,7 +135,7 @@ class UserVectorTest {
     void blend_blendsWhatIsLeftOfEachPart_eachWithItsOwnAverage() {
         double[] liked = {1, 0, 1};
         double[] postAverage = {0, 0, Math.sqrt(0.5)};
-        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", liked, 100)), PICKED, List.of(),
+        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", liked, 100)), PICKED, null, List.of(),
             SHARED, postAverage);
 
         double share = FeedConfig.INTEREST_SHARE_MIN;
@@ -127,7 +146,7 @@ class UserVectorTest {
     @Test
     void blend_aPartThatIsOnlyTheAverage_saysNothing() {
         double[] average = {Math.sqrt(0.5), Math.sqrt(0.5), 0};
-        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", LIKED, 100)), Z, List.of(), null, average);
+        UserVector.Parts parts = new UserVector.Parts(List.of(stance("LIKE", LIKED, 100)), Z, null, List.of(), null, average);
 
         assertArrayEquals(Z, UserVector.blend(parts), 1e-12);
     }
