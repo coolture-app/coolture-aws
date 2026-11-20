@@ -13,6 +13,15 @@ def test_should_keep_the_best_kind_and_the_second_within_the_margin(scores, expe
 
 
 @pytest.mark.parametrize("scores, expected", [
+    ({"kids": 0.82, "concerts": 0.80, "stage": 0.70}, ["kids", "concerts"]),
+    ({"kids": 0.82, "stage": 0.70}, ["kids", "stage"]),
+    ({"kids": 0.82}, ["kids"]),
+], ids=["far ahead of the best format", "any best format", "no other kind"])
+def test_should_give_dla_dzieci_its_best_format_when_it_stands_alone(scores, expected):
+    assert kinds.derive(scores) == expected
+
+
+@pytest.mark.parametrize("scores, expected", [
     ({"kids": 0.805, "concerts": 0.80, "stage": 0.70}, ["kids", "concerts"]),
     ({"concerts": 0.80, "kids": 0.795, "stage": 0.70}, ["concerts"]),
     ({"concerts": 0.80, "stage": 0.799, "kids": 0.7985}, ["concerts", "stage", "kids"]),
