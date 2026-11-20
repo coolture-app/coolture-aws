@@ -43,6 +43,19 @@ FROM (VALUES
 ) AS picks (user_id, interest_key)
 WHERE NOT EXISTS (SELECT 1 FROM user_interests ui WHERE ui.user_id = picks.user_id::uuid);
 
+INSERT INTO user_kinds (user_id, kind_key)
+SELECT picks.user_id::uuid, picks.kind_key
+FROM (VALUES
+    ('00000000-0000-0000-0000-000000000002', 'concerts'),
+    ('00000000-0000-0000-0000-000000000002', 'nightlife'),
+    ('00000000-0000-0000-0000-000000000003', 'stage'),
+    ('00000000-0000-0000-0000-000000000003', 'cinema'),
+    ('00000000-0000-0000-0000-000000000004', 'exhibitions'),
+    ('00000000-0000-0000-0000-000000000004', 'sports'),
+    ('00000000-0000-0000-0000-000000000004', 'food')
+) AS picks(user_id, kind_key)
+WHERE NOT EXISTS (SELECT 1 FROM user_kinds uk WHERE uk.user_id = picks.user_id::uuid);
+
 -- Anna and Jan follow each other, so they're friends and see each other's stances. Ola and Jan follow one way.
 INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES
     ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003', 'FOLLOW'),
