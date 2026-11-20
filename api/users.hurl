@@ -107,11 +107,36 @@ HTTP *
 [Asserts]
 status < 300
 
-# The interest catalogue, and a user's picks. PUT replaces the whole selection (3 to 6 interests).
+# The catalogue: kinds of event, then interests by category. Interests with no event behind them are hidden.
 GET {{api}}/dicts/interests
 HTTP 200
 [Asserts]
+jsonpath "$.kinds" count == 15
+jsonpath "$.minKinds" == 1
 jsonpath "$.categories" count > 0
+jsonpath "$.categories[*].interests[*].key" not contains "astrology"
+
+# PUT replaces both: at least 1 kind, and 0 to 6 interests. This sends Anna's seed picks back.
+PUT {{api}}/users/{{anna}}/interests
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "kinds": ["concerts", "nightlife"], "interests": ["concerts", "indie", "electronic", "clubbing", "parties"] }
+HTTP 200
+[Asserts]
+jsonpath "$.kinds" count == 2
+
+PUT {{api}}/users/{{anna}}/interests
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "kinds": [], "interests": ["concerts"] }
+HTTP 400
+
+# A hidden interest is refused from someone who doesn't hold it already.
+PUT {{api}}/users/{{anna}}/interests
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "kinds": ["concerts"], "interests": ["astrology"] }
+HTTP 400
 
 # Anyone signed in can read someone's picks, for their profile. A guest can't.
 GET {{api}}/users/{{anna}}/interests
@@ -120,6 +145,7 @@ X-User-Name: jan_demo
 HTTP 200
 [Asserts]
 jsonpath "$.interests" contains "concerts"
+jsonpath "$.kinds" contains "nightlife"
 
 GET {{api}}/users/{{anna}}/interests
 X-Anonymous: true
