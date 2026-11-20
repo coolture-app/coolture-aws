@@ -43,7 +43,7 @@ INSERT INTO users (id, username, first_name, last_name, share_stances) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Each demo account is a persona, so a feed can be tried for a taste: Anna indie and clubs, Jan theatre and arthouse
--- film, Ola galleries, running and food, Kasia rock, Piotr classical music and opera, Ewa a parent (children's
+-- film, Ola galleries, running and food, Kasia rock and jazz, Piotr classical music and opera, Ewa a parent (children's
 -- workshops, fairs), Tomek games and sci-fi, Zofia history talks and walks, Marek tech talks and causes, Magda dancing
 -- and nightlife, Bartek kinds only (sport, outdoors), Iza yoga and crafts. Together they cover every kind. local_dev has
 -- none, for onboarding. Only offered topics, at most 6. Each set goes in only for a user with none yet, so a choice made
@@ -68,6 +68,7 @@ FROM (VALUES
     ('00000000-0000-0000-0000-000000000005', 'rock'),
     ('00000000-0000-0000-0000-000000000005', 'metal'),
     ('00000000-0000-0000-0000-000000000005', 'craft_beer'),
+    ('00000000-0000-0000-0000-000000000005', 'jazz'),
     ('00000000-0000-0000-0000-000000000006', 'classical_music'),
     ('00000000-0000-0000-0000-000000000006', 'opera'),
     ('00000000-0000-0000-0000-000000000006', 'ballet'),
