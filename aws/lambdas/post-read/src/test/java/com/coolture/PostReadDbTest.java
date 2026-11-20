@@ -394,6 +394,10 @@ class PostReadDbTest {
             PostMarkDto mark = postRepository.findPostMarks(ofKinds(null, false), AROUND_THE_FIXTURES, ME, false).stream()
                 .filter(m -> m.id().equals(onTheMap)).findFirst().orElseThrow();
             assertEquals("exhibitions", mark.kind());
+            assertEquals(List.of("exhibitions", "talks"), mark.kinds());
+            PostMarkDto foundAsTalk = postRepository.findPostMarks(ofKinds(List.of("concerts", "talks"), false), AROUND_THE_FIXTURES, ME, false)
+                .stream().filter(m -> m.id().equals(onTheMap)).findFirst().orElseThrow();
+            assertEquals("talks", foundAsTalk.kind(), "a filtered pin names the kind it was found by");
 
             assertEquals(List.of("kids", "concerts"), postRepository.findById(kidsConcert, ME).orElseThrow().kinds());
             assertNull(postRepository.findById(postTitled("by_followed"), ME).orElseThrow().kinds(), "not derived yet");

@@ -377,7 +377,11 @@ components:
         coordinates: {$ref: '#/components/schemas/GeoPoint'}
         venueName: {type: string}
         city: {type: string}
-        kind: {type: string, description: "The post's first kind of event, for the pin's icon. Left out until derived."}
+        kind: {type: string, description: "The kind the pin names: the first of the post's kinds among those asked for in `kinds`, else its first. Left out until derived."}
+        kinds:
+          type: array
+          description: Every kind of event the post has, best first. Left out until derived.
+          items: {type: string}
         myReaction: {$ref: '#/components/schemas/ReactionType'}
         myParticipation: {$ref: '#/components/schemas/ParticipationType'}
         friendStances: {$ref: '#/components/schemas/FriendStances'}

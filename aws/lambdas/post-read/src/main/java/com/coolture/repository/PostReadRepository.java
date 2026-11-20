@@ -230,8 +230,10 @@ public class PostReadRepository {
                    ST_X(el.coordinates::geometry) AS longitude,
                    cover_m.object_key AS cover_url,
                    el.venue_name, el.city,
+                   """ + PostKinds.SHOWN + """
+                   AS kind,
                    """ + PostKinds.OF_POST + """
-                   [1] AS kind,
+                   AS kinds,
                    pr_my.type AS my_reaction,
                    pp_my.type AS my_participation
             FROM posts p
@@ -260,7 +262,8 @@ public class PostReadRepository {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            ParamBinder b = new ParamBinder(stmt, conn);
+            ParamBinder b = new ParamBinder(stmt, conn)
+                .bindVarcharArray(f.kinds() == null ? null : f.kinds().toArray(new String[0]));
 
             // The viewer's own reaction and stance
             b.bindNullableUUID(callerId)
@@ -305,6 +308,7 @@ public class PostReadRepository {
                         rs.getString("venue_name"),
                         rs.getString("city"),
                         rs.getString("kind"),
+                        mapStringList(rs, "kinds"),
                         mapMyReaction(rs),
                         mapMyParticipation(rs),
                         null

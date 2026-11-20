@@ -5,6 +5,7 @@ import com.coolture.common.dto.enums.ReactionType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -24,8 +25,10 @@ public record PostMarkDto(
     GeoPointDto coordinates,
     String venueName,
     String city,
-    /** The post's first kind of event, for the pin's icon. Null until derived. */
+    /** The kind the pin names, {@link com.coolture.common.db.PostKinds#SHOWN}. Null until derived. */
     String kind,
+    /** Every kind, best first, for the preview's words. Null until derived. */
+    List<String> kinds,
     /** The viewer's own, so the preview's buttons show it with no request. Null for a guest. */
     ReactionType myReaction,
     ParticipationType myParticipation,
@@ -33,6 +36,6 @@ public record PostMarkDto(
 ) {
     public PostMarkDto withFriendStances(FriendStancesDto stances) {
         return new PostMarkDto(id, title, startsAt, endsAt, openEnded, coverMediaUrl, excerpt, positiveReactionCount, interestedCount,
-            goingCount, coordinates, venueName, city, kind, myReaction, myParticipation, stances);
+            goingCount, coordinates, venueName, city, kind, kinds, myReaction, myParticipation, stances);
     }
 }
