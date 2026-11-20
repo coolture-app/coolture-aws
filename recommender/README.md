@@ -33,9 +33,8 @@ post-write (create, or a change to title or description)
   Request objects expire after a day.
 - `{"action":"embed-interests"}` to `PostEmbeddingFunction` embeds every interest with no vector, or whose
   `embedding_text` or model changed, and every kind of event the same way (a kind's vector is the normalised mean of its
-  `embedding_texts`, in `event_kind_embeddings`). When a kind changed, it re-derives every post's kinds.
-  `{"action":"derive-kinds"}` re-derives them all from the stored post vectors. `scripts/deploy.sh` sends both after
-  deploying this stack.
+  `embedding_texts`, in `event_kind_embeddings`). `{"action":"derive-kinds"}` re-derives every post's kinds from the
+  stored post vectors, so a changed kind text takes both. `scripts/deploy.sh` sends both after deploying this stack.
 - **Kinds of event.** After storing a post's vector the worker writes its kinds to `rec_post_kinds`, best first: the
   closest kind, plus the second within a margin, with Dla dzieci kept or added only when close enough to the best other
   kind (`post-embedding/src/kinds.py`; constants in `settings.py`). Until every kind has a vector, posts get none.
@@ -46,7 +45,7 @@ interests and kinds, then posts, then derives kinds. One at a time:
 
 ```bash
 make embed-interests                 # interests and kinds with no vector, or a changed text or model
-make derive-kinds                    # every post's kinds, from its stored vector
+make derive-kinds                    # every post's kinds, from its stored vector (after a kind's text changed)
 make embed-posts                     # posts with no vector, another model's, or edited since
 make embed-posts POST_ID=<uuid>      # one post
 make embed-posts ALL=1               # every post that isn't deleted

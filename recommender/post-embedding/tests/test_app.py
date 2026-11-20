@@ -249,11 +249,11 @@ def test_should_use_default_database_address_when_it_is_empty(monkeypatch):
     assert (settings.db_host, settings.db_port) == ("host.docker.internal", 5430)
 
 
-def test_should_embed_changed_kinds_as_their_texts_mean_and_rederive_every_post(model, monkeypatch):
+def test_should_embed_changed_kinds_as_their_texts_mean(model, monkeypatch):
     # given
     conn = MagicMock()
     texts = ["Koncert w klubie", "Recital"]
-    conn.execute.return_value.fetchall.side_effect = [[], [("concerts", texts)], KIND_ROWS, [(POST_ID, EMBEDDING)]]
+    conn.execute.return_value.fetchall.side_effect = [[], [("concerts", texts)]]
     model.encode.return_value = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
     monkeypatch.setattr(app, "_get_connection", lambda: conn)
 
@@ -261,13 +261,10 @@ def test_should_embed_changed_kinds_as_their_texts_mean_and_rederive_every_post(
     result = app.lambda_handler({"action": "embed-interests"}, None)
 
     # then
-    assert result == {"interests": 0, "kinds": 1, "posts": 1}
+    assert result == {"interests": 0, "kinds": 1}
     assert model.encode.call_args_list == [call(texts, normalize_embeddings=True)]
     stored = conn.execute.call_args_list[2].args[1]
     assert (stored[0], np.round(stored[1], 6).tolist(), stored[2:]) == ("concerts", [0.707107, 0.707107, 0.0], (MODEL, texts))
-    assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
-        call(ANY, [(POST_ID, ["stage"], MODEL)]),
-    ]
 
 
 def test_should_rederive_every_post_and_drop_other_models_kinds_when_invoked_with_derive_kinds(monkeypatch):

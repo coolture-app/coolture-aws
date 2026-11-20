@@ -240,10 +240,7 @@ def embed_interests(conn: psycopg.Connection) -> int:
 def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     if event.get("action") == EMBED_INTERESTS_ACTION:
         conn = _get_connection()
-        result = {"interests": embed_interests(conn), "kinds": embed_kinds(conn)}
-        if result["kinds"]:
-            result["posts"] = derive_all_kinds(conn)
-        return result
+        return {"interests": embed_interests(conn), "kinds": embed_kinds(conn)}
     if event.get("action") == DERIVE_KINDS_ACTION:
         return {"posts": derive_all_kinds(_get_connection())}
 
