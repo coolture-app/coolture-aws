@@ -44,7 +44,7 @@ public final class PostFilterSql {
          @> ARRAY[?::varchar])""";
 
     public static void bind(ParamBinder b, PostFeedFilters f, UUID viewer) throws SQLException {
-        TextSearch.bind(b, TextSearch.words(f.q(), true));
+        TextSearch.bindWithWordForms(b, f.q());
 
         b.bindUUIDFilterPair(f.authorId());
         b.bindStringFilterPair(f.status() != null ? f.status().name() : null);

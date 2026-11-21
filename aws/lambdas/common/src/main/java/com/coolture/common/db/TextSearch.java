@@ -17,32 +17,41 @@ public final class TextSearch {
     private static final List<String> ENDINGS = List.of(
         "owie", "ach", "ami", "ych", "ymi", "ego", "emu", "owi", "om", "em", "ie", "ej", "ow", "u", "y", "i", "a", "e", "o");
 
-    /** Each word scans the fields once, so a pasted paragraph can't make the query arbitrarily slow. */
+    /** Each word is one more scan of the folded text, so a pasted paragraph can't make the query arbitrarily slow. */
     static final int MAX_WORDS = 8;
 
     private TextSearch() {}
 
     /**
-     * Whether every word bound with {@link #bind} appears in one of {@code fields}; true when there are none. The
-     * newline between the fields keeps a word from spanning two of them. The words are folded again here so both sides
-     * fold by the same rules: Java folds them only to find the ending.
+     * Whether every word bound with {@link #bind} or {@link #bindWithWordForms} appears in one of {@code fields}; true
+     * when there are none. The newline between the fields keeps a word from spanning two of them. The words are folded
+     * again here so both sides fold by the same rules: Java folds them only to find the ending. {@code ARRAY(...)}
+     * builds the patterns once per query, where {@code ALL (SELECT ...)} would build them again for every row.
      */
     public static String matchesAll(String... fields) {
-        return "(?::varchar[] IS NULL OR NOT EXISTS (SELECT 1 FROM unnest(?::varchar[]) w(word)"
-            + " WHERE unaccent(lower(concat_ws(chr(10), " + String.join(", ", fields) + ")))"
-            + " NOT LIKE '%' || unaccent(lower(w.word)) || '%'))";
+        return "(?::varchar[] IS NULL OR unaccent(lower(concat_ws(chr(10), " + String.join(", ", fields) + ")))"
+            + " LIKE ALL (ARRAY(SELECT '%' || unaccent(lower(w)) || '%' FROM unnest(?::varchar[]) w)))";
     }
 
-    public static ParamBinder bind(ParamBinder b, String[] words) throws SQLException {
+    public static ParamBinder bind(ParamBinder b, String q) throws SQLException {
+        return bindWords(b, words(q, false));
+    }
+
+    public static ParamBinder bindWithWordForms(ParamBinder b, String q) throws SQLException {
+        return bindWords(b, words(q, true));
+    }
+
+    private static ParamBinder bindWords(ParamBinder b, String[] words) throws SQLException {
         return b.bindVarcharArray(words).bindVarcharArray(words);
     }
 
     /** The query's words, folded and escaped for {@code LIKE}, or null when it has none. */
-    public static String[] words(String q, boolean wordForms) {
+    static String[] words(String q, boolean wordForms) {
         if (q == null || q.isBlank()) {
             return null;
         }
-        return Arrays.stream(q.strip().split("\\s+"))
+        // (?U) makes \s take a no-break space too, which phone keyboards type.
+        return Arrays.stream(q.strip().split("(?U)\\s+"))
             .limit(MAX_WORDS)
             .map(TextSearch::fold)
             .map(word -> wordForms ? stripEnding(word) : word)

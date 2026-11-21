@@ -266,7 +266,7 @@ public class UserRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn).bindNullableUUID(callerId);
-            TextSearch.bind(b, TextSearch.words(q, false));
+            TextSearch.bind(b, q);
             Blocks.bindViewer(b, callerId)
                 .bindCursorParams(cursorCreatedAt, cursorId)
                 .bindInt(limit);

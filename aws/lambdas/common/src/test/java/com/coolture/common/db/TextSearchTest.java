@@ -12,7 +12,7 @@ class TextSearchTest {
 
     @Test
     void words_splitOnAnySpace_foldAndKeepHyphens() {
-        assertArrayEquals(new String[] {"spiew", "lodz", "stand-up"}, TextSearch.words("  Śpiew\tŁÓDŹ  stand-up ", false));
+        assertArrayEquals(new String[] {"spiew", "lodz", "stand-up"}, TextSearch.words("  Śpiew\tŁÓDŹ  stand-up ", false));
     }
 
     @Test
