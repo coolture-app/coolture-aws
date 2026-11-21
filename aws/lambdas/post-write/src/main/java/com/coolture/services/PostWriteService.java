@@ -49,9 +49,8 @@ public class PostWriteService {
         validateMedia(req.mediaIds(), req.coverMediaId());
 
         requireEventPhotos(repository.validateMediaOwnership(authorId, req.mediaIds()));
-        CreatePostRequest withLinks = req.withLinks(normalized(req.links()));
-        PostDetailDto created = repository.createPost(authorId, req.coverMediaId() == null ? withLinks
-            : withLinks.withMediaIds(coverFirst(req.mediaIds(), req.coverMediaId())));
+        PostDetailDto created = repository.createPost(authorId,
+            req.coverMediaId() == null ? req : req.withMediaIds(coverFirst(req.mediaIds(), req.coverMediaId())));
         embeddingPublisher.requestPost(created.id());
         return created;
     }
@@ -89,7 +88,7 @@ public class PostWriteService {
         String newEventUrl = req.eventUrl() != null ? req.eventUrl()
             : removed.contains("eventUrl") ? null
             : existing.eventUrl();
-        List<PostLinkDto> newLinks = req.links() != null ? normalized(req.links())
+        List<PostLinkDto> newLinks = req.links() != null ? req.links()
             : removed.contains("links") ? List.of()
             : existing.links();
         Instant newStartsAt = req.startsAt() != null ? req.startsAt() : existing.startsAt();
@@ -113,10 +112,6 @@ public class PostWriteService {
         // Every edit, so which fields make up the embedded text stays only in the worker's PostContent.
         embeddingPublisher.requestPost(updated.id());
         return updated;
-    }
-
-    private static List<PostLinkDto> normalized(List<PostLinkDto> links) {
-        return links == null ? null : links.stream().map(PostLinkDto::normalized).toList();
     }
 
     public void deletePost(UUID postId, UUID callerId) throws SQLException {

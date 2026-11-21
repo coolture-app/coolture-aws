@@ -17,8 +17,7 @@ public record PostLinkDto(
     String label
 ) {
     /** A blank label is no label. */
-    public PostLinkDto normalized() {
-        String trimmed = label == null ? null : label.strip();
-        return new PostLinkDto(url, trimmed == null || trimmed.isEmpty() ? null : trimmed);
+    public PostLinkDto {
+        label = label == null || label.isBlank() ? null : label.strip();
     }
 }

@@ -6,6 +6,7 @@ import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.StanceCounts;
+import com.coolture.common.json.JsonUtils;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
@@ -16,7 +17,6 @@ import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
-import com.coolture.common.json.JsonUtils;
 
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.ReactionType;
@@ -190,9 +190,7 @@ public class PostWriteRepository {
                 return created;
             } catch (SQLException e) {
                 conn.rollback();
-                if (isDuplicateEvent(e)) {
-                    throw new DuplicateEventException(e);
-                }
+                refuseDuplicateEvent(e);
                 throw e;
             } catch (Exception e) {
                 conn.rollback();
@@ -204,8 +202,10 @@ public class PostWriteRepository {
     /** The unique index on a post's author and event_url, from V14. */
     private static final String EVENT_URL_INDEX = "posts_author_event_url_key";
 
-    private static boolean isDuplicateEvent(SQLException e) {
-        return "23505".equals(e.getSQLState()) && e.getMessage() != null && e.getMessage().contains(EVENT_URL_INDEX);
+    private static void refuseDuplicateEvent(SQLException e) {
+        if ("23505".equals(e.getSQLState()) && e.getMessage() != null && e.getMessage().contains(EVENT_URL_INDEX)) {
+            throw new DuplicateEventException(e);
+        }
     }
 
     private static String linksJson(List<PostLinkDto> links) {
@@ -292,9 +292,7 @@ public class PostWriteRepository {
                 return updated;
             } catch (SQLException e) {
                 conn.rollback();
-                if (isDuplicateEvent(e)) {
-                    throw new DuplicateEventException(e);
-                }
+                refuseDuplicateEvent(e);
                 throw e;
             } catch (Exception e) {
                 conn.rollback();

@@ -633,22 +633,9 @@ class PostWriteServiceTest {
     }
 
     @Test
-    void updatePost_links_replaceTheSavedOnes_andABlankLabelIsNone() throws SQLException {
-        List<PostLinkDto> sent = List.of(new PostLinkDto("https://a.example", "  "), new PostLinkDto("https://b.example", " Program "));
+    void updatePost_links_replaceTheSavedOnes() throws SQLException {
+        List<PostLinkDto> sent = List.of(new PostLinkDto("https://a.example", null), new PostLinkDto("https://b.example", "Program"));
 
-        assertEquals(List.of(new PostLinkDto("https://a.example", null), new PostLinkDto("https://b.example", "Program")),
-            savedLinks(patchLinks(sent), Set.of()));
-    }
-
-    @Test
-    void createPost_aBlankLabelIsNone() throws SQLException {
-        UUID authorId = UUID.randomUUID();
-        CreatePostRequest req = new CreatePostRequest("Stream", "Opis", null, List.of(new PostLinkDto("https://a.example", "")),
-            Instant.now().plusSeconds(60), null, null, PostType.ONLINE, null, null, null);
-        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
-
-        service.createPost(authorId, req);
-
-        verify(repository).createPost(authorId, req.withLinks(List.of(new PostLinkDto("https://a.example", null))));
+        assertEquals(sent, savedLinks(patchLinks(sent), Set.of()));
     }
 }
