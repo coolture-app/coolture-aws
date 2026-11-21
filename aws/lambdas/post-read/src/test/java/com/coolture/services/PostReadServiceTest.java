@@ -19,8 +19,10 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -202,10 +204,20 @@ class PostReadServiceTest {
         ArgumentCaptor<PostsCursor> cursor = ArgumentCaptor.forClass(PostsCursor.class);
         verify(repository, times(2)).findFeed(any(), eq(sort), any(), cursor.capture(), eq(3));
         PostCardDto last = rows.get(1);
-        assertEquals(new PostsCursor(sort, last.id(),
-            sort == PostSort.RECENT ? last.createdAt() : null,
-            sort == PostSort.POPULAR ? last.positiveReactionCount() : null,
-            null), cursor.getValue());
+        assertEquals(new PostsCursor(sort, last.id(), sort == PostSort.RECENT ? last.createdAt() : null, null),
+            cursor.getValue());
+    }
+
+    /** A Popularne cursor from before Popularne counted stances held the like count too. */
+    @Test
+    void getFeed_popular_aCursorWithTheOldLikeCount_continuesFromItsPost() throws SQLException {
+        UUID last = UUID.randomUUID();
+        String old = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            ("{\"sort\":\"POPULAR\",\"id\":\"" + last + "\",\"likes\":4}").getBytes(StandardCharsets.UTF_8));
+
+        service.getFeed(null, sortedBy("POPULAR"), old, 20);
+
+        verify(repository).findFeed(any(), eq(PostSort.POPULAR), any(), eq(new PostsCursor(PostSort.POPULAR, last, null, null)), eq(21));
     }
 
     @Test

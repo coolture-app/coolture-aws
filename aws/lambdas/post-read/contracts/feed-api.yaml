@@ -79,7 +79,8 @@ paths:
           description: >
             NEAREST needs latitude and longitude, and shows only posts with a place. STANCE_NEWEST needs participationTypes
             and puts the viewer's newest of those stances first. UPCOMING mixes events already running into the events
-            to come, every 5th card (README.md).
+            to come, every 5th card. POPULAR orders by likes + Interesuje mnie + Biorę udział
+            (README.md).
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/Q'
         - $ref: '#/components/parameters/AuthorId'
