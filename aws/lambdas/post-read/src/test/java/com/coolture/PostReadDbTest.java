@@ -301,7 +301,7 @@ class PostReadDbTest {
         try {
             writeAsTheApp("INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, 'INTERESTED', now())", post, ME);
             PostDetailDto page = postRepository.findById(post, ME).orElseThrow();
-            PostCardDto card = postRepository.findFeed(searching("walk_3"), PostSort.RECENT, ME, null, 10).stream()
+            PostCardDto card = postRepository.findFeed(searching("walk_3"), PostSort.RECENT, ME, null, 100).stream()
                 .filter(c -> c.id().equals(post)).findFirst().orElseThrow();
 
             assertEquals(1, page.interestedCount());
