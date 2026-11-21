@@ -109,7 +109,7 @@ All existing parameters keep their meaning. What's specific to this contract:
 | `sortBy` | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST`. Anything else, including `RECOMMENDED`, returns `400` |
 | `NEAREST` | Needs `latitude` and `longitude`, else `400`. Only posts with a place |
 | `cursor` | Continues the sort it was created for. Using it with a different sort returns `400` |
-| Order | `RECENT`: `created_at, id` descending. `POPULAR`: likes, `id` descending. `UPCOMING`: below. `NEAREST`: metres from the position, `id` ascending |
+| Order | `RECENT`: `created_at, id` descending. `POPULAR`: popularity's count, likes + Interesuje mnie + Biorę udział, then `id`, descending. `UPCOMING`: below. `NEAREST`: metres from the position, `id` ascending |
 
 ### Past events
 
@@ -151,7 +151,7 @@ refreshes.
 
 Scores use `asOf` and not the current time, so the order doesn't drift while someone scrolls. The viewer's taste counts their likes,
 interested and going up to `asOf`, so their own reactions reach the feed from the next session and never reorder the current one.
-Likes from other people can still move scores between pages:
+Other people's likes and stances can still move scores between pages:
 
 | Effect | Handling |
 |---|---|
@@ -167,7 +167,7 @@ Each sort pages on its own key, and the key is in the cursor:
 | Sort | A later page has |
 |---|---|
 | `RECENT` | `(created_at, id)` below the cursor |
-| `POPULAR` | `(likes, id)` below the cursor |
+| `POPULAR` | `(count, id)` below the cursor's post, whose count is taken again. If it changed since, a few posts repeat or are skipped, as in the feed |
 | `UPCOMING` | `asOf`, both streams' last keys and how many cards came so far |
 | `NEAREST` | `(metres, id)` above the cursor's post, whose distance is measured again from the request's position |
 
