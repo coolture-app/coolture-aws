@@ -46,7 +46,7 @@ public final class PostSql {
 
     /** Everything ResultSetMappers.mapPostCard reads, up to the WHERE. Binds the viewer twice. */
     public static final String CARD_SELECT = """
-        SELECT p.id, p.title, p.description, p.event_url, p.type, p.status,
+        SELECT p.id, p.title, p.description, p.event_url, p.links, p.type, p.status,
                p.positive_reaction_count, p.comments_count,
                stances.participant_count, stances.interested_count, stances.going_count,
                p.starts_at, p.ends_at, p.open_ended, p.created_at, p.last_modified_at, p.deleted_at,

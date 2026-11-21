@@ -330,7 +330,14 @@ components:
         location: {$ref: '#/components/schemas/EventLocation'}
         title: {type: string}
         description: {type: string}
-        eventUrl: {type: string}
+        eventUrl: {type: string, description: "The page the scraper imported the post from, unique per author. Not for display."}
+        links:
+          type: array
+          description: >-
+            Links under the description, in the author's order (PostLimits.MAX_LINKS). Left out when the post has
+            none.
+          maxItems: 3
+          items: {$ref: '#/components/schemas/PostLink'}
         startsAt: {type: string, format: date-time}
         endsAt: {type: string, format: date-time}
         openEnded: {type: boolean, description: No end date. Such a post never has endsAt and never ends.}
@@ -458,6 +465,13 @@ components:
       properties:
         latitude: {type: number, format: double}
         longitude: {type: number, format: double}
+    PostLink:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {type: string, description: Starts with http:// or https://.}
+        label: {type: string, maxLength: 40, description: The author's name for it. Left out when none; the app shows the domain.}
     MediaResource:
       type: object
       additionalProperties: false

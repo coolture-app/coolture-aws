@@ -9,12 +9,14 @@ import com.coolture.common.db.StanceCounts;
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
+import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
+import com.coolture.common.json.JsonUtils;
 
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.ReactionType;
@@ -43,6 +45,7 @@ public class PostWriteRepository {
         String title,
         String description,
         String eventUrl,
+        List<PostLinkDto> links,
         Instant startsAt,
         Instant endsAt,
         boolean openEnded,
@@ -56,7 +59,7 @@ public class PostWriteRepository {
 
     public Optional<ExistingPost> findById(UUID postId) throws SQLException {
         String sql = """
-            SELECT p.id, p.author_id, p.event_location_id, p.title, p.description, p.event_url,
+            SELECT p.id, p.author_id, p.event_location_id, p.title, p.description, p.event_url, p.links,
                    p.starts_at, p.ends_at, p.open_ended, p.type, p.status,
                    p.created_at, p.last_modified_at, p.deleted_at,
                    el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
@@ -80,6 +83,7 @@ public class PostWriteRepository {
                         rs.getString("title"),
                         rs.getString("description"),
                         rs.getString("event_url"),
+                        mapLinks(rs),
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
                         rs.getBoolean("open_ended"),
@@ -149,12 +153,12 @@ public class PostWriteRepository {
                 // 2. Insert Post
                 String postSql = """
                     INSERT INTO posts (
-                        id, author_id, event_location_id, title, description, event_url,
+                        id, author_id, event_location_id, title, description, event_url, links,
                         type, status,
                         positive_reaction_count, participant_count, comments_count,
                         starts_at, ends_at, open_ended, created_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?::jsonb,
                         ?, ?,
                         0, 0, 0,
                         ?, ?, ?, ?
@@ -168,6 +172,7 @@ public class PostWriteRepository {
                      .bindString(req.title())
                      .bindString(req.description())
                      .bindString(req.eventUrl())
+                     .bindString(linksJson(req.links()))
                      .bindString(req.type().name())
                      .bindString(PostStatus.ACTIVE.name())
                      .bindTimestamp(req.startsAt())
@@ -183,6 +188,12 @@ public class PostWriteRepository {
                 PostDetailDto created = getPostDetail(conn, postId);
                 conn.commit();
                 return created;
+            } catch (SQLException e) {
+                conn.rollback();
+                if (isDuplicateEvent(e)) {
+                    throw new DuplicateEventException(e);
+                }
+                throw e;
             } catch (Exception e) {
                 conn.rollback();
                 throw e;
@@ -190,9 +201,20 @@ public class PostWriteRepository {
         }
     }
 
+    /** The unique index on a post's author and event_url, from V14. */
+    private static final String EVENT_URL_INDEX = "posts_author_event_url_key";
+
+    private static boolean isDuplicateEvent(SQLException e) {
+        return "23505".equals(e.getSQLState()) && e.getMessage() != null && e.getMessage().contains(EVENT_URL_INDEX);
+    }
+
+    private static String linksJson(List<PostLinkDto> links) {
+        return JsonUtils.toJson(links == null ? List.of() : links);
+    }
+
     /** A post's fields after an edit, as the service resolved them from the request and the saved post. */
-    public record Fields(String title, String description, String eventUrl, PostType type, Instant startsAt,
-                         Instant endsAt, boolean openEnded) {}
+    public record Fields(String title, String description, String eventUrl, List<PostLinkDto> links, PostType type,
+                         Instant startsAt, Instant endsAt, boolean openEnded) {}
 
     /** The place and photos come from the request; every other field from fields. */
     public PostDetailDto updatePost(UUID postId, UUID callerId, ExistingPost existing, UpdatePostRequest req,
@@ -231,6 +253,7 @@ public class PostWriteRepository {
                         title = ?,
                         description = ?,
                         event_url = ?,
+                        links = ?::jsonb,
                         type = ?,
                         event_location_id = ?,
                         starts_at = ?,
@@ -245,6 +268,7 @@ public class PostWriteRepository {
                     b.bindString(fields.title())
                      .bindString(fields.description())
                      .bindString(fields.eventUrl())
+                     .bindString(linksJson(fields.links()))
                      .bindString(fields.type().name())
                      .bindObject(effectiveLocationId)
                      .bindTimestamp(fields.startsAt())
@@ -266,6 +290,12 @@ public class PostWriteRepository {
                 PostDetailDto updated = getPostDetail(conn, postId);
                 conn.commit();
                 return updated;
+            } catch (SQLException e) {
+                conn.rollback();
+                if (isDuplicateEvent(e)) {
+                    throw new DuplicateEventException(e);
+                }
+                throw e;
             } catch (Exception e) {
                 conn.rollback();
                 throw e;
@@ -306,7 +336,7 @@ public class PostWriteRepository {
 
     private PostDetailDto getPostDetail(Connection conn, UUID postId) throws SQLException {
         String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.type, p.status,
+            SELECT p.id, p.title, p.description, p.event_url, p.links, p.type, p.status,
                    p.positive_reaction_count, p.comments_count,
                    stances.participant_count, stances.interested_count, stances.going_count,
                    p.starts_at, p.ends_at, p.open_ended, p.created_at, p.last_modified_at, p.deleted_at,
@@ -349,6 +379,7 @@ public class PostWriteRepository {
                     rs.getString("title"),
                     rs.getString("description"),
                     rs.getString("event_url"),
+                    mapLinks(rs),
                     mapInstant(rs, "starts_at"),
                     mapInstant(rs, "ends_at"),
                     rs.getBoolean("open_ended"),

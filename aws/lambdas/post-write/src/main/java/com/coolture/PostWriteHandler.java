@@ -19,6 +19,7 @@ import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.ParticipationRequest;
 import com.coolture.dto.ReactionRequest;
 import com.coolture.dto.UpdatePostRequest;
+import com.coolture.repository.DuplicateEventException;
 import com.coolture.services.PostWriteService;
 
 public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
@@ -63,6 +64,8 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
                 default -> ApiResponse.badRequest("Unsupported HTTP method: " + method);
             };
 
+        } catch (DuplicateEventException e) {
+            return ApiResponse.conflict(e.getMessage());
         } catch (SecurityException e) {
             String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
             if (msg.contains("authenticat")) {
@@ -131,7 +134,7 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
         if (tree == null || !tree.isObject()) {
             return Set.of();
         }
-        return Stream.of("endsAt", "eventUrl")
+        return Stream.of("endsAt", "eventUrl", "links")
             .filter(field -> tree.has(field) && tree.get(field).isNull())
             .collect(Collectors.toUnmodifiableSet());
     }

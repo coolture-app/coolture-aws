@@ -14,6 +14,7 @@ import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.UserSummaryDto;
@@ -69,7 +70,7 @@ class ContractTest {
         return new PostCardDto(
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, Instant.now(), 0, 0),
-            null, "Koncert", null, null, Instant.now(), null, false,
+            null, "Koncert", null, null, null, Instant.now(), null, false,
             0, 0, 0, 0, 0, PostType.ONLINE, PostStatus.ACTIVE,
             Instant.now(), null, null, null, null, null, null, null
         );
@@ -86,7 +87,8 @@ class ContractTest {
         return new PostCardDto(
             UUID.randomUUID(),
             new UserSummaryDto(UUID.randomUUID(), "anna", "Anna", "Nowak", avatar, now, 1, 2),
-            location, "Koncert", "Opis", "https://example.com", now, now.plusSeconds(60), false,
+            location, "Koncert", "Opis", "https://example.com",
+            List.of(new PostLinkDto("https://bilety.example", "Bilety"), new PostLinkDto("https://example.org", null)), now, now.plusSeconds(60), false,
             1, 3, 2, 1, 4, PostType.OFFLINE, PostStatus.EDITED,
             now, now, null, cover, ReactionType.LIKE, ParticipationType.TAKES_PART, List.of(cover), friendStances()
         );

@@ -131,7 +131,7 @@ public class PostReadRepository {
 
     public Optional<PostDetailDto> findById(UUID postId, UUID callerId) throws SQLException {
         String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.type, p.status,
+            SELECT p.id, p.title, p.description, p.event_url, p.links, p.type, p.status,
                    p.positive_reaction_count, p.comments_count,
                    stances.participant_count, stances.interested_count, stances.going_count,
                    p.starts_at, p.ends_at, p.open_ended, p.created_at, p.last_modified_at, p.deleted_at,
@@ -182,6 +182,7 @@ public class PostReadRepository {
                         rs.getString("title"),
                         rs.getString("description"),
                         rs.getString("event_url"),
+                        mapLinks(rs),
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
                         rs.getBoolean("open_ended"),

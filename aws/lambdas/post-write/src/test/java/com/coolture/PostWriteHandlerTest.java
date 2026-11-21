@@ -9,6 +9,7 @@ import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.security.SecurityContext;
 import com.coolture.dto.CreatePostRequest;
+import com.coolture.repository.DuplicateEventException;
 import com.coolture.services.PostWriteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -82,7 +83,7 @@ class PostWriteHandlerTest {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/posts", body, null);
 
         PostDetailDto createdPost = new PostDetailDto(
-            postId, null, null, "Cool Event", "A very cool event", null,
+            postId, null, null, "Cool Event", "A very cool event", null, null,
             Instant.parse("2026-09-01T12:00:00Z"), null, false, 0, 0, 0, 0, 0,
             PostType.ONLINE, PostStatus.ACTIVE, null,
             Instant.now(), null, null, null, List.of(), null, null, null
@@ -214,7 +215,7 @@ class PostWriteHandlerTest {
         );
 
         PostDetailDto updatedPost = new PostDetailDto(
-            postId, null, null, "Updated Title", "Desc", null,
+            postId, null, null, "Updated Title", "Desc", null, null,
             Instant.parse("2026-09-01T12:00:00Z"), null, false, 0, 0, 0, 0, 0,
             PostType.ONLINE, PostStatus.EDITED, null,
             Instant.now(), Instant.now(), null, null, List.of(), null, null, null
@@ -235,7 +236,7 @@ class PostWriteHandlerTest {
     void updatePost_tellsTheServiceWhichFieldsWereSentAsNull() throws Exception {
         UUID userId = UUID.randomUUID();
         UUID postId = UUID.randomUUID();
-        String body = "{\"title\":\"Updated Title\",\"endsAt\":null,\"eventUrl\":null,\"description\":null}";
+        String body = "{\"title\":\"Updated Title\",\"endsAt\":null,\"eventUrl\":null,\"links\":null,\"description\":null}";
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
             "PATCH", "/posts/" + postId, body, Map.of("id", postId.toString())
         );
@@ -246,9 +247,42 @@ class PostWriteHandlerTest {
 
             handler.handleRequest(event, lambdaContext);
 
-            verify(service).updatePost(eq(postId), eq(userId), any(), eq(Set.of("endsAt", "eventUrl")));
+            verify(service).updatePost(eq(postId), eq(userId), any(), eq(Set.of("endsAt", "eventUrl", "links")));
         }
     }
 
-}
+    private APIGatewayV2HTTPResponse create(String links) {
+        String body = """
+            {"title": "Koncert", "description": "Opis", "type": "ONLINE", "startsAt": "2030-09-01T12:00:00Z", "links": %s}
+            """.formatted(links);
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/posts", body, null);
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(UUID.randomUUID());
+            return handler.handleRequest(event, lambdaContext);
+        }
+    }
 
+    @Test
+    void createPost_withMoreThanThreeLinks_returns400() {
+        String link = "{\"url\": \"https://a.example\"}";
+
+        assertEquals(400, create("[" + String.join(",", link, link, link, link) + "]").getStatusCode());
+    }
+
+    @Test
+    void createPost_withALinkThatIsNotHttp_returns400() {
+        assertEquals(400, create("[{\"url\": \"javascript:alert(1)\"}]").getStatusCode());
+    }
+
+    @Test
+    void createPost_withALabelOverFortyCharacters_returns400() {
+        assertEquals(400, create("[{\"url\": \"https://a.example\", \"label\": \"" + "x".repeat(41) + "\"}]").getStatusCode());
+    }
+
+    @Test
+    void createPost_aSecondPostFromTheSameEventPage_returns409() throws Exception {
+        when(service.createPost(any(), any())).thenThrow(new DuplicateEventException(null));
+
+        assertEquals(409, create("[]").getStatusCode());
+    }
+}

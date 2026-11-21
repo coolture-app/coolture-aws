@@ -5,6 +5,7 @@ import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.dto.enums.CommentStatus;
@@ -14,13 +15,17 @@ import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.json.JsonUtils;
 import com.coolture.common.storage.MediaUrls;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -33,6 +38,20 @@ public final class ResultSetMappers {
     public static Instant mapInstant(ResultSet rs, String column) throws SQLException {
         Timestamp ts = rs.getTimestamp(column);
         return ts != null ? ts.toInstant() : null;
+    }
+
+    /** A post's links column, null when it has none. */
+    public static List<PostLinkDto> mapLinks(ResultSet rs) throws SQLException {
+        String json = rs.getString("links");
+        if (json == null) {
+            return null;
+        }
+        try {
+            List<PostLinkDto> links = JsonUtils.mapper().readValue(json, new TypeReference<>() {});
+            return links.isEmpty() ? null : links;
+        } catch (JsonProcessingException e) {
+            throw new SQLException("Unreadable links: " + json, e);
+        }
     }
 
     public static <T extends Enum<T>> T mapEnum(ResultSet rs, String column, Class<T> enumClass) throws SQLException {
@@ -231,6 +250,7 @@ public final class ResultSetMappers {
             rs.getString("title"),
             rs.getString("description"),
             rs.getString("event_url"),
+            mapLinks(rs),
             mapInstant(rs, "starts_at"),
             mapInstant(rs, "ends_at"),
             rs.getBoolean("open_ended"),

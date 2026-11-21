@@ -1,8 +1,11 @@
 package com.coolture.dto;
 
 import com.coolture.common.dto.EventLocationDto;
+import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.enums.PostType;
+import com.coolture.common.validation.PostLimits;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
@@ -16,8 +19,12 @@ public record UpdatePostRequest(
     @Size(max = 1024, message = "Description must be shorter than 1024 characters")
     String description,
 
+    /** The page the scraper imported the post from. Unique per author. */
     @Size(max = 2048)
     String eventUrl,
+
+    @Size(max = PostLimits.MAX_LINKS, message = "A post has at most " + PostLimits.MAX_LINKS + " links")
+    List<@NotNull @Valid PostLinkDto> links,
 
     Instant startsAt,
 
@@ -36,7 +43,7 @@ public record UpdatePostRequest(
     UUID coverMediaId
 ) {
     public UpdatePostRequest withMediaIds(List<UUID> ordered) {
-        return new UpdatePostRequest(title, description, eventUrl, startsAt, endsAt, openEnded, type, location,
+        return new UpdatePostRequest(title, description, eventUrl, links, startsAt, endsAt, openEnded, type, location,
             ordered, coverMediaId);
     }
 }

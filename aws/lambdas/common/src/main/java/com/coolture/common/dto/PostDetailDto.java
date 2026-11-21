@@ -17,7 +17,10 @@ public record PostDetailDto(
     EventLocationDto location,
     String title,
     String description,
+    /** The page the scraper imported the post from. Not for display: the app shows links. */
     String eventUrl,
+    /** Null when the post has none. */
+    List<PostLinkDto> links,
     Instant startsAt,
     Instant endsAt,
     /** No end date: endsAt is null and the event never ends (EventTime). */
