@@ -1,5 +1,8 @@
 -- Posts, their photos and places, and stances.
 
+-- Search folds diacritics on both sides ("spiew" finds "Śpiew"). unaccent isn't immutable, so it can't back an index.
+CREATE EXTENSION IF NOT EXISTS unaccent;
+
 -- The image's size in pixels, so a post's photo frame can take the photo's shape before it loads.
 -- Null for media uploaded before this, and for files that aren't images.
 ALTER TABLE media

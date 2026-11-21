@@ -9,6 +9,15 @@ HTTP 200
 jsonpath "$.items[0].username" == "jan_demo"
 jsonpath "$.items[0].followsYou" == true
 
+# Every word must be in one of the names, so a full name finds the person.
+GET {{api}}/users?q=jan%20DEMO&limit=100
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 200
+[Asserts]
+jsonpath "$.items[*].username" contains "jan_demo"
+jsonpath "$.items[*].username" not contains "anna_demo"
+
 GET {{api}}/users/by-username/ola_demo
 HTTP 200
 [Captures]
