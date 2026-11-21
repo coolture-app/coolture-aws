@@ -20,6 +20,19 @@ post: jsonpath "$.id"
 jsonpath "$.author.username" == "anna_demo"
 jsonpath "$.type" == "ONLINE"
 
+# Search ignores diacritics and word forms, and needs every word, in any order and in any field.
+GET {{api}}/posts?authorId={{anna}}&q=WIECZOR%20planszowkami%20przegladarke&limit=100
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.items[?(@.id == '{{post}}')]" count == 1
+
+GET {{api}}/posts?authorId={{anna}}&q=wieczor%20szachy&limit=100
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.items[?(@.id == '{{post}}')]" count == 0
+
 # A guest reads it.
 GET {{api}}/posts/{{post}}
 X-Anonymous: true

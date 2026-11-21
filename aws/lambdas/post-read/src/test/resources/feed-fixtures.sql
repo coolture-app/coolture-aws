@@ -220,3 +220,18 @@ INSERT INTO posts (author_id, title, description, starts_at, ends_at, open_ended
   ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_1',    'rytm', now() - interval '1 day',   now() + interval '1 day',  false, 'ONLINE'),
   ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_2',    NULL,   now() - interval '1 day',   now() + interval '2 days', false, 'ONLINE'),
   ('a0000000-0000-0000-0000-000000000012', 'rhythm_running_open', NULL,   now() - interval '10 days', NULL,                      true,  'ONLINE');
+
+-- Search, by its own author: Polish letters, another form of a word, and words spread over the title, the description
+-- and the place.
+INSERT INTO users (id, username) VALUES ('a0000000-0000-0000-0000-000000000013', 'searcher');
+
+INSERT INTO event_locations (id, city, venue_name, coordinates) VALUES
+  ('a0000000-0000-0000-0000-000000000103', 'Łódź', 'Filharmonia Łódzka', ST_SetSRID(ST_MakePoint(19.46, 51.77), 4326)::geography);
+
+INSERT INTO posts (author_id, event_location_id, title, description, starts_at, type) VALUES
+  ('a0000000-0000-0000-0000-000000000013', NULL, 'Śpiew gospel', NULL, now() + interval '2 days', 'ONLINE'),
+  ('a0000000-0000-0000-0000-000000000013', NULL, 'Wieczór koncertowy', NULL, now() + interval '2 days', 'ONLINE'),
+  ('a0000000-0000-0000-0000-000000000013', 'a0000000-0000-0000-0000-000000000103', 'Muzyka w filharmonii', 'Repertuar klasyczny',
+   now() + interval '2 days', 'OFFLINE'),
+  ('a0000000-0000-0000-0000-000000000013', NULL, 'Zniżka 50%', NULL, now() + interval '2 days', 'ONLINE'),
+  ('a0000000-0000-0000-0000-000000000013', NULL, 'Bilety od 500 zł', NULL, now() + interval '2 days', 'ONLINE');

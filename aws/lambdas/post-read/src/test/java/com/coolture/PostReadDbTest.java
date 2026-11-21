@@ -826,6 +826,37 @@ class PostReadDbTest {
         }
     }
 
+    private static final UUID SEARCHER = UUID.fromString("a0000000-0000-0000-0000-000000000013");
+
+    /** The searcher's posts that {@code q} finds, since the database may hold others with the same words. */
+    private Set<String> searched(String q) throws SQLException {
+        return new HashSet<>(titles(walkPosts(ME, by(SEARCHER, "RECENT", null, null, q), 100)));
+    }
+
+    @Test
+    void aSearch_ignoresDiacritics_onBothSides() throws SQLException {
+        assertEquals(Set.of("Śpiew gospel"), searched("spiew"));
+        assertEquals(Set.of("Śpiew gospel"), searched("ŚPIEW"));
+        assertEquals(Set.of("Muzyka w filharmonii"), searched("lodz"));
+    }
+
+    @Test
+    void aSearch_findsAnotherFormOfAWord() throws SQLException {
+        assertEquals(Set.of("Wieczór koncertowy"), searched("koncertu"));
+    }
+
+    @Test
+    void aSearch_needsEveryWord_inAnyField_inAnyOrder() throws SQLException {
+        assertEquals(Set.of("Muzyka w filharmonii"), searched("muzyka klasyczna"));
+        assertEquals(Set.of("Muzyka w filharmonii"), searched("Łódź  muzyka"));
+        assertEquals(Set.of(), searched("muzyka opera"));
+    }
+
+    @Test
+    void aSearch_takesPercentAsALetter() throws SQLException {
+        assertEquals(Set.of("Zniżka 50%"), searched("50%"));
+    }
+
     @Test
     void mapMarks_carryThePlaceAndTheStart() throws SQLException {
         PostMarkDto far = postRepository.findPostMarks(searching("near_far_1"), AROUND_THE_FIXTURES, ME, false).get(0);

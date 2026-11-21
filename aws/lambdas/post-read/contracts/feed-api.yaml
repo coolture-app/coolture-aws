@@ -203,7 +203,9 @@ components:
     Q:
       name: q
       in: query
-      description: Matches a part of the title, the description, the city or the place's name, ignoring case.
+      description: Words separated by spaces, at most 8. Every word must appear in the title, the description, the city or
+        the place's name, in any order, ignoring case and diacritics. A word of 5 or more letters also matches its other
+        Polish forms ("koncertu" finds "koncert").
       schema: {type: string}
     AuthorId:
       name: authorId

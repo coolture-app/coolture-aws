@@ -47,8 +47,8 @@ class UserDbTest {
     @BeforeEach
     void addRows() throws SQLException {
         removeRows();
-        execute("INSERT INTO users (id, username, first_name, bio) VALUES ('" + ANNA + "', 'udb_anna', 'Anna', 'bio'), ('"
-            + JAN + "', 'udb_jan', 'Jan', 'bio'), ('" + OLA + "', 'udb_ola', 'Ola', 'bio')");
+        execute("INSERT INTO users (id, username, first_name, last_name, bio) VALUES ('" + ANNA + "', 'udb_anna', 'Anna', 'Łódzka', 'bio'), ('"
+            + JAN + "', 'udb_jan', 'Jan', 'Kowalski', 'bio'), ('" + OLA + "', 'udb_ola', 'Ola', NULL, 'bio')");
         // Ola follows both, and Anna and Jan are friends.
         follow(OLA, ANNA);
         follow(OLA, JAN);
@@ -76,6 +76,21 @@ class UserDbTest {
 
         assertEquals(new UserInterestsDto(List.of("stage", "cinema"), List.of("jazz")), interests.getSelection(ANNA, JAN));
         assertEquals(List.of("stage", "cinema"), users.getByIdForCaller(ANNA, ANNA).kinds());
+    }
+
+    @Test
+    void search_needsEveryWord_inAnyColumn_withoutDiacritics_andWithoutWordForms() throws SQLException {
+        assertEquals(List.of("udb_jan"), ours(users.search(OLA, "Jan Kowalski", null, 20)));
+        assertEquals(List.of("udb_jan"), ours(users.search(OLA, "kowalski udb", null, 20)));
+        assertEquals(List.of("udb_anna"), ours(users.search(OLA, "LODZKA", null, 20)));
+        assertEquals(List.of(), ours(users.search(OLA, "Jan Nowak", null, 20)), "a word in no column");
+        assertEquals(List.of(), ours(users.search(OLA, "Kowalskiego", null, 20)), "people get no word forms");
+        assertEquals(List.of(), ours(users.search(OLA, "udb%", null, 20)), "% is a letter, not a wildcard");
+    }
+
+    /** The test's own people, since the database may hold others with the same names. */
+    private static List<String> ours(CursorPage<UserListItemDto> page) {
+        return usernames(page).stream().filter(u -> u.startsWith("udb_")).toList();
     }
 
     @Test

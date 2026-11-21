@@ -3,6 +3,7 @@ package com.coolture.user.repository;
 import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.TextSearch;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.MediaStatus;
 
@@ -253,35 +254,22 @@ public class UserRepository {
             SELECT id, username, first_name, last_name, bio, created_at,
                    %s AS follows_you
             FROM users u
-            WHERE (? IS NULL OR username ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?)
+            WHERE %s
               AND %s
               AND (?::timestamptz IS NULL OR (created_at < ?::timestamptz OR (created_at = ?::timestamptz AND id < ?::uuid)))
             ORDER BY created_at DESC, id DESC
             LIMIT ?
-        """.formatted(FOLLOWS_CALLER, Blocks.notWithViewer("u.id"));
+        """.formatted(FOLLOWS_CALLER, TextSearch.matchesAll("u.username", "u.first_name", "u.last_name"),
+            Blocks.notWithViewer("u.id"));
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            String pattern = (q != null && !q.isBlank()) ? "%" + q + "%" : null;
-            Timestamp cursorTs = cursorCreatedAt != null ? Timestamp.from(cursorCreatedAt) : null;
-
-            stmt.setObject(1, callerId);
-
-            stmt.setString(2, pattern);
-            stmt.setString(3, pattern);
-            stmt.setString(4, pattern);
-            stmt.setString(5, pattern);
-
-            stmt.setObject(6, callerId);
-            stmt.setObject(7, callerId);
-
-            stmt.setTimestamp(8, cursorTs);
-            stmt.setTimestamp(9, cursorTs);
-            stmt.setTimestamp(10, cursorTs);
-            stmt.setObject(11, cursorId);
-
-            stmt.setInt(12, limit);
+            ParamBinder b = new ParamBinder(stmt, conn).bindNullableUUID(callerId);
+            TextSearch.bind(b, TextSearch.words(q, false));
+            Blocks.bindViewer(b, callerId)
+                .bindCursorParams(cursorCreatedAt, cursorId)
+                .bindInt(limit);
 
             List<ListedUser> users = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
