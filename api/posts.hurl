@@ -25,13 +25,13 @@ GET {{api}}/posts?authorId={{anna}}&q=WIECZOR%20planszowkami%20przegladarke&limi
 X-Anonymous: true
 HTTP 200
 [Asserts]
-jsonpath "$.items[?(@.id == '{{post}}')]" count == 1
+jsonpath "$.items[*].id" contains "{{post}}"
 
 GET {{api}}/posts?authorId={{anna}}&q=wieczor%20szachy&limit=100
 X-Anonymous: true
 HTTP 200
 [Asserts]
-jsonpath "$.items[?(@.id == '{{post}}')]" count == 0
+jsonpath "$.items[*].id" not contains "{{post}}"
 
 # A guest reads it.
 GET {{api}}/posts/{{post}}

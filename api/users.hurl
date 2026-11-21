@@ -15,8 +15,8 @@ X-User-Id: {{anna}}
 X-User-Name: anna_demo
 HTTP 200
 [Asserts]
-jsonpath "$.items[?(@.username == 'jan_demo')]" count == 1
-jsonpath "$.items[?(@.username == 'anna_demo')]" count == 0
+jsonpath "$.items[*].username" contains "jan_demo"
+jsonpath "$.items[*].username" not contains "anna_demo"
 
 GET {{api}}/users/by-username/ola_demo
 HTTP 200
