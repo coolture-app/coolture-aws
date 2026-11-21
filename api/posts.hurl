@@ -306,6 +306,75 @@ X-User-Id: {{jan}}
 X-User-Name: jan_demo
 HTTP 404
 
+# Popularne counts likes and stances, as the feed does: two stances outrank one like.
+POST {{api}}/posts
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Seans pod gwiazdami, polubiony", "description": "Kino plenerowe.", "startsAt": "2030-04-01T20:00:00Z", "type": "ONLINE" }
+HTTP 201
+[Captures]
+liked: jsonpath "$.id"
+
+POST {{api}}/posts
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Seans pod gwiazdami, zaplanowany", "description": "Kino plenerowe.", "startsAt": "2030-04-02T20:00:00Z", "type": "ONLINE" }
+HTTP 201
+[Captures]
+planned: jsonpath "$.id"
+
+PUT {{api}}/posts/{{liked}}/reaction
+X-User-Id: {{jan}}
+X-User-Name: jan_demo
+{ "type": "LIKE" }
+HTTP *
+[Asserts]
+status < 300
+
+PUT {{api}}/posts/{{planned}}/participation
+X-User-Id: {{ola}}
+X-User-Name: ola_demo
+{ "type": "INTERESTED" }
+HTTP *
+[Asserts]
+status < 300
+
+PUT {{api}}/posts/{{planned}}/participation
+X-User-Id: {{iza}}
+X-User-Name: iza_demo
+{ "type": "TAKES_PART" }
+HTTP *
+[Asserts]
+status < 300
+
+GET {{api}}/posts?sortBy=POPULAR&authorId={{anna}}&q=seans%20gwiazdami&limit=1
+X-Anonymous: true
+HTTP 200
+[Captures]
+popular_next: jsonpath "$.page.nextCursor"
+[Asserts]
+jsonpath "$.items[0].id" == "{{planned}}"
+
+GET {{api}}/posts?sortBy=POPULAR&authorId={{anna}}&q=seans%20gwiazdami&limit=1&cursor={{popular_next}}
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.items[0].id" == "{{liked}}"
+
+DELETE {{api}}/posts/{{liked}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP *
+[Asserts]
+status < 300
+
+DELETE {{api}}/posts/{{planned}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP *
+[Asserts]
+status < 300
+
 # The start can't move to the past, but an edit may send an unchanged start back, as the edit form always does. (Once
 # an event has ended, Interesuje mnie and Biorę udział are refused too; PostWriteDbTest shows it, since a post can't be
 # created in the past.)
