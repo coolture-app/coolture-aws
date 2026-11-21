@@ -956,6 +956,26 @@ class PostReadDbTest {
         }
     }
 
+    /** walk_1 has one like; walk_6 none, until two people mark it. Popularne counted likes alone before. */
+    @Test
+    void browse_popular_countsStancesLikeTheFeed() throws SQLException {
+        UUID liked = postTitled("walk_1");
+        UUID marked = postTitled("walk_6");
+        try {
+            writeAsTheApp("UPDATE posts SET participant_count = 2 WHERE id = ?", marked);
+
+            List<UUID> order = idsOf(walkPosts(ME, filters("POPULAR", false, null, null), 7));
+            assertTrue(order.indexOf(marked) < order.indexOf(liked), "two stances outrank one like");
+            assertEquals(2, engagementOf(marked));
+        } finally {
+            writeAsTheApp("UPDATE posts SET participant_count = 0 WHERE id = ?", marked);
+        }
+    }
+
+    private int engagementOf(UUID post) throws SQLException {
+        return candidates(Instant.now()).stream().filter(f -> f.id().equals(post)).findFirst().orElseThrow().engagement();
+    }
+
     @ParameterizedTest
     @CsvSource({"true, true", "true, false", "false, true", "false, false"})
     void walkingTheFeed_showsEveryCandidateOnce(boolean signedIn, boolean withLocation) throws SQLException {

@@ -10,21 +10,23 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Where a GET /posts page ended: the sort, the id, and the value that sort orders by. UPCOMING keeps its Upcoming.Position. */
+/**
+ * Where a GET /posts page ended: the sort, the id, and for RECENT the value it orders by; the other sorts read their
+ * value again from the post. UPCOMING keeps its Upcoming.Position.
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer likes, Upcoming.Position upcoming) {
+public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Upcoming.Position upcoming) {
 
     public static String after(PostSort sort, PostCardDto card) {
         return CursorCodec.encode(switch (sort) {
-            case RECENT -> new PostsCursor(sort, card.id(), card.createdAt(), null, null);
-            case POPULAR -> new PostsCursor(sort, card.id(), null, card.positiveReactionCount(), null);
+            case RECENT -> new PostsCursor(sort, card.id(), card.createdAt(), null);
             case UPCOMING -> throw new IllegalArgumentException("UPCOMING pages with upcoming()");
-            case NEAREST, STANCE_NEWEST -> new PostsCursor(sort, card.id(), null, null, null);
+            case POPULAR, NEAREST, STANCE_NEWEST -> new PostsCursor(sort, card.id(), null, null);
         });
     }
 
     public static String upcoming(Upcoming.Position at) {
-        return CursorCodec.encode(new PostsCursor(PostSort.UPCOMING, null, null, null, at));
+        return CursorCodec.encode(new PostsCursor(PostSort.UPCOMING, null, null, at));
     }
 
     public static Optional<PostsCursor> decode(String raw, PostSort sort) {
@@ -35,9 +37,8 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
             }
             boolean valid = switch (sort) {
                 case RECENT -> c.id != null && c.createdAt != null;
-                case POPULAR -> c.id != null && c.likes != null;
                 case UPCOMING -> c.upcoming != null && c.upcoming.isValid();
-                case NEAREST, STANCE_NEWEST -> c.id != null;
+                case POPULAR, NEAREST, STANCE_NEWEST -> c.id != null;
             };
             if (!valid) {
                 throw new IllegalArgumentException("Invalid cursor");
@@ -50,7 +51,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Integer lik
     void bindKeyset(ParamBinder binder, Double latitude, Double longitude, UUID viewer) throws SQLException {
         switch (sort) {
             case RECENT -> binder.bindTimestamp(createdAt);
-            case POPULAR -> binder.bindInt(likes);
+            case POPULAR -> binder.bindUUID(id);
             case UPCOMING -> throw new IllegalStateException("UPCOMING binds through Upcoming");
             case NEAREST -> binder.bindDouble(longitude).bindDouble(latitude)
                 .bindDouble(longitude).bindDouble(latitude)

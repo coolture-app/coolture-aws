@@ -37,6 +37,13 @@ public final class PostSql {
          .bindNullableUUID(viewer);
     }
 
+    /**
+     * What popularity counts, for the feed's score and Popularne's order: likes, Interesuje mnie and Biorę udział, from
+     * the stored counters, which leave "Nie dla mnie" out. Comments don't count: most commenters have reacted already, and
+     * counting them again made the ranking worse (benchmarks/popularity-count).
+     */
+    public static final String ENGAGEMENT = "(COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0))";
+
     /** Everything ResultSetMappers.mapPostCard reads, up to the WHERE. Binds the viewer twice. */
     public static final String CARD_SELECT = """
         SELECT p.id, p.title, p.description, p.event_url, p.type, p.status,

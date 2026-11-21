@@ -65,7 +65,7 @@ public class FeedRepository {
                p.starts_at,
                p.ends_at,
                p.open_ended,
-               COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0) AS engagement,
+        """ + "       " + PostSql.ENGAGEMENT + " AS engagement,\n" + """
                1 - (c.centred <=> ?::vector) AS similarity,
                (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
                 FROM marks m) AS near_mark,
