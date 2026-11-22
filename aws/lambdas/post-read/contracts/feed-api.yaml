@@ -74,13 +74,13 @@ paths:
           in: query
           schema:
             type: string
-            enum: [RECENT, POPULAR, UPCOMING, NEAREST, STANCE_NEWEST]
+            enum: [RECENT, POPULAR, UPCOMING, PAST, NEAREST, STANCE_NEWEST]
             default: RECENT
           description: >
             NEAREST needs latitude and longitude, and shows only posts with a place. STANCE_NEWEST needs participationTypes
             and puts the viewer's newest of those stances first. UPCOMING mixes events already running into the events
-            to come, every 5th card. POPULAR orders by likes + Interesuje mnie + Biorę udział
-            (README.md).
+            to come, every 5th card, and with includePast the ended events follow them. PAST shows only ended events, the latest end first. POPULAR orders by likes +
+            Interesuje mnie + Biorę udział (README.md).
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/Q'
         - $ref: '#/components/parameters/AuthorId'
@@ -94,7 +94,14 @@ paths:
         - $ref: '#/components/parameters/Latitude'
         - $ref: '#/components/parameters/Longitude'
         - $ref: '#/components/parameters/RadiusKm'
-        - {name: participationTypes, in: query, description: Signed-in only. Only the viewer's own stances; NOT_INTERESTED (Nie dla mnie) is never shown to anyone else., schema: {type: array, items: {$ref: '#/components/schemas/ParticipationType'}}, style: form, explode: true}
+        - {name: participationTypes, in: query, description: "Signed-in only. The viewer's own stances, or participantId's; NOT_INTERESTED (Nie dla mnie) is never shown to anyone else.", schema: {type: array, items: {$ref: '#/components/schemas/ParticipationType'}}, style: form, explode: true}
+        - name: participantId
+          in: query
+          schema: {type: string, format: uuid}
+          description: >
+            Signed-in only. Whose stances participationTypes reads, the viewer when left out. Someone else's need
+            participationTypes of INTERESTED or TAKES_PART only, and no reactionType or STANCE_NEWEST, else 400. They're
+            an empty list unless that person is the viewer's friend and shares their stances, as on cards.
         - {name: reactionType, in: query, description: Signed-in only., schema: {$ref: '#/components/schemas/ReactionType'}}
       responses:
         '200':
@@ -258,7 +265,7 @@ components:
     IncludePast:
       name: includePast
       in: query
-      description: When false, ended events are hidden. UPCOMING always hides them.
+      description: When false, ended events are hidden. UPCOMING puts them after every event to come.
       schema: {type: boolean, default: false}
   responses:
     BadRequest:

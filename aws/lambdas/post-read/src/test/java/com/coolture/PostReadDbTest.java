@@ -33,6 +33,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -64,6 +65,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -407,7 +409,7 @@ class PostReadDbTest {
 
     private static PostFeedFilters ofKinds(List<String> kinds, boolean kids) {
         return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, "RECENT", false, kinds, kids);
+            null, null, null, 20, "RECENT", false, kinds, kids, null);
     }
 
     private Double pprOf(UUID post, Instant asOf) throws SQLException {
@@ -604,12 +606,60 @@ class PostReadDbTest {
     }
 
     @Test
-    void browse_upcoming_neverShowsAnEndedEvent() throws SQLException {
+    void browse_upcoming_showsAnEndedEventOnlyWithIncludePast() throws SQLException {
         Instant longAgo = Instant.now().minus(Duration.ofDays(500));
 
         assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters("UPCOMING", false, null, null), 100)));
-        assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters("UPCOMING", true, null, null), 100)));
-        assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters("UPCOMING", true, longAgo, null), 100)));
+        assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters("UPCOMING", false, longAgo, null), 100)));
+        assertEquals(union(NOT_ENDED_FOR_ME, ENDED), ruleTitles(walkPosts(ME, filters("UPCOMING", true, null, null), 100)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 7, 100})
+    void browse_upcoming_withIncludePast_endsWithPastsOrder_onceEach(int pageSize) throws SQLException {
+        List<UUID> upcoming = walkPosts(ME, filters("UPCOMING", false, null, null), 100).stream().map(PostCardDto::id).toList();
+        List<UUID> past = walkPosts(ME, filters("PAST", false, null, null), 100).stream().map(PostCardDto::id).toList();
+        List<UUID> both = new ArrayList<>(upcoming);
+        both.addAll(past);
+
+        List<UUID> walked = walkPosts(ME, filters("UPCOMING", true, null, null), pageSize).stream().map(PostCardDto::id).toList();
+
+        assertFalse(past.isEmpty());
+        assertEquals(both, walked);
+    }
+
+    @Test
+    void browse_past_showsOnlyEndedEvents_latestEndFirst_acrossPages() throws SQLException {
+        List<PostCardDto> cards = walkPosts(ME, filters("PAST", false, null, null), 2).stream()
+            .filter(c -> RULE_TITLES.contains(c.title())).toList();
+
+        assertEquals(ENDED, ruleTitles(cards));
+        for (int i = 1; i < cards.size(); i++) {
+            Instant before = EventTime.end(cards.get(i - 1).startsAt(), cards.get(i - 1).endsAt(), cards.get(i - 1).openEnded());
+            Instant after = EventTime.end(cards.get(i).startsAt(), cards.get(i).endsAt(), cards.get(i).openEnded());
+            assertFalse(after.isAfter(before), cards.get(i).title() + " after " + cards.get(i - 1).title());
+        }
+    }
+
+    @Test
+    void browse_aFriendsStances_onlyWhileTheyShare_andNeverTheirNotForMe() throws SQLException {
+        assertEquals(Set.of("friend_going", "friends_crowd"), titlesOf(walkPosts(ME, stancesOf("6", "TAKES_PART"), 100)));
+        assertEquals(Set.of("friend_interested"), titlesOf(walkPosts(ME, stancesOf("6", "INTERESTED"), 100)));
+        // quiet_friend doesn't share, and `followed` isn't a friend.
+        assertEquals(Set.of(), titlesOf(walkPosts(ME, stancesOf("8", "TAKES_PART"), 100)));
+        assertEquals(Set.of(), titlesOf(walkPosts(ME, stancesOf("3", "TAKES_PART"), 100)));
+
+        assertThrows(IllegalArgumentException.class, () -> walkPosts(ME, stancesOf("6", "NOT_INTERESTED"), 100));
+        assertThrows(SecurityException.class, () -> walkPosts(null, stancesOf("6", "TAKES_PART"), 100));
+    }
+
+    private static PostFeedFilters stancesOf(String who, String type) {
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            List.of(type), null, null, 20, "UPCOMING", false, null, false, UUID.fromString("a0000000-0000-0000-0000-00000000000" + who));
+    }
+
+    private static Set<String> titlesOf(List<PostCardDto> cards) {
+        return cards.stream().map(PostCardDto::title).collect(Collectors.toSet());
     }
 
     @Test
@@ -943,7 +993,7 @@ class PostReadDbTest {
     // ===== Walks =====
 
     @ParameterizedTest
-    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = {"NEAREST", "STANCE_NEWEST", "UPCOMING"})
+    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = {"NEAREST", "STANCE_NEWEST", "UPCOMING", "PAST"})
     void walkingASort_showsEveryPostOnceInOrder(PostSort sort) throws SQLException {
         for (boolean includePast : List.of(false, true)) {
             PostFeedFilters filters = filters(sort.name(), includePast, null, null);

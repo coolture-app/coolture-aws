@@ -309,7 +309,7 @@ public class FeedRepository {
             bindRules(b, viewer, at.asOf(), filters);
         });
         try (Connection conn = DatabaseConfig.getConnection()) {
-            return Upcoming.find(conn, query, viewer, filters.from(), at, limit);
+            return Upcoming.find(conn, query, null, viewer, filters.from(), at, limit);
         }
     }
 

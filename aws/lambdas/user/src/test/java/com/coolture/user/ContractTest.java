@@ -11,6 +11,7 @@ import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
+import com.coolture.common.dto.ProfileEventsDto;
 import com.coolture.common.dto.UserProfileDto;
 import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.dto.enums.MediaPurpose;
@@ -71,12 +72,12 @@ class ContractTest {
     }
 
     private static UserProfileDto minimalProfile(UUID id) {
-        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false, false, List.of(), List.of());
+        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false, false, List.of(), List.of(), null);
     }
 
     private static UserProfileDto fullProfile(UUID id) {
         return new UserProfileDto(id, "jan", "Jan", "Demo", avatar(), 1, 2, "Teatr", Instant.now(), true, false, true,
-            List.of("theatre", "cinema"), List.of("stage", "cinema"));
+            List.of("theatre", "cinema"), List.of("stage", "cinema"), new ProfileEventsDto(3, 1, 2, 0));
     }
 
     private static CursorPage<UserListItemDto> page() {
@@ -143,7 +144,7 @@ class ContractTest {
     @Test
     void theBlockersSlimProfile_matches() throws Exception {
         when(users.getByIdForCaller(OTHER, CALLER)).thenReturn(
-            new UserProfileDto(OTHER, "jan", "Jan", "Demo", avatar(), null, null, null, null, false, true, false, null, null));
+            new UserProfileDto(OTHER, "jan", "Jan", "Demo", avatar(), null, null, null, null, false, true, false, null, null, null));
 
         assertMatches(report("/users/" + OTHER, Request.Method.GET, signedIn("GET", "/users/" + OTHER, null, OTHER)));
     }
@@ -151,8 +152,8 @@ class ContractTest {
     @Test
     void pagesOfPeople_match() throws Exception {
         when(users.search(any(), any(), any(), anyInt())).thenReturn(page());
-        when(users.getFollowers(any(), any(), any(), anyInt())).thenReturn(page());
-        when(users.getFollowing(any(), any(), any(), anyInt())).thenReturn(page());
+        when(users.getFollowers(any(), any(), any(), any(), anyInt())).thenReturn(page());
+        when(users.getFollowing(any(), any(), any(), any(), anyInt())).thenReturn(page());
         when(users.getBlocking(any(), any(), any(), anyInt())).thenReturn(page());
 
         assertMatches(report("/users", Request.Method.GET,

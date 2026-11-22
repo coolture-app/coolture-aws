@@ -1,5 +1,7 @@
 package com.coolture.repository;
 
+import com.coolture.common.db.EventTime;
+
 /** The orders of GET /posts. Each order continues from a keyset, so paging can't repeat or lose a post. */
 public enum PostSort {
 
@@ -14,6 +16,13 @@ public enum PostSort {
         PostSql.ENGAGEMENT + " DESC, p.id DESC"),
     /** Two streams merged in Java (Upcoming), so no single keyset or order. */
     UPCOMING(null, null),
+    /**
+     * Minione: only ended events, the latest end first. The cursor holds just the last id, and its end is read again
+     * here, so the comparison is exact.
+     */
+    PAST(
+        "(" + EventTime.END + ", p.id) < ((SELECT " + EventTime.END + " FROM posts p WHERE p.id = ?::uuid), ?::uuid)",
+        EventTime.END + " DESC, p.id DESC"),
     /**
      * Nearest first, from the request's position, posts with a place only. The cursor holds just the last id: its
      * distance is measured again here, with the same expression, so the comparison is exact.
@@ -62,6 +71,11 @@ public enum PostSort {
     /** Whether the order needs the request's position. */
     public boolean needsPosition() {
         return this == NEAREST;
+    }
+
+    /** Whether the order shows only ended events. */
+    public boolean endedOnly() {
+        return this == PAST;
     }
 
     /** Whether the order needs the viewer's participation filter, as it orders by that stance. */

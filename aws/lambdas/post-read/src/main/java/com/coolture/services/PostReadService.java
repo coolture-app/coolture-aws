@@ -26,6 +26,7 @@ import java.util.UUID;
 public class PostReadService {
 
     private static final Set<String> VALID_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART", "NOT_INTERESTED", "interested", "takes_part", "not_interested");
+    private static final Set<String> SHARED_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART", "interested", "takes_part");
     private static final Set<String> VALID_REACTION_TYPES = Set.of("LIKE", "like");
 
     private final PostReadRepository repository;
@@ -42,7 +43,12 @@ public class PostReadService {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
 
+        validateParticipant(filters, callerId);
+
         PostSort sort = PostSort.parse(filters.sortBy());
+        if (sort.needsStances() && someoneElse(filters, callerId)) {
+            throw new IllegalArgumentException("participantId can't go with STANCE_NEWEST");
+        }
         if (sort.needsPosition() && (filters.latitude() == null || filters.longitude() == null)) {
             throw new IllegalArgumentException("sortBy NEAREST needs latitude and longitude");
         }
@@ -78,7 +84,32 @@ public class PostReadService {
     public List<PostMarkDto> getMapMarks(UUID callerId, PostFeedFilters filters, MapBoundsDto bounds, boolean excludeMine) throws SQLException {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
+        validateParticipant(filters, callerId);
         return repository.findPostMarks(filters, bounds, callerId, excludeMine);
+    }
+
+    /**
+     * Of someone else, only Interesuje mnie and Biorę udział can be asked for. Whether the viewer may see them is the
+     * query's rule, as on cards: a refused friend gets an empty list.
+     */
+    private static void validateParticipant(PostFeedFilters filters, UUID callerId) {
+        if (!someoneElse(filters, callerId)) {
+            return;
+        }
+        if (callerId == null) {
+            throw new SecurityException("Authentication is required to filter by participantId");
+        }
+        if (filters.participationTypes() == null || filters.participationTypes().isEmpty()
+            || !SHARED_PARTICIPATION_TYPES.containsAll(filters.participationTypes())) {
+            throw new IllegalArgumentException("participantId needs participationTypes of INTERESTED or TAKES_PART");
+        }
+        if (filters.reactionType() != null) {
+            throw new IllegalArgumentException("participantId can't go with reactionType");
+        }
+    }
+
+    private static boolean someoneElse(PostFeedFilters filters, UUID callerId) {
+        return filters.participantId() != null && !filters.participantId().equals(callerId);
     }
 
 

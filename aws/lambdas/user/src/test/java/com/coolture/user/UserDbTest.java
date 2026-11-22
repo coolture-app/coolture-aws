@@ -6,6 +6,7 @@ import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.storage.S3StorageService;
 import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.dto.UserListItemDto;
+import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.service.InterestService;
@@ -39,7 +40,8 @@ class UserDbTest {
     private static final UUID ANNA = UUID.fromString("e0000000-0000-0000-0000-000000000001");
     private static final UUID JAN = UUID.fromString("e0000000-0000-0000-0000-000000000002");
     private static final UUID OLA = UUID.fromString("e0000000-0000-0000-0000-000000000003");
-    private static final String ALL = "'" + ANNA + "', '" + JAN + "', '" + OLA + "'";
+    private static final UUID BARTEK = UUID.fromString("e0000000-0000-0000-0000-000000000004");
+    private static final String ALL = "'" + ANNA + "', '" + JAN + "', '" + OLA + "', '" + BARTEK + "'";
 
     private final UserService users = new UserService(new UserRepository(), new InterestRepository(), mock(S3StorageService.class));
     private final InterestService interests = new InterestService(new InterestRepository());
@@ -58,6 +60,8 @@ class UserDbTest {
 
     @AfterEach
     void removeRows() throws SQLException {
+        execute("DELETE FROM post_participations WHERE user_id IN (" + ALL + ")");
+        execute("DELETE FROM posts WHERE author_id IN (" + ALL + ")");
         execute("DELETE FROM user_relations WHERE source_user_id IN (" + ALL + ") OR target_user_id IN (" + ALL + ")");
         execute("DELETE FROM user_interests WHERE user_id IN (" + ALL + ")");
         execute("DELETE FROM user_kinds WHERE user_id IN (" + ALL + ")");
@@ -119,6 +123,42 @@ class UserDbTest {
     }
 
     @Test
+    void events_countEveryPost_andStancesOnlyForTheUserAndAFriendWhoShares() throws SQLException {
+        execute("INSERT INTO posts (author_id, title, starts_at, ends_at, type) VALUES ('" + ANNA + "', 'udb_soon', now() + interval '1 day', NULL, 'ONLINE'),"
+            + " ('" + ANNA + "', 'udb_over', now() - interval '2 days', now() - interval '1 day', 'ONLINE')");
+        execute("INSERT INTO post_participations (post_id, user_id, type) SELECT id, '" + JAN + "', 'TAKES_PART' FROM posts WHERE title = 'udb_soon'");
+        execute("INSERT INTO post_participations (post_id, user_id, type) SELECT id, '" + JAN + "', 'INTERESTED' FROM posts WHERE title = 'udb_over'");
+
+        var annas = users.getByIdForCaller(ANNA, OLA).events();
+        assertEquals(2, annas.posts());
+        assertEquals(1, annas.upcomingPosts());
+
+        assertEquals(1, users.getByIdForCaller(JAN, ANNA).events().takesPart());
+        assertEquals(0, users.getByIdForCaller(JAN, ANNA).events().interested());
+        assertEquals(1, users.getByIdForCaller(JAN, JAN).events().takesPart());
+        // Ola follows Jan, but he doesn't follow her back.
+        assertNull(users.getByIdForCaller(JAN, OLA).events().takesPart());
+        assertNull(users.getByIdForCaller(JAN, null).events().takesPart());
+
+        // As the tab's list, the count leaves out a post whose author is in a block with the viewer.
+        execute("INSERT INTO posts (author_id, title, starts_at, ends_at, type) VALUES ('" + OLA + "', 'udb_blocked', now() + interval '1 day', NULL, 'ONLINE')");
+        execute("INSERT INTO post_participations (post_id, user_id, type) SELECT id, '" + JAN + "', 'TAKES_PART' FROM posts WHERE title = 'udb_blocked'");
+        execute("INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES ('" + ANNA + "', '" + OLA + "', 'BLOCK')");
+        assertEquals(1, users.getByIdForCaller(JAN, ANNA).events().takesPart());
+        assertEquals(2, users.getByIdForCaller(JAN, JAN).events().takesPart());
+
+        execute("UPDATE users SET share_stances = false WHERE id = '" + JAN + "'");
+        assertNull(users.getByIdForCaller(JAN, ANNA).events().takesPart());
+        assertEquals(2, users.getByIdForCaller(JAN, JAN).events().takesPart());
+    }
+
+    @Test
+    void aTakenUsername_isAConflict() {
+        assertThrows(IllegalStateException.class, () -> users.update(ANNA, ANNA,
+            new UserProfileUpdateRequest("udb_jan", null, null, null, null)));
+    }
+
+    @Test
     void theBlocker_getsASlimProfile_andWhoeverWasBlocked_aNotFound() throws SQLException {
         users.block(ANNA, JAN);
 
@@ -146,14 +186,36 @@ class UserDbTest {
 
         assertEquals(List.of("udb_ola", "udb_anna"), usernames(users.search(ANNA, "udb_", null, 20)));
         assertEquals(List.of("udb_ola", "udb_jan"), usernames(users.search(JAN, "udb_", null, 20)));
-        assertEquals(List.of("udb_anna"), usernames(users.getFollowing(OLA, ANNA, null, 20)));
+        assertEquals(List.of("udb_anna"), usernames(users.getFollowing(OLA, ANNA, null, null, 20)));
         assertEquals(3, users.search(OLA, "udb_", null, 20).items().size(), "someone outside the block sees both");
-        assertEquals(2, users.getFollowing(OLA, OLA, null, 20).items().size(), "someone outside the block sees both");
+        assertEquals(2, users.getFollowing(OLA, OLA, null, null, 20).items().size(), "someone outside the block sees both");
 
-        assertNotFound(() -> users.getFollowers(JAN, ANNA, null, 20));
-        assertNotFound(() -> users.getFollowing(JAN, ANNA, null, 20));
+        assertNotFound(() -> users.getFollowers(JAN, ANNA, null, null, 20));
+        assertNotFound(() -> users.getFollowing(JAN, ANNA, null, null, 20));
         assertNotFound(() -> interests.getSelection(JAN, ANNA));
         assertNotFound(() -> interests.getSelection(ANNA, JAN));
+    }
+
+    @Test
+    void followLists_goByNameFromAToZ_elseByUsername_andPageInThatOrder() throws SQLException {
+        // Bartek has a last name but no first, so "udb_bartek" places him, after every name here.
+        execute("INSERT INTO users (id, username, last_name) VALUES ('" + BARTEK + "', 'udb_bartek', 'Adamski')");
+        follow(BARTEK, ANNA);
+        follow(OLA, BARTEK);
+
+        assertEquals(List.of("udb_jan", "udb_ola", "udb_bartek"), usernames(users.getFollowers(ANNA, ANNA, null, null, 20)));
+        assertEquals(List.of("udb_anna", "udb_jan", "udb_bartek"), usernames(users.getFollowing(OLA, OLA, null, null, 20)));
+
+        CursorPage<UserListItemDto> first = users.getFollowing(OLA, OLA, null, null, 2);
+        assertEquals(List.of("udb_anna", "udb_jan"), usernames(first));
+        assertEquals(List.of("udb_bartek"), usernames(users.getFollowing(OLA, OLA, null, first.page().nextCursor(), 2)));
+    }
+
+    @Test
+    void followLists_searchAsPeopleSearchDoes() throws SQLException {
+        assertEquals(List.of("udb_jan"), usernames(users.getFollowing(OLA, OLA, "KOWALSKI", null, 20)));
+        assertEquals(List.of("udb_anna"), usernames(users.getFollowing(OLA, OLA, "lodzka anna", null, 20)));
+        assertEquals(List.of(), usernames(users.getFollowers(JAN, JAN, "ola nowak", null, 20)), "a word in no column");
     }
 
     @Test

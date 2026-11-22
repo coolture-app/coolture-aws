@@ -22,7 +22,8 @@ import java.util.UUID;
  * Nadchodzące: /posts with sortBy=UPCOMING and /feed's fallback. Two streams from the moment m, the later of the list's
  * asOf and the filter's from: events starting at or after m, by start, and events already running at m, ending soonest
  * first and those with no end date last. Every RUNNING_EVERY-th card comes from the running stream, so running events are
- * neither always first nor always last. A stream that runs out leaves the other to continue alone.
+ * neither always first nor always last. A stream that runs out leaves the other to continue alone. With Pokaż minione,
+ * the events that ended before asOf follow both, latest end first.
  */
 public final class Upcoming {
 
@@ -33,10 +34,16 @@ public final class Upcoming {
     /**
      * Where a list stopped: its asOf, each stream's last key (null ids when the stream gave no card yet) and how many
      * cards came so far, which keeps the rhythm across pages. A running key with an id and no end is a post with no end
-     * date. Both cursors carry it as it is.
+     * date. Both cursors carry it as it is. Once both streams ran out, ended says the list is in its ended events, and
+     * endedEnd and endedId are the last one given.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Position(Instant asOf, Instant datedStart, UUID datedId, Instant runningEnd, UUID runningId, int count) {
+    public record Position(Instant asOf, Instant datedStart, UUID datedId, Instant runningEnd, UUID runningId, int count,
+                           @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean ended, Instant endedEnd, UUID endedId) {
+
+        public Position(Instant asOf, Instant datedStart, UUID datedId, Instant runningEnd, UUID runningId, int count) {
+            this(asOf, datedStart, datedId, runningEnd, runningId, count, false, null, null);
+        }
 
         public static Position start(Instant asOf) {
             return new Position(asOf, null, null, null, null, 0);
@@ -46,7 +53,15 @@ public final class Upcoming {
         @JsonIgnore
         public boolean isValid() {
             return asOf != null && count >= 0 && (datedStart == null) == (datedId == null)
-                && (runningEnd == null || runningId != null);
+                && (runningEnd == null || runningId != null)
+                && (endedEnd == null) == (endedId == null) && (ended || endedId == null);
+        }
+
+        Position endedAfter(PostCardDto last) {
+            return last == null
+                ? new Position(asOf, datedStart, datedId, runningEnd, runningId, count, true, endedEnd, endedId)
+                : new Position(asOf, datedStart, datedId, runningEnd, runningId, count, true,
+                    EventTime.end(last.startsAt(), last.endsAt(), last.openEnded()), last.id());
         }
 
         Instant moment(Instant from) {
@@ -64,12 +79,26 @@ public final class Upcoming {
         void bind(ParamBinder b) throws SQLException;
     }
 
-    /** Both streams from the given position, merged, with photos and friends' stances. */
-    public static Page find(Connection conn, Query query, UUID viewer, Instant from, Position at, int limit)
+    /**
+     * Both streams from the given position, merged, with photos and friends' stances. Once both ran out and ended isn't
+     * null, the events of ended (the list's query with ended events in place of its rule against them) that ended before
+     * asOf.
+     */
+    public static Page find(Connection conn, Query query, Query ended, UUID viewer, Instant from, Position at, int limit)
             throws SQLException {
-        List<PostCardDto> dated = Stream.DATED.read(conn, query, at, from, limit + 1);
-        List<PostCardDto> running = Stream.RUNNING.read(conn, query, at, from, limit + 1);
-        Page page = merge(dated, running, at, limit);
+        Page page = at.ended()
+            ? new Page(List.of(), false, at)
+            : merge(Stream.DATED.read(conn, query, at, from, limit + 1),
+                Stream.RUNNING.read(conn, query, at, from, limit + 1), at, limit);
+        if (!page.hasMore() && ended != null) {
+            int room = limit - page.items().size();
+            List<PostCardDto> past = Stream.ENDED.read(conn, ended, page.next(), from, room + 1);
+            List<PostCardDto> taken = past.subList(0, Math.min(room, past.size()));
+            List<PostCardDto> items = new ArrayList<>(page.items());
+            items.addAll(taken);
+            page = new Page(items, past.size() > room,
+                page.next().endedAfter(taken.isEmpty() ? null : taken.get(taken.size() - 1)));
+        }
         return new Page(Friends.withFriendStances(conn, viewer, MediaQueries.withPhotos(conn, page.items())),
             page.hasMore(), page.next());
     }
@@ -103,10 +132,10 @@ public final class Upcoming {
     /** Each stream orders by its key and the id, and continues after the position's last key for it. */
     private enum Stream {
 
-        DATED("p.starts_at >= ?::timestamptz", "p.starts_at") {
+        DATED("p.starts_at >= ?::timestamptz", "p.starts_at", "ASC", ">") {
             @Override
-            void bindWithin(ParamBinder b, Instant moment) throws SQLException {
-                b.bindTimestamp(moment);
+            void bindWithin(ParamBinder b, Position at, Instant from) throws SQLException {
+                b.bindTimestamp(at.moment(from));
             }
 
             @Override
@@ -120,9 +149,10 @@ public final class Upcoming {
             }
         },
 
-        RUNNING("p.starts_at < ?::timestamptz AND " + EventTime.END + " >= ?::timestamptz", EventTime.END) {
+        RUNNING("p.starts_at < ?::timestamptz AND " + EventTime.END + " >= ?::timestamptz", EventTime.END, "ASC", ">") {
             @Override
-            void bindWithin(ParamBinder b, Instant moment) throws SQLException {
+            void bindWithin(ParamBinder b, Position at, Instant from) throws SQLException {
+                Instant moment = at.moment(from);
                 b.bindTimestamp(moment).bindTimestamp(moment);
             }
 
@@ -135,17 +165,39 @@ public final class Upcoming {
             UUID lastId(Position at) {
                 return at.runningId();
             }
+        },
+
+        /** Bounded by asOf, not now, so an event that ends while the list is read can't come a second time here. */
+        ENDED(EventTime.END + " < ?::timestamptz", EventTime.END, "DESC", "<") {
+            @Override
+            void bindWithin(ParamBinder b, Position at, Instant from) throws SQLException {
+                b.bindTimestamp(at.asOf());
+            }
+
+            @Override
+            Instant lastKey(Position at) {
+                return at.endedEnd();
+            }
+
+            @Override
+            UUID lastId(Position at) {
+                return at.endedId();
+            }
         };
 
         private final String within;
         private final String key;
+        private final String order;
+        private final String after;
 
-        Stream(String within, String key) {
+        Stream(String within, String key, String order, String after) {
             this.within = within;
             this.key = key;
+            this.order = order;
+            this.after = after;
         }
 
-        abstract void bindWithin(ParamBinder b, Instant moment) throws SQLException;
+        abstract void bindWithin(ParamBinder b, Position at, Instant from) throws SQLException;
 
         abstract Instant lastKey(Position at);
 
@@ -155,15 +207,16 @@ public final class Upcoming {
             boolean continues = lastId(at) != null;
             String sql = query.sql()
                 + "  AND " + within + "\n"
-                // A null key is the end of a post with no end date.
-                + (continues ? "  AND (" + key + ", p.id) > (COALESCE(?::timestamptz, 'infinity'::timestamptz), ?::uuid)\n" : "")
-                + "ORDER BY " + key + " ASC, p.id ASC\n"
+                // A null key is the end of a post with no end date, which an ended event never has.
+                + (continues ? "  AND (" + key + ", p.id) " + after
+                    + " (COALESCE(?::timestamptz, 'infinity'::timestamptz), ?::uuid)\n" : "")
+                + "ORDER BY " + key + " " + order + ", p.id " + order + "\n"
                 + "LIMIT ?";
 
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 ParamBinder b = new ParamBinder(stmt, conn);
                 query.binds().bind(b);
-                bindWithin(b, at.moment(from));
+                bindWithin(b, at, from);
                 if (continues) {
                     b.bindTimestamp(lastKey(at)).bindUUID(lastId(at));
                 }
