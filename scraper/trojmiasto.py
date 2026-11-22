@@ -459,21 +459,25 @@ class Site:
         return response
 
     def listing_items(self) -> Iterator[ListingItem]:
-        """Each day's listing from today, each until a page adds nothing, because the site repeats its last page past
-        the end. An event listed on several days comes once, with its first day."""
-        seen: set[str] = set()
+        """Each day's listing from today, each until a page adds nothing to that day, because the site repeats its last
+        page past the end. An event listed on several days comes once, with its first day, and a later day's page
+        holding only those still leads to its next page."""
+        yielded: set[str] = set()
         first = self._today()
         for offset in range(self._days):
             url = DAY_LISTING_URL.format(day=(first + timedelta(days=offset)).isoformat())
+            on_day: set[str] = set()
             page_number = 0
             while True:
                 page_html = self._get(url, {LISTING_PAGE_PARAMETER: page_number}).text
-                items = [i for i in parse_listing(page_html) if i.url not in seen]
+                items = [i for i in parse_listing(page_html) if i.url not in on_day]
                 if not items:
                     break
                 for item in items:
-                    seen.add(item.url)
-                    yield item
+                    on_day.add(item.url)
+                    if item.url not in yielded:
+                        yielded.add(item.url)
+                        yield item
                 page_number += 1
 
     def event(self, item: ListingItem) -> Event | None:

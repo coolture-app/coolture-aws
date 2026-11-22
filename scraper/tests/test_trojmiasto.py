@@ -342,6 +342,19 @@ def test_listing_walks_each_day_and_gives_an_event_of_several_days_once():
     assert [day for day, page in session.requested if page == 0] == ['2026-11-28', '2026-11-29', '2026-11-30']
 
 
+
+def test_a_days_page_of_earlier_days_events_still_leads_to_its_next_page():
+    session = FakeListingSession([''], days={
+        '2026-11-28': [listing_html(1, 2)],
+        '2026-11-29': [listing_html(1, 2), listing_html(3, 4)],
+    })
+
+    site = Site(session, sleep=lambda _: None, today=lambda: date(2026, 11, 28), days=2)
+    urls = [i.url.rsplit('/', 1)[1] for i in site.listing_items()]
+
+    assert urls == ['1', '2', '3', '4']
+    assert ('2026-11-29', 2) in session.requested
+
 def listed(**overrides):
     fields = dict(url='https://www.trojmiasto.pl/imprezy/x-imp1.html', title='Koncert', category='koncerty',
                   city='Gdańsk', venue=None, start_date=None, hour=time(19, 0))
