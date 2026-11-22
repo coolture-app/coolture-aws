@@ -294,3 +294,52 @@ def test_should_fail_derive_kinds_when_kinds_have_no_vectors(monkeypatch):
     # when, then
     with pytest.raises(RuntimeError):
         app.lambda_handler({"action": "derive-kinds"}, None)
+
+
+def time_left(*seconds: float) -> MagicMock:
+    context = MagicMock()
+    context.get_remaining_time_in_millis.side_effect = [s * 1000 for s in seconds]
+    return context
+
+
+def test_should_embed_posts_without_a_current_vector_and_their_kinds_until_none_are_left(model, conn):
+    # given
+    other = "22222222-2222-2222-2222-222222222222"
+    conn.execute.return_value.fetchall.side_effect = [
+        [(UUID(POST_ID), *POST_ROW), (UUID(other), "Stand-up", None, None, None)],
+        KIND_ROWS,
+        [],
+    ]
+    conn.execute.return_value.fetchone.return_value = (0,)
+    model.encode.return_value = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+
+    # when
+    result = app.lambda_handler({"action": "embed-posts"}, time_left(120, 110, 100))
+
+    # then
+    assert result == {"posts": 2, "left": 0}
+    assert model.encode.call_args_list == [
+        call(["Jazz night Live jazz Klub Żak, Gdańsk", "Stand-up"], normalize_embeddings=True),
+    ]
+    assert conn.execute.call_args_list[1:3] == [
+        call(ANY, (POST_ID, [1.0, 0.0, 0.0], MODEL)),
+        call(ANY, (other, [0.0, 0.0, 1.0], MODEL)),
+    ]
+    assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
+        call(ANY, [(POST_ID, ["concerts"], MODEL), (other, ["stage"], MODEL)]),
+    ]
+
+
+def test_should_stop_before_the_timeout_and_say_how_many_posts_are_left(model, conn):
+    # given
+    conn.execute.return_value.fetchall.side_effect = [[(UUID(POST_ID), *POST_ROW)], KIND_ROWS]
+    conn.execute.return_value.fetchone.return_value = (40,)
+    model.encode.return_value = np.array([EMBEDDING], dtype=np.float32)
+
+    # when
+    result = app.lambda_handler({"action": "embed-posts"}, time_left(120, app.EMBED_POSTS_RESERVE_SECONDS))
+
+    # then
+    assert result == {"posts": 1, "left": 40}
+    assert len(model.encode.call_args_list) == 1
+

@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote_plus
 from uuid import UUID
@@ -18,6 +20,12 @@ logger.setLevel(logging.INFO)
 KEY_PREFIX = "posts/"
 EMBED_INTERESTS_ACTION = "embed-interests"
 DERIVE_KINDS_ACTION = "derive-kinds"
+EMBED_POSTS_ACTION = "embed-posts"
+EMBED_POSTS_BATCH = 8
+# embed-posts starts no batch with less time than this left, so the last batch, its writes and the reply fit.
+EMBED_POSTS_RESERVE_SECONDS = 30
+NOT_DELETED = "p.status <> 'DELETED' AND p.deleted_at IS NULL"
+WITHOUT_CURRENT_VECTOR = "NOT EXISTS (SELECT 1 FROM post_embeddings pe WHERE pe.post_id = p.id AND pe.model = %s)"
 
 _model = None
 _conn: psycopg.Connection | None = None
@@ -75,11 +83,11 @@ def post_ids_from_s3_event(body: str) -> list[UUID]:
 
 def find_post_content(conn: psycopg.Connection, post_id: UUID) -> PostContent | None:
     row = conn.execute(
-        """
+        f"""
         SELECT p.title, p.description, el.venue_name, el.city
         FROM posts p
         LEFT JOIN event_locations el ON el.id = p.event_location_id
-        WHERE p.id = %s AND p.status <> 'DELETED' AND p.deleted_at IS NULL
+        WHERE p.id = %s AND {NOT_DELETED}
         """,
         (str(post_id),),
     ).fetchone()
@@ -113,28 +121,78 @@ def process_post(post_id: UUID) -> None:
     logger.info("processing post %s: %r", post_id, post.title)
     # The model has no normalization layer, and user vectors average these, so length would act as a weight.
     vector = _get_model().encode(post.text, normalize_embeddings=True).tolist()
-    try:
-        upsert_embedding(
-            conn,
-            PostEmbeddingRecord(post_id=post_id, embedding=vector, model=settings.embedding_model),
-        )
-    except errors.ForeignKeyViolation:
-        logger.warning("post %s no longer exists, skipping", post_id)
-        return
+    store_vectors(conn, [(post_id, vector)])
 
-    logger.info("stored embedding for post %s", post_id)
+
+def store_vectors(conn: psycopg.Connection, vectors: list[tuple[UUID, list[float]]]) -> None:
+    """Each post's vector, then its kinds from it. A post gone in the meantime is skipped."""
+    stored = []
+    for post_id, vector in vectors:
+        try:
+            upsert_embedding(
+                conn,
+                PostEmbeddingRecord(post_id=post_id, embedding=vector, model=settings.embedding_model),
+            )
+        except errors.ForeignKeyViolation:
+            logger.warning("post %s no longer exists, skipping", post_id)
+            continue
+        logger.info("stored embedding for post %s", post_id)
+        stored.append((post_id, vector))
+    if not stored:
+        return
 
     kind_vectors = find_kind_vectors(conn)
     if kind_vectors is None:
-        logger.warning("kinds have no vectors for %s yet, run embed-interests; post %s has no kinds", settings.embedding_model, post_id)
+        logger.warning("kinds have no vectors for %s yet, run embed-interests; %d post(s) have no kinds", settings.embedding_model, len(stored))
         return
-    post_kinds = kinds.derive(kinds.cosines(vector, kind_vectors))
+    post_kinds = [(post_id, kinds.derive(kinds.cosines(vector, kind_vectors))) for post_id, vector in stored]
     try:
-        upsert_post_kinds(conn, [(post_id, post_kinds)])
+        upsert_post_kinds(conn, post_kinds)
     except errors.ForeignKeyViolation:
-        logger.warning("post %s no longer exists, skipping its kinds", post_id)
+        logger.warning("a post no longer exists, skipping the kinds of %s", [str(post_id) for post_id, _ in stored])
         return
-    logger.info("stored kinds %s for post %s", post_kinds, post_id)
+    for post_id, derived in post_kinds:
+        logger.info("stored kinds %s for post %s", derived, post_id)
+
+
+def find_posts_without_vector(conn: psycopg.Connection, limit: int) -> list[tuple[UUID, PostContent]]:
+    rows = conn.execute(
+        f"""
+        SELECT p.id, p.title, p.description, el.venue_name, el.city
+        FROM posts p
+        LEFT JOIN event_locations el ON el.id = p.event_location_id
+        WHERE {NOT_DELETED} AND {WITHOUT_CURRENT_VECTOR}
+        ORDER BY p.created_at DESC, p.id
+        LIMIT %s
+        """,
+        (settings.embedding_model, limit),
+    ).fetchall()
+    return [
+        (post_id, PostContent(title=title, description=description, venue_name=venue_name, city=city))
+        for post_id, title, description, venue_name, city in rows
+    ]
+
+
+def count_posts_without_vector(conn: psycopg.Connection) -> int:
+    return conn.execute(
+        f"SELECT count(*) FROM posts p WHERE {NOT_DELETED} AND {WITHOUT_CURRENT_VECTOR}",
+        (settings.embedding_model,),
+    ).fetchone()[0]
+
+
+def embed_posts_without_vector(conn: psycopg.Connection, seconds_left: Callable[[], float]) -> dict[str, int]:
+    """Newest first, in batches, until none are left or the time is nearly up. Returns how many are left for the next run."""
+    embedded = 0
+    while seconds_left() > EMBED_POSTS_RESERVE_SECONDS:
+        posts = find_posts_without_vector(conn, EMBED_POSTS_BATCH)
+        if not posts:
+            break
+        started = time.monotonic()
+        vectors = _get_model().encode([post.text for _, post in posts], normalize_embeddings=True).tolist()
+        store_vectors(conn, [(post_id, vector) for (post_id, _), vector in zip(posts, vectors)])
+        embedded += len(posts)
+        logger.info("embedded %d post(s) in %.1f s", len(posts), time.monotonic() - started)
+    return {"posts": embedded, "left": count_posts_without_vector(conn)}
 
 
 def find_kind_vectors(conn: psycopg.Connection) -> dict[str, list[float]] | None:
@@ -237,12 +295,14 @@ def embed_interests(conn: psycopg.Connection) -> int:
     return len(rows)
 
 
-def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if event.get("action") == EMBED_INTERESTS_ACTION:
         conn = _get_connection()
         return {"interests": embed_interests(conn), "kinds": embed_kinds(conn)}
     if event.get("action") == DERIVE_KINDS_ACTION:
         return {"posts": derive_all_kinds(_get_connection())}
+    if event.get("action") == EMBED_POSTS_ACTION:
+        return embed_posts_without_vector(_get_connection(), lambda: context.get_remaining_time_in_millis() / 1000)
 
     failures = []
     for record in event.get("Records", []):
