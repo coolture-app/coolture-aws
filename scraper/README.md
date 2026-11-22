@@ -22,7 +22,7 @@ make local                                            # in another terminal
 make scrape                                           # imports live as the local bot user
 make scrape ARGS='--limit 20'
 make scrape ARGS='--dry-run --limit 20'               # prints the posts as JSON lines, uploads and writes nothing
-make test-scraper
+make test-python                                      # its tests, with the other Python projects'
 ```
 
 ## Snapshot and seed
