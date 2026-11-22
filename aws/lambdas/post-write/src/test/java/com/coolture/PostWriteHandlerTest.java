@@ -77,8 +77,7 @@ class PostWriteHandlerTest {
                 "title": "Cool Event",
                 "description": "A very cool event",
                 "type": "ONLINE",
-                "visibility": "PUBLIC",
-                "startsAt": "2027-09-01T12:00:00Z"
+                "startsAt": "2030-09-01T12:00:00Z"
             }
         """;
 
@@ -245,7 +244,6 @@ class PostWriteHandlerTest {
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-            when(service.updatePost(eq(postId), eq(userId), any(), any())).thenReturn(null);
 
             handler.handleRequest(event, lambdaContext);
 
@@ -278,7 +276,6 @@ class PostWriteHandlerTest {
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(UUID.randomUUID());
-            when(service.updatePost(any(), any(), any(), any())).thenReturn(null);
 
             handler.handleRequest(event, lambdaContext);
 
