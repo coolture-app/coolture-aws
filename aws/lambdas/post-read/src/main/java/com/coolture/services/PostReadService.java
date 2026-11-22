@@ -25,9 +25,9 @@ import java.util.UUID;
 
 public class PostReadService {
 
-    private static final Set<String> VALID_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART", "NOT_INTERESTED", "interested", "takes_part", "not_interested");
-    private static final Set<String> SHARED_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART", "interested", "takes_part");
-    private static final Set<String> VALID_REACTION_TYPES = Set.of("LIKE", "like");
+    private static final Set<String> VALID_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART", "NOT_INTERESTED");
+    private static final Set<String> SHARED_PARTICIPATION_TYPES = Set.of("INTERESTED", "TAKES_PART");
+    private static final Set<String> VALID_REACTION_TYPES = Set.of("LIKE");
 
     private final PostReadRepository repository;
 

@@ -269,6 +269,11 @@ class PostReadHandlerTest {
         "kids, maybe",
         "latitude, 54.35",
         "longitude, 18.65",
+        "radiusKm, -1",
+        "radiusKm, 0",
+        "radiusKm, NaN",
+        "radiusKm, Infinity",
+        "radiusKm, abc",
     })
     void getFeed_whenAParameterIsInvalidOrHalfALocation_thenReturns400(String name, String value) throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of(name, value));
@@ -443,6 +448,28 @@ class PostReadHandlerTest {
         when(postReadService.getFriends(eq(postId), any())).thenThrow(new IllegalArgumentException("Post not found: " + postId));
 
         assertEquals(404, handler.handleRequest(event, lambdaContext).getStatusCode());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "leftUpper.latitude, 91",
+        "leftUpper.longitude, NaN",
+        "rightBottom.latitude, -91",
+        "rightBottom.longitude, 181",
+        "rightBottom.longitude, abc",
+    })
+    void handleRequest_whenAMapBoundIsInvalid_returns400(String name, String value) throws Exception {
+        Map<String, String> query = new java.util.HashMap<>(Map.of(
+            "leftUpper.latitude", "54.5",
+            "leftUpper.longitude", "18.0",
+            "rightBottom.latitude", "54.0",
+            "rightBottom.longitude", "19.0"
+        ));
+        query.put(name, value);
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/map", query);
+
+        assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+        verify(postReadService, never()).getMapMarks(any(), any(), any(), anyBoolean());
     }
 
     @Test

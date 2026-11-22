@@ -153,7 +153,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         Double lat = parseCoordinate(qp, "latitude", 90);
         Double lng = parseCoordinate(qp, "longitude", 180);
         requireFullLocation(lat, lng);
-        Double radiusKm = qp.get("radiusKm") != null ? Double.parseDouble(qp.get("radiusKm")) : null;
+        Double radiusKm = parseRadius(qp.get("radiusKm"));
 
         List<String> partTypes = parseList(qp.get("participationTypes"));
         String reactionType = qp.get("reactionType");
@@ -205,10 +205,10 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
     }
 
     private MapBoundsDto parseMapBounds(Map<String, String> qp) {
-        Double leftUpperLat = parseDouble(qp, "leftUpper.latitude");
-        Double leftUpperLng = parseDouble(qp, "leftUpper.longitude");
-        Double rightBottomLat = parseDouble(qp, "rightBottom.latitude");
-        Double rightBottomLng = parseDouble(qp, "rightBottom.longitude");
+        Double leftUpperLat = parseCoordinate(qp, "leftUpper.latitude", 90);
+        Double leftUpperLng = parseCoordinate(qp, "leftUpper.longitude", 180);
+        Double rightBottomLat = parseCoordinate(qp, "rightBottom.latitude", 90);
+        Double rightBottomLng = parseCoordinate(qp, "rightBottom.longitude", 180);
 
         if (leftUpperLat == null || leftUpperLng == null || rightBottomLat == null || rightBottomLng == null) {
             throw new IllegalArgumentException("Map bounds (leftUpper & rightBottom coordinates) are required");
@@ -220,9 +220,19 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         );
     }
 
-    private Double parseDouble(Map<String, String> qp, String key) {
-        String value = qp.get(key);
-        return value == null || value.isBlank() ? null : Double.parseDouble(value);
+    private Double parseRadius(String raw) {
+        if (raw == null) return null;
+        double value;
+        try {
+            value = Double.parseDouble(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid radiusKm");
+        }
+        // Written so that NaN fails too.
+        if (!(value > 0 && value < Double.POSITIVE_INFINITY)) {
+            throw new IllegalArgumentException("Invalid radiusKm");
+        }
+        return value;
     }
 
     /** Keys only by their form: a kind no post has matches nothing, like any filter. */

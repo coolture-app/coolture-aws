@@ -173,6 +173,25 @@ class PostReadServiceTest {
             List.of("TAKES_PART"), reaction, null, 20, sortBy, false, null, false, participant);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"interested", "takes_part", "not_interested", "OTHER"})
+    void getFeed_whenAParticipationTypeIsNotInUppercase_throws(String type) {
+        PostFeedFilters filters = new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            List.of(type), null, null, 20, "RECENT");
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), filters, null, 20));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void getFeed_whenAReactionTypeIsNotInUppercase_throws() {
+        PostFeedFilters filters = new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            null, "like", null, 20, "RECENT");
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), filters, null, 20));
+        verifyNoInteractions(repository);
+    }
+
     @Test
     void getFeed_whenNearestHasNoPosition_throws() {
         PostFeedFilters noPosition = new PostFeedFilters(
