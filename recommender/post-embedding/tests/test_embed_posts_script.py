@@ -9,10 +9,23 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = "scripts/embed-posts.sh"
-# The full path, because on Windows a bare "bash" runs WSL's from System32, whatever PATH says.
-BASH = shutil.which("bash")
 
-pytestmark = pytest.mark.skipif(BASH is None, reason="needs bash")
+
+def find_bash():
+    # On Windows the "bash" on PATH is usually WSL's in System32, which runs WSL's docker instead of the stand-in.
+    if os.name != "nt":
+        return shutil.which("bash")
+    git = shutil.which("git")
+    if git is None:
+        return None
+    exec_path = subprocess.run([git, "--exec-path"], capture_output=True, text=True).stdout.strip()
+    bash = Path(exec_path).parents[2] / "bin" / "bash.exe"
+    return str(bash) if bash.is_file() else None
+
+
+BASH = find_bash()
+
+pytestmark = pytest.mark.skipif(BASH is None, reason="needs bash, Git's on Windows")
 
 
 def run_script(tmp_path, docker_body):

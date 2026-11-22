@@ -78,6 +78,7 @@ Outside the browser, the same users are a header away, see [Who you are](#who-yo
 |---|---|
 | Ctrl+C in terminal 1 | Stops the API. If its containers stay behind, as happens on Windows, `make stop-lambdas` |
 | `make local` | Rebuilds and restarts only the API, after a code change |
+| `make local API_PORT=3100 FRONTEND_PORT=4300 WARM=LAZY` | A second API beside another clone's or worktree's, on its own port, for an `ng serve --port 4300` pointed at it, starting each function on first use. `make stop-lambdas` and the commands that call it remove only their own checkout's containers |
 | `make stop` | Stops everything. Data stays |
 | `make reset-db` | Deletes the database and the stored photos. Then `make up && make seed`, about 5 minutes. Keeps the geocoder's index |
 | `make clean-all` | Removes all containers, data, the geocoder's index, images, builds and `.venv`. Keeps the snapshot |
@@ -164,8 +165,7 @@ scripts/                        # deploy.sh, doctor.sh, embed-posts.sh, geo-publ
 |---|---|
 | `mvn test -f aws/lambdas/<module>/pom.xml` | A Java module's unit tests, after `make build-common`. `make build` runs them too |
 | `make test-db` | The database tests of posts, comments, users and PageRank, against `make up` |
-| `make test-python` | The Python Lambdas: embedding worker, PageRank, migrations, authorizer |
-| `make test-scraper` | The scraper |
+| `make test-python` | Every Python project: embedding worker, PageRank, migrations, authorizer, geocoder proxy, scraper |
 | `make api-test` | The request flows in `api/`, against `make dev` and `make seed` |
 
 ## Deploying to AWS
