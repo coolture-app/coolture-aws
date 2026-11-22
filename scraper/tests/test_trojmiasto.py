@@ -295,29 +295,51 @@ class FakeSessionResponse:
 
 
 class FakeListingSession:
+    """Each day's pages by the day in the URL; a day's last page repeats past its end, as on the site."""
 
-    def __init__(self, pages):
+    def __init__(self, pages, days=None):
+        self.days = days or {}
         self.pages = pages
         self.requested = []
 
     def get(self, url, params, timeout):
-        self.requested.append(params['strona'])
-        return FakeSessionResponse(self.pages[min(params['strona'], len(self.pages) - 1)])
+        day = url.rsplit(',', 1)[1]
+        self.requested.append((day, params['strona']))
+        pages = self.days.get(day, self.pages)
+        return FakeSessionResponse(pages[min(params['strona'], len(pages) - 1)])
+
+
+def one_day(session, **kwargs):
+    return Site(session, sleep=lambda _: None, today=lambda: date(2026, 11, 28), days=1, **kwargs)
 
 
 def test_listing_stops_when_a_page_adds_nothing():
     session = FakeListingSession([listing_html(1, 2), listing_html(2, 3)])
 
-    urls = [i.url for i in Site(session, sleep=lambda _: None).listing_items()]
+    urls = [i.url for i in one_day(session).listing_items()]
 
     assert [u.rsplit('/', 1)[1] for u in urls] == ['1', '2', '3']
-    assert session.requested == [0, 1, 2]
+    assert session.requested == [('2026-11-28', 0), ('2026-11-28', 1), ('2026-11-28', 2)]
 
 
 def test_empty_listing_ends_at_once():
     session = FakeListingSession([''])
 
-    assert list(Site(session, sleep=lambda _: None).listing_items()) == []
+    assert list(one_day(session).listing_items()) == []
+
+
+def test_listing_walks_each_day_and_gives_an_event_of_several_days_once():
+    session = FakeListingSession([''], days={
+        '2026-11-28': [listing_html(1, 2)],
+        '2026-11-29': [listing_html(2, 3)],
+        '2026-11-30': [''],
+    })
+
+    site = Site(session, sleep=lambda _: None, today=lambda: date(2026, 11, 28), days=3)
+    urls = [i.url.rsplit('/', 1)[1] for i in site.listing_items()]
+
+    assert urls == ['1', '2', '3']
+    assert [day for day, page in session.requested if page == 0] == ['2026-11-28', '2026-11-29', '2026-11-30']
 
 
 def listed(**overrides):
@@ -594,7 +616,7 @@ def test_every_site_request_waits_a_second():
     pauses = []
     session = FakeListingSession([listing_html(1, 2), listing_html(2, 3)])
 
-    list(Site(session, sleep=pauses.append).listing_items())
+    list(Site(session, sleep=pauses.append, today=lambda: date(2026, 11, 28), days=1).listing_items())
 
     assert pauses == [1.0, 1.0, 1.0]
 

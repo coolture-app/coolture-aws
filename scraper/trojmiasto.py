@@ -18,7 +18,10 @@ from images import Image
 log = logging.getLogger(__name__)
 
 SITE_URL = 'https://www.trojmiasto.pl'
-LISTING_URL = f'{SITE_URL}/imprezy/dni,30dni.html'
+# One listing per day: the 30-day listing (dni,30dni.html) stops at page 19, 400 events, while the days held 534 on
+# 2026-11-22. A busy Saturday is about 100.
+DAY_LISTING_URL = SITE_URL + '/imprezy/dzien,{day}'
+LISTING_DAYS = 30
 LISTING_PAGE_PARAMETER = 'strona'
 SITE_PAUSE_S = 1.0
 WARSAW = ZoneInfo('Europe/Warsaw')
@@ -441,10 +444,13 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
 class Site:
 
     def __init__(self, session: requests.Session, sleep: Callable[[float], None] = clock.sleep,
-                 pause: Callable[[], float] = lambda: SITE_PAUSE_S) -> None:
+                 pause: Callable[[], float] = lambda: SITE_PAUSE_S,
+                 today: Callable[[], date] = lambda: datetime.now(WARSAW).date(), days: int = LISTING_DAYS) -> None:
         self._session = session
         self._sleep = sleep
         self._pause = pause
+        self._today = today
+        self._days = days
 
     def _get(self, url: str, params: dict | None = None) -> requests.Response:
         self._sleep(self._pause())
@@ -453,18 +459,22 @@ class Site:
         return response
 
     def listing_items(self) -> Iterator[ListingItem]:
-        """Walks the listing until a page adds nothing, because the site repeats its last page past the end."""
+        """Each day's listing from today, each until a page adds nothing, because the site repeats its last page past
+        the end. An event listed on several days comes once, with its first day."""
         seen: set[str] = set()
-        page_number = 0
-        while True:
-            page_html = self._get(LISTING_URL, {LISTING_PAGE_PARAMETER: page_number}).text
-            items = [i for i in parse_listing(page_html) if i.url not in seen]
-            if not items:
-                return
-            for item in items:
-                seen.add(item.url)
-                yield item
-            page_number += 1
+        first = self._today()
+        for offset in range(self._days):
+            url = DAY_LISTING_URL.format(day=(first + timedelta(days=offset)).isoformat())
+            page_number = 0
+            while True:
+                page_html = self._get(url, {LISTING_PAGE_PARAMETER: page_number}).text
+                items = [i for i in parse_listing(page_html) if i.url not in seen]
+                if not items:
+                    break
+                for item in items:
+                    seen.add(item.url)
+                    yield item
+                page_number += 1
 
     def event(self, item: ListingItem) -> Event | None:
         try:

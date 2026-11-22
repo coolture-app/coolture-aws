@@ -1,7 +1,8 @@
 # Scraper
 
-Imports the events of the [trojmiasto.pl](https://www.trojmiasto.pl/imprezy/dni,30dni.html) 30-day listing as posts of a bot
-account. It runs outside AWS and writes only through the public API, as `POST /posts`, like any other client. Aurora isn't
+Imports the events of the next 30 days on [trojmiasto.pl](https://www.trojmiasto.pl/imprezy/dni,30dni.html) as posts of a bot
+account. It reads one listing per day (`/imprezy/dzien,2026-11-28`), because the 30-day listing stops at 400 events, and
+an event on several days comes once. It runs outside AWS and writes only through the public API, as `POST /posts`, like any other client. Aurora isn't
 reachable from outside the VPC.
 
 Each post has a real title and description, the event's photos, its address, and coordinates, which the feed's proximity signal needs. An event held
@@ -56,6 +57,7 @@ A local stack gets its events from a snapshot, so nobody waits for a live scrape
 The snapshot is gitignored, like the ledger, because scraped text and photos stay out of the public repository.
 
 Most of a run is waiting: the site gets at most one request a second, and a local write took a median of 3.3 s. The
+listings alone are about 120 pages, two minutes locally and about four on AWS. The
 geocoder is ours, so it isn't paced. Later runs skip the events already imported, without opening their pages. Each post then reaches
 `post-embedding` as usual. Locally that needs `make embed-posts`, because there are no S3 events.
 
