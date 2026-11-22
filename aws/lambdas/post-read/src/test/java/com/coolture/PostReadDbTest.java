@@ -409,7 +409,7 @@ class PostReadDbTest {
 
     private static PostFeedFilters ofKinds(List<String> kinds, boolean kids) {
         return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, "RECENT", false, kinds, kids);
+            null, null, null, 20, "RECENT", false, kinds, kids, null);
     }
 
     private Double pprOf(UUID post, Instant asOf) throws SQLException {

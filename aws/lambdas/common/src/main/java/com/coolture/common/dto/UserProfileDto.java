@@ -28,12 +28,4 @@ public record UserProfileDto(
     /** Kinds of event, in the catalogue's order. */
     List<String> kinds,
     ProfileEventsDto events
-) {
-
-    public UserProfileDto(UUID id, String username, String firstName, String lastName, MediaResourceDto avatar,
-                          Integer followersCount, Integer followingCount, String bio, Instant createdAt, boolean isFollowing,
-                          boolean isBlocked, boolean followsYou, List<String> interests, List<String> kinds) {
-        this(id, username, firstName, lastName, avatar, followersCount, followingCount, bio, createdAt, isFollowing,
-            isBlocked, followsYou, interests, kinds, null);
-    }
-}
+) {}

@@ -41,16 +41,6 @@ public record PostFeedFilters(
     public PostFeedFilters(
         String q, UUID authorId, PostStatus status, Boolean followed, PostType type,
         Instant from, Instant to, Double latitude, Double longitude, Double radiusKm,
-        List<String> participationTypes, String reactionType, String cursor, int limit, String sortBy, boolean includePast,
-        List<String> kinds, boolean kids
-    ) {
-        this(q, authorId, status, followed, type, from, to, latitude, longitude, radiusKm,
-            participationTypes, reactionType, cursor, limit, sortBy, includePast, kinds, kids, null);
-    }
-
-    public PostFeedFilters(
-        String q, UUID authorId, PostStatus status, Boolean followed, PostType type,
-        Instant from, Instant to, Double latitude, Double longitude, Double radiusKm,
         List<String> participationTypes, String reactionType, String cursor, int limit, String sortBy, boolean includePast
     ) {
         this(q, authorId, status, followed, type, from, to, latitude, longitude, radiusKm,

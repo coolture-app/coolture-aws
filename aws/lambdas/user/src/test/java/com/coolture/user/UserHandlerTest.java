@@ -493,7 +493,7 @@ class UserHandlerTest {
             security.when(() -> SecurityContext.getClaim(eq(event), any())).thenReturn(java.util.Optional.empty());
 
             when(service.getMe(eq(CALLER_ID), eq(FAKE_USERNAME), any(), any())).thenReturn(new UserProfileDto(
-                    CALLER_ID, FAKE_USERNAME, null, null, null, 0, 0, null, Instant.now(), false, false, false, List.of("jazz"), List.of()));
+                    CALLER_ID, FAKE_USERNAME, null, null, null, 0, 0, null, Instant.now(), false, false, false, List.of("jazz"), List.of(), null));
 
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
@@ -662,6 +662,6 @@ class UserHandlerTest {
     private static UserProfileDto profile(UUID id, String username) {
         return new UserProfileDto(
                 id, username, "Kunegunda", "Kowalska", null,
-                0, 0, "Bio", Instant.now(), false, false, false, List.of("theatre", "cinema"), List.of("stage"));
+                0, 0, "Bio", Instant.now(), false, false, false, List.of("theatre", "cinema"), List.of("stage"), null);
     }
 }

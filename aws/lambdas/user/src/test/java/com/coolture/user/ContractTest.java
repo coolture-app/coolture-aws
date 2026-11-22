@@ -72,7 +72,7 @@ class ContractTest {
     }
 
     private static UserProfileDto minimalProfile(UUID id) {
-        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false, false, List.of(), List.of());
+        return new UserProfileDto(id, "jan", null, null, null, 0, 0, null, null, false, false, false, List.of(), List.of(), null);
     }
 
     private static UserProfileDto fullProfile(UUID id) {
@@ -144,7 +144,7 @@ class ContractTest {
     @Test
     void theBlockersSlimProfile_matches() throws Exception {
         when(users.getByIdForCaller(OTHER, CALLER)).thenReturn(
-            new UserProfileDto(OTHER, "jan", "Jan", "Demo", avatar(), null, null, null, null, false, true, false, null, null));
+            new UserProfileDto(OTHER, "jan", "Jan", "Demo", avatar(), null, null, null, null, false, true, false, null, null, null));
 
         assertMatches(report("/users/" + OTHER, Request.Method.GET, signedIn("GET", "/users/" + OTHER, null, OTHER)));
     }
