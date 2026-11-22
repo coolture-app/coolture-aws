@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 import requests
 
-from geocoder import Geocoder, GeocoderUnavailable, Place
+from geocoder import Geocoder, GeocoderUnavailable, Place, is_street, same_street
 from trojmiasto import Event
 
 
@@ -36,8 +36,10 @@ class FakeSession:
         return FakeResponse({'features': [self.answers[asked]] if asked in self.answers else []})
 
 
-def feature(lon=18.5, lat=54.5, postcode='81-350'):
+def feature(lon=18.5, lat=54.5, postcode='81-350', name=None):
     properties = {'postcode': postcode} if postcode else {}
+    if name:
+        properties['name'] = name
     return {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [lon, lat]}, 'properties': properties}
 
 
@@ -52,7 +54,7 @@ def event(venue, street, building_number, city):
 
 
 def test_street_address_wins_and_is_exact():
-    session = FakeSession({'Portowa': feature()})
+    session = FakeSession({'Portowa': feature(name='Portowa')})
 
     place = geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
@@ -91,8 +93,9 @@ def test_venue_is_tried_when_the_street_misses_and_leaves_out_stops():
     place = geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
     assert place.exact is True
-    path, params = session.requests[1]
-    assert (path, params['q']) == ('api', 'Klub, Gdynia')
+    assert [params.get('q') for _, params in session.requests] == [None, 'Portowa 9, Gdynia', 'Klub, Gdynia']
+    path, params = session.requests[2]
+    assert path == 'api'
     assert 'osm.highway.bus_stop' in params['exclude']
 
 
@@ -131,7 +134,7 @@ def test_no_city_is_not_looked_up():
 
 
 def test_each_address_is_asked_once():
-    session = FakeSession({'Portowa': feature()})
+    session = FakeSession({'Portowa': feature(name='Portowa')})
     subject = geocoder(session)
 
     subject.locate(event('Klub', 'Portowa', '9', 'Gdynia'))
@@ -167,7 +170,7 @@ def test_a_failed_request_on_a_street_does_not_fall_back_to_the_city_centre():
 
 
 def test_a_failed_request_is_not_remembered():
-    session = FakeSession({'Portowa': feature()}, error=requests.ConnectionError('down'))
+    session = FakeSession({'Portowa': feature(name='Portowa')}, error=requests.ConnectionError('down'))
     subject = geocoder(session)
 
     with pytest.raises(GeocoderUnavailable):
@@ -201,3 +204,56 @@ def test_an_answer_of_the_wrong_shape_means_the_service_could_not_be_asked(body)
 
     with pytest.raises(GeocoderUnavailable):
         geocoder(session).locate(event(None, 'Portowa', '9', 'Gdynia'))
+
+
+def test_a_structured_answer_on_another_street_gives_way_to_the_free_text():
+    session = FakeSession({'pl. Kaszubski': feature(18.47, 54.47, name='Trasa Kaszubska – Kaszëbskô Darga'),
+                           'pl. Kaszubski 7B, Gdynia': feature(18.54, 54.52, name='Plac Kaszubski')})
+
+    place = geocoder(session).locate(event('Cafe Strych', 'pl. Kaszubski', '7B', 'Gdynia'))
+
+    assert (place.latitude, place.longitude, place.exact) == (54.52, 18.54, True)
+
+
+def test_a_hall_in_the_street_field_is_not_searched_and_the_venue_places_it():
+    session = FakeSession({'Hevelianum, Gdańsk': feature(18.64, 54.36)})
+
+    place = geocoder(session).locate(event('Hevelianum', 'w Sali Haxo', None, 'Gdańsk'))
+
+    assert (place.latitude, place.longitude) == (54.36, 18.64)
+    assert [params.get('q') for _, params in session.requests] == ['Hevelianum, Gdańsk']
+
+
+@pytest.mark.parametrize('street, expected', [
+    ('Portowa', True), ('w Sali Haxo', False), ('W sali kameralnej', False), ('we Dworze Artusa', False),
+    ('Sala Koncertowa', False), ('35/38', False), ('', False), (None, False), ('Wały Jagiellońskie', True),
+    ('Wielopole', True),
+])
+def test_what_counts_as_a_street(street, expected):
+    assert is_street(street) is expected
+
+
+@pytest.mark.parametrize('asked, properties, expected', [
+    ('pl. Kaszubski', {'name': 'Plac Kaszubski'}, True),
+    ('pl. Kaszubski', {'name': 'Trasa Kaszubska – Kaszëbskô Darga'}, False),
+    ('Gradowa', {'street': 'Gradowa', 'name': 'Hevelianum'}, True),
+    ('gen. J. Hallera', {'name': 'Generała Józefa Hallera'}, True),
+    ('al. Zwycięstwa', {'name': 'Aleja Zwycięstwa'}, True),
+    ('Łąkowa', {'name': 'Lakowa'}, True),
+    ('3 Maja', {'name': '3 Maja'}, True),
+    ('Franciszka Rakoczego 11/U3', {'street': 'Franciszka Rakoczego', 'name': 'Sun Way Travel'}, True),
+    ('Portowa', {}, False),
+    ('ul.', {'name': 'Portowa'}, False),
+])
+def test_the_same_street(asked, properties, expected):
+    assert same_street(asked, properties) is expected
+
+
+def test_a_number_left_in_the_street_is_sent_as_the_house_number():
+    session = FakeSession({'Franciszka Rakoczego': feature(name='Sun Way Travel')})
+    session.answers['Franciszka Rakoczego']['properties']['street'] = 'Franciszka Rakoczego'
+
+    geocoder(session).locate(event('Good Time', 'Franciszka Rakoczego 11/U3', None, 'Gdańsk'))
+
+    assert session.requests[0][1]['street'] == 'Franciszka Rakoczego'
+    assert session.requests[0][1]['housenumber'] == '11'

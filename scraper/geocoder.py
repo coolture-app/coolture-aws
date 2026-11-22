@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -14,7 +15,13 @@ REGION = '16.5,53.3,20.0,55.0'
 EXCLUDED = ('osm.highway.bus_stop', 'osm.public_transport', 'osm.amenity.shelter')
 # Photon's structured search answers 400 to "35/38" or "27-31/M.30". The leading number finds the building.
 HOUSE_NUMBER = re.compile(r'\d+[a-zA-Z]?')
+# The site's splitter leaves a number like "11/U3" in the street, and without it Photon gives the street's middle.
+TRAILING_NUMBER = re.compile(r'^(?P<street>.*[^\d\s])\s+(?P<number>\d\S*)$')
 WRONG_SHAPE = (KeyError, IndexError, AttributeError, TypeError, ValueError)
+# The site sometimes puts a hall in the street field ("w Sali Haxo"), which a search would place on some other street.
+NOT_A_STREET = re.compile(r'^(w|we|sala|sali)\b', re.IGNORECASE)
+# Words that say what kind of street it is, which Photon writes out or leaves out ("pl." for "Plac").
+STREET_KINDS = {'ul', 'ulica', 'al', 'aleja', 'aleje', 'pl', 'plac', 'os', 'osiedle', 'rondo', 'skwer', 'bulwar'}
 
 
 class GeocoderUnavailable(RuntimeError):
@@ -44,31 +51,40 @@ class Geocoder:
             return None
 
         queries = []
-        if event.street:
-            query = {'street': event.street, 'city': city}
-            number = HOUSE_NUMBER.match(event.building_number or '')
+        street, building_number = event.street, event.building_number
+        trailing = TRAILING_NUMBER.match(street or '')
+        if trailing and not building_number:
+            street, building_number = trailing['street'], trailing['number']
+        if is_street(street):
+            query = {'street': street, 'city': city}
+            number = HOUSE_NUMBER.match(building_number or '')
             if number:
                 query['housenumber'] = number.group()
-            queries.append(('structured', query))
+            # The structured search can answer with another street of a similar name ("pl. Kaszubski" gave Trasa
+            # Kaszubska), where the free text finds the right one, so each answer must name the street asked for.
+            queries.append(('structured', query, street))
+            address = f'{street} {number.group()}' if number else street
+            queries.append(('api', {'q': f'{address}, {city}', 'exclude': EXCLUDED}, street))
         if event.venue:
-            queries.append(('api', {'q': f'{event.venue}, {city}', 'exclude': EXCLUDED}))
+            queries.append(('api', {'q': f'{event.venue}, {city}', 'exclude': EXCLUDED}, None))
 
-        for path, query in queries:
-            place = self._search(path, query, exact=True)
+        for path, query, street in queries:
+            place = self._search(path, query, exact=True, street=street)
             if place is not None:
                 return place
         return self._search('api', {'q': city, 'layer': 'city'}, exact=False)
 
-    def _search(self, path: str, query: dict, exact: bool) -> Place | None:
-        key = (path, *sorted(query.items()))
-        return self._remembered(key, lambda: self._first(path, {**query, 'countrycode': 'PL', 'bbox': REGION}, exact))
+    def _search(self, path: str, query: dict, exact: bool, street: str | None = None) -> Place | None:
+        key = (path, street, *sorted(query.items()))
+        return self._remembered(
+            key, lambda: self._first(path, {**query, 'countrycode': 'PL', 'bbox': REGION}, exact, street))
 
     def _remembered(self, key: tuple, ask: Callable[[], Place | None]) -> Place | None:
         if key not in self._answers:
             self._answers[key] = ask()
         return self._answers[key]
 
-    def _first(self, path: str, params: dict, exact: bool) -> Place | None:
+    def _first(self, path: str, params: dict, exact: bool, street: str | None) -> Place | None:
         try:
             response = self._session.get(f'{self._base_url}/{path}', timeout=20,
                                          params={**params, 'limit': 1, 'lang': 'default'})
@@ -76,8 +92,11 @@ class Geocoder:
             features = response.json()['features']
             if features == []:
                 return None
+            properties = features[0]['properties']
+            if street is not None and not same_street(street, properties):
+                return None
             longitude, latitude = features[0]['geometry']['coordinates']
-            return Place(float(latitude), float(longitude), features[0]['properties'].get('postcode'), exact)
+            return Place(float(latitude), float(longitude), properties.get('postcode'), exact)
         except requests.ConnectionError as error:
             raise GeocoderUnavailable(f'Photon is not answering at {self._base_url}. Locally: make geo-index once, '
                                       f'then make up. error={error}') from error
@@ -85,3 +104,22 @@ class Geocoder:
             raise GeocoderUnavailable(f'Photon request failed path={path} params={params} error={error}') from error
         except WRONG_SHAPE as error:
             raise GeocoderUnavailable(f'Photon gave an unexpected answer path={path} error={error!r}') from error
+
+
+def is_street(street: str | None) -> bool:
+    return bool(street) and any(c.isalpha() for c in street) and not NOT_A_STREET.match(street.strip())
+
+
+def same_street(asked: str, properties: dict) -> bool:
+    """Whether Photon's answer is on the street asked for: every word of letters in the asked name begins a word of the
+    answer's street, or of its name when the answer is the street itself, so "gen. Hallera" finds "Generała Józefa
+    Hallera". Numbers are left out, since some streets arrive with their house number ("Rakoczego 11/U3")."""
+    found = _words(properties.get('street') or properties.get('name') or '')
+    wanted = [w for w in _words(asked) if w not in STREET_KINDS and len(w) > 1 and w.isalpha()]
+    return bool(wanted) and all(any(f.startswith(w) for f in found) for w in wanted)
+
+
+def _words(text: str) -> list[str]:
+    plain = unicodedata.normalize('NFKD', text.lower().replace('ł', 'l'))
+    plain = ''.join(c for c in plain if not unicodedata.combining(c))
+    return re.findall(r'[a-z0-9]+', plain)
