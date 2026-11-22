@@ -18,10 +18,10 @@ This folder is inside `post-read` because that Lambda serves everything describe
 | **Used by** | The home page's "Dla Ciebie" tab, with or without search and filters | The "Wszystkie" tab, My Events, profiles |
 | **Input** | First page: `limit`, location, filters. Later pages: `cursor`, `limit`, the same filters | All filters and sorts, plus `includePast` |
 | **Contains** | Posts new to this viewer, ranked, narrowed by the filters | Everything visible, minus old events by default |
-| **Order** | Score, or upcoming if ranking fails | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST` |
+| **Order** | Score, or upcoming if ranking fails | `RECENT`, `POPULAR`, `UPCOMING`, `NEAREST`, `PAST` or `STANCE_NEWEST` |
 
 **The filters mean the same everywhere:** `q`, `authorId`, `status`, `followed`, `type`, `from`, `to`,
-`includePast`, and `radiusKm` around `latitude`/`longitude`. One piece of SQL applies them to `/feed`, `/posts` and `/posts/map`.
+`includePast`, `kinds`, `kids`, and `radiusKm` around `latitude`/`longitude`. One piece of SQL applies them to `/feed`, `/posts` and `/posts/map`.
 
 **Dates match by overlap.** A post matches `from` and `to` if it runs at any moment between them: `starts_at <= to` and its
 end `>= from`, either side optional. An exhibition running all month matches a weekend's dates.
@@ -42,8 +42,6 @@ lists them all, for the list behind the card's friends line.
 
 **Photos:** every `PostCard` has `photos`, all of the post's photos with the cover first, at most 8. A post can't have more than 8
 (`PostLimits.MAX_PHOTOS` in `common`; `POST` and `PUT /posts` return `400` above it).
-`GET /posts/recommendations` no longer exists.
-
 ## `GET /feed`
 
 ```
@@ -73,15 +71,13 @@ GET /feed?limit=20&cursor=eyJ2Ijox...                 every later page
 
 ### What the feed may show
 
-The fallback order uses exactly the same rules.
+The fallback order uses the same rules, except that it never shows ended events.
 
 | A post appears in `/feed` only if | Signed in | Guest |
 |---|---|---|
 | Not deleted | Yes | Yes |
 | Event hasn't ended, checked against the real time on every page, unless `includePast`, `from` or `to` is set | Yes | Yes |
 | Created at or before the session's `asOf` | Yes | Yes |
-| Public | Yes | Yes |
-| Or friends-only, and the viewer follows the author | Yes | No |
 | Not the viewer's own post | Yes | n/a |
 | Not liked, saved, attending or marked "Nie dla mnie" | Yes | n/a |
 | No block between viewer and author, in either direction | Yes | n/a |
@@ -94,7 +90,7 @@ Commenting doesn't hide a post. A post liked during a session stays where it is,
 |---|---|
 | User or post has no vector, or their vectors come from different embedding models | `RANKED`, similarity is neutral |
 | No location, or an online post | `RANKED`, distance is neutral |
-| No PageRank score for the viewer and post, or no run finished within `PPR_RUN_MAX_AGE_HOURS` before the session | `RANKED`, the PageRank part is neutral |
+| No PageRank score for the viewer and post, or no recent PageRank run before the session | `RANKED`, the PageRank part is neutral |
 | Guest | `RANKED`, on time, popularity and location |
 | Ranking query fails or takes over 5 seconds, or scoring throws | `200` with `mode: UPCOMING` in the order of `sortBy=UPCOMING` below, and a server log line with the reason |
 | The upcoming query also fails, or the database is down | `500` |
