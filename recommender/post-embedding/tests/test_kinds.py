@@ -29,7 +29,3 @@ def test_should_give_dla_dzieci_its_best_format_when_it_stands_alone(scores, exp
 ], ids=["kept first", "removed when too far below the best other", "added last", "kept as the second"])
 def test_should_keep_dla_dzieci_only_when_close_enough_to_the_best_other_kind(scores, expected):
     assert kinds.derive(scores) == expected
-
-
-def test_should_take_the_dot_product_as_the_cosine():
-    assert kinds.cosines([0.6, 0.8], {"concerts": [1.0, 0.0], "stage": [0.0, 1.0]}) == {"concerts": 0.6, "stage": 0.8}

@@ -108,17 +108,11 @@ def test_city_centre_is_the_last_resort_and_not_exact():
     assert session.requests[-1][1]['layer'] == 'city'
 
 
-def test_a_hit_keeps_its_own_postal_code_and_asks_nothing_more():
-    session = FakeSession({'Gdynia': feature()})
+@pytest.mark.parametrize('postcode, expected', [('81-350', '81-350'), (None, None)])
+def test_a_hit_gives_its_own_postal_code_and_asks_nothing_more(postcode, expected):
+    session = FakeSession({'Gdynia': feature(postcode=postcode)})
 
-    assert geocoder(session).locate(event(None, None, None, 'Gdynia')).postal_code == '81-350'
-    assert len(session.requests) == 1
-
-
-def test_a_hit_with_no_postal_code_asks_nothing_more_by_itself():
-    session = FakeSession({'Gdynia': feature(postcode=None)})
-
-    assert geocoder(session).locate(event(None, None, None, 'Gdynia')).postal_code is None
+    assert geocoder(session).locate(event(None, None, None, 'Gdynia')).postal_code == expected
     assert len(session.requests) == 1
 
 
@@ -133,18 +127,9 @@ def test_no_city_is_not_looked_up():
     assert session.requests == []
 
 
-def test_each_address_is_asked_once():
-    session = FakeSession({'Portowa': feature(name='Portowa')})
-    subject = geocoder(session)
-
-    subject.locate(event('Klub', 'Portowa', '9', 'Gdynia'))
-    subject.locate(event('Klub', 'Portowa', '9', 'Gdynia'))
-
-    assert len(session.requests) == 1
-
-
-def test_a_miss_is_remembered_too():
-    session = FakeSession()
+@pytest.mark.parametrize('answers', [{'Portowa': feature(name='Portowa')}, {}], ids=['a hit', 'a miss'])
+def test_each_address_is_asked_once_whatever_the_answer(answers):
+    session = FakeSession(answers)
     subject = geocoder(session)
 
     subject.locate(event('Klub', 'Portowa', '9', 'Gdynia'))

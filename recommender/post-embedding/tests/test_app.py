@@ -13,7 +13,7 @@ POST_ID = "11111111-1111-1111-1111-111111111111"
 POST_KEY = f"posts/{POST_ID}"
 POST_ROW = ("Jazz night", "Live jazz", "Klub Żak", "Gdańsk")
 EMBEDDING = [0.5, 0.25, 1.0]
-MODEL = "sdadas/mmlw-roberta-base"
+MODEL = app.settings.embedding_model
 NO_FAILURES = {"batchItemFailures": []}
 KIND_ROWS = [("concerts", [1.0, 0.0, 0.0]), ("stage", [0.0, 0.0, 1.0])]
 
@@ -282,7 +282,9 @@ def test_should_rederive_every_post_and_drop_other_models_kinds_when_invoked_wit
     assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
         call(ANY, [(POST_ID, ["concerts"], MODEL), (other, ["stage"], MODEL)]),
     ]
-    assert conn.execute.call_args_list[-1] == call(ANY, (MODEL,))
+    delete = conn.execute.call_args_list[-1]
+    assert "DELETE FROM rec_post_kinds" in delete.args[0]
+    assert delete.args[1] == (MODEL,)
 
 
 def test_should_fail_derive_kinds_when_kinds_have_no_vectors(monkeypatch):
