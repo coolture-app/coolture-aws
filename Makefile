@@ -211,7 +211,7 @@ test-python: $(VENV_PY) ## Run the unit tests of every Python project: recommend
 
 test-db: build-common $(VENV_PY) ## Run the database tests of posts, comments, users and PageRank against `make up`
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-read/pom.xml -Dtest=PostReadDbTest
-	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/post-write/pom.xml -Dtest=PostWriteDbTest
+	@DB_TEST=true DB_HOST=localhost AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=eu-central-1 mvn test -f aws/lambdas/post-write/pom.xml -Dtest=PostWriteDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/comment-read/pom.xml -Dtest=CommentReadDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/comment-write/pom.xml -Dtest=CommentWriteDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/user/pom.xml -Dtest=UserDbTest
