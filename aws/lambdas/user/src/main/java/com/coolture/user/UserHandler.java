@@ -265,7 +265,7 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         String limitStr = getQueryParam(event, "limit");
         int limit = limitStr != null ? Integer.parseInt(limitStr) : 20;
 
-        CursorPage<UserListItemDto> page = service.getFollowers(userId, callerId, cursor, limit);
+        CursorPage<UserListItemDto> page = service.getFollowers(userId, callerId, getQueryParam(event, "q"), cursor, limit);
         return ApiResponse.ok(page);
     }
 
@@ -276,7 +276,7 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
         String limitStr = getQueryParam(event, "limit");
         int limit = limitStr != null ? Integer.parseInt(limitStr) : 20;
 
-        CursorPage<UserListItemDto> page = service.getFollowing(userId, callerId, cursor, limit);
+        CursorPage<UserListItemDto> page = service.getFollowing(userId, callerId, getQueryParam(event, "q"), cursor, limit);
         return ApiResponse.ok(page);
     }
 

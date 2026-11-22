@@ -152,8 +152,8 @@ class ContractTest {
     @Test
     void pagesOfPeople_match() throws Exception {
         when(users.search(any(), any(), any(), anyInt())).thenReturn(page());
-        when(users.getFollowers(any(), any(), any(), anyInt())).thenReturn(page());
-        when(users.getFollowing(any(), any(), any(), anyInt())).thenReturn(page());
+        when(users.getFollowers(any(), any(), any(), any(), anyInt())).thenReturn(page());
+        when(users.getFollowing(any(), any(), any(), any(), anyInt())).thenReturn(page());
         when(users.getBlocking(any(), any(), any(), anyInt())).thenReturn(page());
 
         assertMatches(report("/users", Request.Method.GET,

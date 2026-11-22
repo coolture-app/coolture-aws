@@ -40,7 +40,8 @@ class UserDbTest {
     private static final UUID ANNA = UUID.fromString("e0000000-0000-0000-0000-000000000001");
     private static final UUID JAN = UUID.fromString("e0000000-0000-0000-0000-000000000002");
     private static final UUID OLA = UUID.fromString("e0000000-0000-0000-0000-000000000003");
-    private static final String ALL = "'" + ANNA + "', '" + JAN + "', '" + OLA + "'";
+    private static final UUID BARTEK = UUID.fromString("e0000000-0000-0000-0000-000000000004");
+    private static final String ALL = "'" + ANNA + "', '" + JAN + "', '" + OLA + "', '" + BARTEK + "'";
 
     private final UserService users = new UserService(new UserRepository(), new InterestRepository(), mock(S3StorageService.class));
     private final InterestService interests = new InterestService(new InterestRepository());
@@ -178,14 +179,36 @@ class UserDbTest {
 
         assertEquals(List.of("udb_ola", "udb_anna"), usernames(users.search(ANNA, "udb_", null, 20)));
         assertEquals(List.of("udb_ola", "udb_jan"), usernames(users.search(JAN, "udb_", null, 20)));
-        assertEquals(List.of("udb_anna"), usernames(users.getFollowing(OLA, ANNA, null, 20)));
+        assertEquals(List.of("udb_anna"), usernames(users.getFollowing(OLA, ANNA, null, null, 20)));
         assertEquals(3, users.search(OLA, "udb_", null, 20).items().size(), "someone outside the block sees both");
-        assertEquals(2, users.getFollowing(OLA, OLA, null, 20).items().size(), "someone outside the block sees both");
+        assertEquals(2, users.getFollowing(OLA, OLA, null, null, 20).items().size(), "someone outside the block sees both");
 
-        assertNotFound(() -> users.getFollowers(JAN, ANNA, null, 20));
-        assertNotFound(() -> users.getFollowing(JAN, ANNA, null, 20));
+        assertNotFound(() -> users.getFollowers(JAN, ANNA, null, null, 20));
+        assertNotFound(() -> users.getFollowing(JAN, ANNA, null, null, 20));
         assertNotFound(() -> interests.getSelection(JAN, ANNA));
         assertNotFound(() -> interests.getSelection(ANNA, JAN));
+    }
+
+    @Test
+    void followLists_goByNameFromAToZ_elseByUsername_andPageInThatOrder() throws SQLException {
+        // Bartek has no names, so "udb_bartek" places him, after every name here.
+        execute("INSERT INTO users (id, username) VALUES ('" + BARTEK + "', 'udb_bartek')");
+        follow(BARTEK, ANNA);
+        follow(OLA, BARTEK);
+
+        assertEquals(List.of("udb_jan", "udb_ola", "udb_bartek"), usernames(users.getFollowers(ANNA, ANNA, null, null, 20)));
+        assertEquals(List.of("udb_anna", "udb_jan", "udb_bartek"), usernames(users.getFollowing(OLA, OLA, null, null, 20)));
+
+        CursorPage<UserListItemDto> first = users.getFollowing(OLA, OLA, null, null, 2);
+        assertEquals(List.of("udb_anna", "udb_jan"), usernames(first));
+        assertEquals(List.of("udb_bartek"), usernames(users.getFollowing(OLA, OLA, null, first.page().nextCursor(), 2)));
+    }
+
+    @Test
+    void followLists_searchAsPeopleSearchDoes() throws SQLException {
+        assertEquals(List.of("udb_jan"), usernames(users.getFollowing(OLA, OLA, "KOWALSKI", null, 20)));
+        assertEquals(List.of("udb_anna"), usernames(users.getFollowing(OLA, OLA, "lodzka anna", null, 20)));
+        assertEquals(List.of(), usernames(users.getFollowers(JAN, JAN, "ola nowak", null, 20)), "a word in no column");
     }
 
     @Test

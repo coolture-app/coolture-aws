@@ -17,8 +17,10 @@ import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.repository.UserRepository.AvatarRecord;
+import com.coolture.user.repository.UserRepository.FollowRow;
 import com.coolture.user.repository.UserRepository.HomeRecord;
 import com.coolture.user.repository.UserRepository.ListedUser;
+import com.coolture.user.repository.UserRepository.NameCursor;
 import com.coolture.user.repository.UserRepository.UserEntity;
 
 import java.sql.SQLException;
@@ -206,36 +208,41 @@ public class UserService {
         return Math.round(coordinate * 100) / 100.0;
     }
 
-    public CursorPage<UserListItemDto> getFollowers(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
-        if (limit < 1 || limit > 100) {
-            throw new IllegalArgumentException("Limit must be between 1 and 100");
-        }
-        if (!userRepository.existsById(targetUserId)) {
-            throw new IllegalArgumentException("User " + targetUserId + " not found");
-        }
-        requireNoBlock(targetUserId, callerId);
-        Optional<CursorPayload> payload = CursorCodec.decode(cursor);
-        Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
-        UUID cursorId = payload.map(CursorPayload::id).orElse(null);
-
-        List<UserRepository.UserRelationRow> rows = userRepository.findFollowers(targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
-        return toRelationPage(rows, limit);
+    public CursorPage<UserListItemDto> getFollowers(UUID targetUserId, UUID callerId, String q, String cursor, int limit) throws SQLException {
+        NameCursor after = checkFollowList(targetUserId, callerId, cursor, limit);
+        return toFollowPage(userRepository.findFollowers(targetUserId, callerId, q, after, limit + 1), limit);
     }
 
-    public CursorPage<UserListItemDto> getFollowing(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getFollowing(UUID targetUserId, UUID callerId, String q, String cursor, int limit) throws SQLException {
+        NameCursor after = checkFollowList(targetUserId, callerId, cursor, limit);
+        return toFollowPage(userRepository.findFollowing(targetUserId, callerId, q, after, limit + 1), limit);
+    }
+
+    /** Throws for a bad limit or cursor, a missing user and a block; returns where the page starts. */
+    private NameCursor checkFollowList(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
         if (limit < 1 || limit > 100) {
             throw new IllegalArgumentException("Limit must be between 1 and 100");
+        }
+        NameCursor after = CursorCodec.decode(cursor, NameCursor.class).orElse(null);
+        if (after != null && (after.name() == null || after.id() == null)) {
+            throw new IllegalArgumentException("Invalid cursor");
         }
         if (!userRepository.existsById(targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
         }
         requireNoBlock(targetUserId, callerId);
-        Optional<CursorPayload> payload = CursorCodec.decode(cursor);
-        Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
-        UUID cursorId = payload.map(CursorPayload::id).orElse(null);
+        return after;
+    }
 
-        List<UserRepository.UserRelationRow> rows = userRepository.findFollowing(targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
-        return toRelationPage(rows, limit);
+    private CursorPage<UserListItemDto> toFollowPage(List<FollowRow> rows, int limit) throws SQLException {
+        CursorPage<FollowRow> page = CursorPage.of(rows, limit,
+            row -> CursorCodec.encode(new NameCursor(row.sortName(), row.user().id())));
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(page.items().stream().map(r -> r.user().id()).toList());
+        List<UserListItemDto> dtos = new ArrayList<>();
+        for (FollowRow row : page.items()) {
+            dtos.add(toListItem(row.user(), row.followsYou(), avatarMap));
+        }
+        return new CursorPage<>(dtos, page.page());
     }
 
     public CursorPage<UserListItemDto> getBlocking(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {

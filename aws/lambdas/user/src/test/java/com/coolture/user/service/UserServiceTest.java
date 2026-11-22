@@ -303,7 +303,7 @@ class UserServiceTest {
     void getFollowers_throwsNotFound_whenTargetUserDoesNotExist() throws SQLException {
         when(repository.existsById(USER_ID)).thenReturn(false);
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFollowers(USER_ID, CALLER_ID, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFollowers(USER_ID, CALLER_ID, null, null, 20));
     }
 
     @Test
@@ -311,9 +311,9 @@ class UserServiceTest {
         when(repository.existsById(USER_ID)).thenReturn(true);
         var follower = new UserEntity(CALLER_ID, "follower1", "F", "L", null, Instant.now());
         when(repository.findFollowers(eq(USER_ID), eq(CALLER_ID), any(), any(), eq(21)))
-                .thenReturn(List.of(new UserRepository.UserRelationRow(follower, Instant.now(), true)));
+                .thenReturn(List.of(new UserRepository.FollowRow(follower, true, "f l")));
 
-        var page = service.getFollowers(USER_ID, CALLER_ID, null, 20);
+        var page = service.getFollowers(USER_ID, CALLER_ID, null, null, 20);
 
         assertNotNull(page);
         assertEquals(1, page.items().size());
@@ -326,9 +326,9 @@ class UserServiceTest {
         when(repository.existsById(USER_ID)).thenReturn(true);
         var followed = new UserEntity(UUID.randomUUID(), "followed1", "F", "L", null, Instant.now());
         when(repository.findFollowing(eq(USER_ID), eq(CALLER_ID), any(), any(), eq(21)))
-                .thenReturn(List.of(new UserRepository.UserRelationRow(followed, Instant.now(), false)));
+                .thenReturn(List.of(new UserRepository.FollowRow(followed, false, "f l")));
 
-        var page = service.getFollowing(USER_ID, CALLER_ID, null, 20);
+        var page = service.getFollowing(USER_ID, CALLER_ID, null, null, 20);
 
         assertEquals(1, page.items().size());
         assertFalse(page.items().get(0).followsYou());
@@ -456,8 +456,9 @@ class UserServiceTest {
         when(repository.existsById(USER_ID)).thenReturn(true);
         when(repository.isBlockedEitherDirection(CALLER_ID, USER_ID)).thenReturn(true);
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFollowers(USER_ID, CALLER_ID, null, 20));
-        assertThrows(IllegalArgumentException.class, () -> service.getFollowing(USER_ID, CALLER_ID, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFollowers(USER_ID, CALLER_ID, null, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFollowing(USER_ID, CALLER_ID, null, null, 20));
         verify(repository, never()).findFollowers(any(), any(), any(), any(), anyInt());
+        verify(repository, never()).findFollowing(any(), any(), any(), any(), anyInt());
     }
 }
