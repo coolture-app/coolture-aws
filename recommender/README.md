@@ -35,8 +35,8 @@ post-write (create, or a change to title or description)
   `embedding_text` or model changed, and every kind of event the same way (a kind's vector is the normalised mean of its
   `embedding_texts`, in `event_kind_embeddings`). `{"action":"derive-kinds"}` re-derives every post's kinds from the
   stored post vectors, so a changed kind text takes both.
-- `{"action":"embed-posts"}` embeds every post that isn't deleted and has no vector of the current model, newest first,
-  and derives its kinds. It stops in time to answer before the function's timeout, with
+- `{"action":"embed-posts"}` embeds every post that isn't deleted and has no vector of the current model or one older than its
+  last edit, newest first, and derives its kinds. It stops in time to answer before the function's timeout, with
   `{"posts": <embedded>, "left": <still without one>}`. `scripts/deploy.sh` sends `embed-interests`, `derive-kinds`
   and `embed-posts` after deploying this stack, and `embed-posts` again while posts are left.
 - **Kinds of event.** After storing a post's vector the worker writes its kinds to `rec_post_kinds`, best first: the

@@ -216,6 +216,7 @@ test-db: build-common $(VENV_PY) ## Run the database tests of posts, comments, u
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/comment-write/pom.xml -Dtest=CommentWriteDbTest
 	@DB_TEST=true DB_HOST=localhost mvn test -f aws/lambdas/user/pom.xml -Dtest=UserDbTest
 	@cd recommender/ppr && DB_TEST=true "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests/test_app_db.py
+	@cd recommender/post-embedding && DB_TEST=true "$(CURDIR)/$(VENV_PY)" -m pytest -q -p no:cacheprovider tests/test_app_db.py
 
 api-test: ## Run the request flows in api/ against the local stack (after make dev and make seed)
 	@command -v hurl > /dev/null || { echo "hurl not found: mise install, or see https://hurl.dev"; exit 1; }

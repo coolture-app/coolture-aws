@@ -256,7 +256,7 @@ invoke_worker() {
 embed_posts() {
     local embedded left
     while :; do
-        invoke_worker embed-posts "posts without a vector of the current model are neutral in the feed and have no kinds"
+        invoke_worker embed-posts "posts without a current vector are neutral in the feed and have no kinds"
         embedded="$(sed -n 's/.*"posts": *\([0-9]*\).*/\1/p' <<< "$WORKER_REPLY")"
         left="$(sed -n 's/.*"left": *\([0-9]*\).*/\1/p' <<< "$WORKER_REPLY")"
         [[ "${left:-0}" -gt 0 ]] || return 0

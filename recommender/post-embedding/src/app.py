@@ -25,7 +25,12 @@ EMBED_POSTS_BATCH = 8
 # embed-posts starts no batch with less time than this left, so the last batch, its writes and the reply fit.
 EMBED_POSTS_RESERVE_SECONDS = 30
 NOT_DELETED = "p.status <> 'DELETED' AND p.deleted_at IS NULL"
-WITHOUT_CURRENT_VECTOR = "NOT EXISTS (SELECT 1 FROM post_embeddings pe WHERE pe.post_id = p.id AND pe.model = %s)"
+# A vector is current when it is of this model and not older than the post's last edit. The worker's upsert sets
+# updated_at, so an edit whose embedding request failed is picked up here, and a post embedded after its edit is not.
+NEEDS_EMBEDDING = (
+    "NOT EXISTS (SELECT 1 FROM post_embeddings pe WHERE pe.post_id = p.id AND pe.model = %s "
+    "AND (p.last_modified_at IS NULL OR pe.updated_at >= p.last_modified_at))"
+)
 
 _model = None
 _conn: psycopg.Connection | None = None
@@ -155,13 +160,13 @@ def store_vectors(conn: psycopg.Connection, vectors: list[tuple[UUID, list[float
         logger.info("stored kinds %s for post %s", derived, post_id)
 
 
-def find_posts_without_vector(conn: psycopg.Connection, limit: int) -> list[tuple[UUID, PostContent]]:
+def find_posts_to_embed(conn: psycopg.Connection, limit: int) -> list[tuple[UUID, PostContent]]:
     rows = conn.execute(
         f"""
         SELECT p.id, p.title, p.description, el.venue_name, el.city
         FROM posts p
         LEFT JOIN event_locations el ON el.id = p.event_location_id
-        WHERE {NOT_DELETED} AND {WITHOUT_CURRENT_VECTOR}
+        WHERE {NOT_DELETED} AND {NEEDS_EMBEDDING}
         ORDER BY p.created_at DESC, p.id
         LIMIT %s
         """,
@@ -173,18 +178,18 @@ def find_posts_without_vector(conn: psycopg.Connection, limit: int) -> list[tupl
     ]
 
 
-def count_posts_without_vector(conn: psycopg.Connection) -> int:
+def count_posts_to_embed(conn: psycopg.Connection) -> int:
     return conn.execute(
-        f"SELECT count(*) FROM posts p WHERE {NOT_DELETED} AND {WITHOUT_CURRENT_VECTOR}",
+        f"SELECT count(*) FROM posts p WHERE {NOT_DELETED} AND {NEEDS_EMBEDDING}",
         (settings.embedding_model,),
     ).fetchone()[0]
 
 
-def embed_posts_without_vector(conn: psycopg.Connection, seconds_left: Callable[[], float]) -> dict[str, int]:
+def embed_pending_posts(conn: psycopg.Connection, seconds_left: Callable[[], float]) -> dict[str, int]:
     """Newest first, in batches, until none are left or the time is nearly up. Returns how many are left for the next run."""
     embedded = 0
     while seconds_left() > EMBED_POSTS_RESERVE_SECONDS:
-        posts = find_posts_without_vector(conn, EMBED_POSTS_BATCH)
+        posts = find_posts_to_embed(conn, EMBED_POSTS_BATCH)
         if not posts:
             break
         started = time.monotonic()
@@ -192,7 +197,7 @@ def embed_posts_without_vector(conn: psycopg.Connection, seconds_left: Callable[
         store_vectors(conn, [(post_id, vector) for (post_id, _), vector in zip(posts, vectors)])
         embedded += len(posts)
         logger.info("embedded %d post(s) in %.1f s", len(posts), time.monotonic() - started)
-    return {"posts": embedded, "left": count_posts_without_vector(conn)}
+    return {"posts": embedded, "left": count_posts_to_embed(conn)}
 
 
 def find_kind_vectors(conn: psycopg.Connection) -> dict[str, list[float]] | None:
@@ -302,7 +307,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if event.get("action") == DERIVE_KINDS_ACTION:
         return {"posts": derive_all_kinds(_get_connection())}
     if event.get("action") == EMBED_POSTS_ACTION:
-        return embed_posts_without_vector(_get_connection(), lambda: context.get_remaining_time_in_millis() / 1000)
+        return embed_pending_posts(_get_connection(), lambda: context.get_remaining_time_in_millis() / 1000)
 
     failures = []
     for record in event.get("Records", []):
