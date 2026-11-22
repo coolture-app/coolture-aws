@@ -12,6 +12,7 @@ from api import MAX_PHOTOS, ApiError, Outcome
 from geocoder import Geocoder, GeocoderUnavailable, Place
 from images import Image
 from scrape import DryRun, main, run
+from snapshot import Snapshot, is_complete
 from trojmiasto import EventPage, ListingItem, merge
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -288,6 +289,23 @@ def test_a_failed_run_logs_one_error_and_the_totals_and_exits_1(monkeypatch, cap
     assert main() == 1
     assert "Done: {'listed': 3}" in caplog.text
     assert [record.levelname for record in caplog.records].count('ERROR') == 1
+
+
+def test_a_snapshot_run_is_complete_only_when_it_ends(monkeypatch, scraper_args, tmp_path):
+    monkeypatch.setattr(sys, 'argv', ['scrape.py', '--snapshot', str(tmp_path)])
+    monkeypatch.setattr('scrape.run', lambda site, geocoder, sink, stats, limit: stats.update(listed=1))
+
+    assert main() == 0
+    assert is_complete(tmp_path)
+
+    def fail(*_):
+        raise GeocoderUnavailable('Photon request failed')
+
+    monkeypatch.setattr('scrape.run', fail)
+    Snapshot(tmp_path)
+
+    assert main() == 1
+    assert not is_complete(tmp_path)
 
 
 def test_a_network_error_names_the_request_in_one_line(monkeypatch, caplog, scraper_args):

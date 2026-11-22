@@ -19,7 +19,6 @@ from images import Image
 from trojmiasto import WARSAW
 
 DEFAULT_DIR = Path(__file__).parent / 'snapshot'
-DEFAULT_SIZE = 120
 POSTS_FILE = 'posts.jsonl'
 IMAGES_DIR = 'images'
 # Written last, so an interrupted scrape isn't taken for a finished one.
@@ -99,8 +98,8 @@ def read(directory: Path) -> list[Entry]:
 
 
 def sample(entries: list[Entry], size: int) -> list[Entry]:
-    """`size` entries chosen as a snapshot is: each category a share by allocate, each spread over the days. The same
-    snapshot and size give the same entries, in the snapshot's order."""
+    """`size` entries: each category a share by allocate, each spread over the days. The same snapshot and size give
+    the same entries, in the snapshot's order."""
     groups: dict[str, list[Entry]] = defaultdict(list)
     for entry in entries:
         groups[top_category(entry.category)].append(entry)

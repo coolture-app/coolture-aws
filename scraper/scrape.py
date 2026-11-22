@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from itertools import islice
@@ -17,8 +17,8 @@ from api import MAX_PHOTOS, ApiError, CooltureApi, Outcome
 from geocoder import DEFAULT_URL, Geocoder, GeocoderUnavailable
 from images import Image
 from posts import to_post
-from snapshot import DEFAULT_SIZE, Snapshot, allocate, spread_over_dates, top_category
-from trojmiasto import WARSAW, ListingItem, Site
+from snapshot import Snapshot
+from trojmiasto import ListingItem, Site
 
 log = logging.getLogger('scraper')
 
@@ -71,7 +71,7 @@ class DryRun:
         return Outcome(photos=len(uploads))
 
 
-def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Counter, limit: int | None,
+def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun | Snapshot, stats: Counter, limit: int | None,
         clock: Callable[[], datetime] = utc_now, stop_at: datetime | None = None) -> None:
     """Imports what the API doesn't have yet. `stop_at` ends the run between two events, as a Lambda's time runs out;
     the next run goes on, because it skips what this one created."""
@@ -88,36 +88,6 @@ def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun, stats: Count
             stats['stopped_for_time'] += 1
             break
         import_item(item, site, geocoder, sink, stats, clock)
-
-
-def run_snapshot(site: Site, geocoder: Geocoder, snapshot: Snapshot, stats: Counter, size: int | None,
-                 clock: Callable[[], datetime] = utc_now) -> None:
-    """Saves a sample of the listing that covers every category and spreads over its dates, or all of it when size is None.
-
-    The listing comes sorted by category, so its first events would all be concerts. A run adds to what the snapshot
-    already holds, so one that stopped goes on where it was.
-    """
-    today = clock().astimezone(WARSAW).date()
-    groups: dict[str, list[ListingItem]] = defaultdict(list)
-    for item in site.listing_items():
-        stats['listed'] += 1
-        # One that started before today would be skipped anyway, and shouldn't take a share of the quota.
-        if item.start_date is None or item.start_date >= today:
-            groups[top_category(item.category)].append(item)
-    supply = {category: len(items) for category, items in groups.items()}
-    quotas = supply if size is None else allocate(supply, size)
-    existing = snapshot.existing_event_urls()
-
-    for category in sorted(groups, key=lambda name: (-quotas[name], name)):
-        items = spread_over_dates(groups[category])
-        count = sum(item.url in existing for item in items)
-        for item in items:
-            if count >= quotas[category]:
-                break
-            if item.url not in existing and import_item(item, site, geocoder, snapshot, stats, clock):
-                count += 1
-        log.info('Category %s: %d of %d (listed %d)', category, count, quotas[category], supply[category])
-    snapshot.mark_complete()
 
 
 def import_item(item: ListingItem, site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun | Snapshot,
@@ -168,10 +138,10 @@ def main() -> int:
     parser.add_argument('--limit', type=int, help='stop after this many new posts')
     parser.add_argument('--dry-run', action='store_true', help='print the posts as JSON lines instead of sending them')
     parser.add_argument('--snapshot', type=Path, metavar='DIR',
-                        help='save a sample of every category, with photos, into DIR instead of sending it; adds to what DIR holds')
-    parser.add_argument('--size', type=int, default=DEFAULT_SIZE, help=f'events in a snapshot (default {DEFAULT_SIZE})')
-    parser.add_argument('--all', action='store_true', help='a snapshot of the whole listing')
+                        help='save the whole listing, with photos, into DIR instead of sending it; adds to what DIR holds')
     args = parser.parse_args()
+    if args.snapshot and args.limit:
+        parser.error('--limit would leave a snapshot unfinished; it takes the whole listing')
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', stream=sys.stderr)
     # A retry that fails ends in the one error below, so its warnings would only repeat it.
     logging.getLogger('urllib3').setLevel(logging.ERROR)
@@ -180,7 +150,9 @@ def main() -> int:
     try:
         geocoder = Geocoder(http_session(retry_timeouts=True), os.getenv('SCRAPER_GEOCODER_URL', DEFAULT_URL))
         if args.snapshot:
-            run_snapshot(Site(http_session(retry_timeouts=True)), geocoder, Snapshot(args.snapshot), stats, None if args.all else args.size)
+            snapshot = Snapshot(args.snapshot)
+            run(Site(http_session(retry_timeouts=True)), geocoder, snapshot, stats, None)
+            snapshot.mark_complete()
             return exit_code(stats)
         sink = DryRun() if args.dry_run else CooltureApi(
             http_session(), http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),

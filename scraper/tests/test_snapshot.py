@@ -1,9 +1,9 @@
 import json
 from collections import Counter
-from datetime import date, datetime, time, timezone
+from datetime import date, time
 
 from images import Image
-from scrape import run_snapshot
+from scrape import run
 from snapshot import Snapshot, allocate, is_complete, load_images, read, sample, spread_over_dates, top_category
 from trojmiasto import ListingItem
 
@@ -76,35 +76,15 @@ def test_a_snapshot_saved_with_tags_gives_them_as_its_category(tmp_path):
     assert entry.category == 'wystawy, spotkania'
 
 
-def test_snapshot_run_samples_every_category_and_marks_it_complete(tmp_path):
-    items = [listed(n, 'koncerty') for n in range(10)] + [listed(n, 'kulinaria') for n in range(10, 12)]
-    stats = Counter()
-
-    run_snapshot(FakeSite(items), FakeGeocoder(), Snapshot(tmp_path), stats, size=6, clock=lambda: NOW)
-
-    # The square roots of 10 and 2 split six as 4 and 2.
-    assert Counter(entry.category for entry in read(tmp_path)) == {'koncerty': 4, 'kulinaria': 2}
-    assert is_complete(tmp_path)
-    assert stats['listed'] == 12
-
-
 def test_a_second_run_only_fills_what_is_missing(tmp_path):
-    items = [listed(n, 'koncerty') for n in range(10)]
-    run_snapshot(FakeSite(items), FakeGeocoder(), Snapshot(tmp_path), Counter(), size=3, clock=lambda: NOW)
+    items = [listed(n, 'koncerty') for n in range(3)]
+    run(FakeSite(items[:2]), FakeGeocoder(), Snapshot(tmp_path), Counter(), None, clock=lambda: NOW)
     site = FakeSite(items)
 
-    run_snapshot(site, FakeGeocoder(), Snapshot(tmp_path), Counter(), size=5, clock=lambda: NOW)
+    run(site, FakeGeocoder(), Snapshot(tmp_path), Counter(), None, clock=lambda: NOW)
 
-    assert len(read(tmp_path)) == 5
-    assert len(site.opened) == 2
-
-
-def test_events_listed_before_today_take_no_share(tmp_path):
-    items = [listed(1, 'wystawy', day=date(2026, 10, 1)), listed(2, 'koncerty')]
-
-    run_snapshot(FakeSite(items), FakeGeocoder(), Snapshot(tmp_path), Counter(), size=2, clock=lambda: NOW)
-
-    assert [entry.post['eventUrl'] for entry in read(tmp_path)] == ['https://site.test/2']
+    assert len(read(tmp_path)) == 3
+    assert len(site.opened) == 1
 
 
 def test_an_unfinished_run_leaves_the_snapshot_incomplete(tmp_path):
@@ -113,15 +93,6 @@ def test_an_unfinished_run_leaves_the_snapshot_incomplete(tmp_path):
     Snapshot(tmp_path)
 
     assert not is_complete(tmp_path)
-
-
-def test_whole_listing_when_size_is_none(tmp_path):
-    items = [listed(n, 'koncerty') for n in range(4)] + [listed(9, 'sport')]
-
-    run_snapshot(FakeSite(items), FakeGeocoder(), Snapshot(tmp_path), Counter(), size=None,
-                 clock=lambda: datetime(2026, 11, 2, tzinfo=timezone.utc))
-
-    assert len(read(tmp_path)) == 5
 
 
 def saved(directory, events):

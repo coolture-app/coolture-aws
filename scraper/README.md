@@ -2,8 +2,8 @@
 
 Imports the events of the next 30 days on [trojmiasto.pl](https://www.trojmiasto.pl/imprezy/dni,30dni.html) as posts of a bot
 account. It reads one listing per day (`/imprezy/dzien,2026-11-28`), because the 30-day listing stops at 400 events, and
-an event on several days comes once. It runs outside AWS and writes only through the public API, as `POST /posts`, like any other client. Aurora isn't
-reachable from outside the VPC.
+an event on several days comes once. It writes only through the public API, as `POST /posts`, like any other client, because Aurora isn't
+reachable from outside the VPC. It runs from a developer's machine, or on AWS as a scheduled Lambda (see below).
 
 Each post has a real title and description, the event's photos, its address, and coordinates, which the feed's proximity signal needs. An event held
 in a place is sent as `OFFLINE`. If it can't be located it's left out, because an `ONLINE` post would get no proximity signal.
@@ -15,8 +15,8 @@ local geocoder, the same Photon and index the app uses on AWS, so `make geo-inde
 started it. That holds when the run sends to AWS too.
 
 ```bash
-make scrape-snapshot                                  # saves every listed event to scraper/snapshot, no API needed (SIZE=120: a sample)
-make seed                                             # loads a sample of the snapshot into the local stack (SIZE=all: all of it)
+make scrape-snapshot                                  # saves every listed event to scraper/snapshot, no API needed
+make seed                                             # the local data set; its first step loads a sample of the snapshot (SIZE=N, SIZE=all)
 
 make local                                            # in another terminal
 make scrape                                           # imports live as the local bot user
@@ -30,16 +30,12 @@ make test-python                                      # its tests, with the othe
 A local stack gets its events from a snapshot, so nobody waits for a live scrape after every `make reset-db`.
 
 - **`scrape.py --snapshot DIR`** (`make scrape-snapshot`) saves posts as `posts.jsonl` and their photos under `images/`,
-  instead of sending them. The listing comes sorted by category, so the first 60 would all be concerts. Instead every
-  top category gets a quota by power allocation, the square root of how many events it lists (Bankier, 1988), which
-  gives big categories more without drowning the small ones: of 120, 24 concerts, 19 shows, 16 parties, 15 exhibitions,
-  13 films, 12 sport, 8 occasional, 7 fairs and 6 food on 2026-11-09. Within a category, events are taken one per day
-  before a second of any day, so they spread over the 30 days. `--all` saves the whole listing. A run adds to what's
-  there and writes `complete` at the end, so one that stopped goes on where it was. A category with too few events
-  ahead, such as exhibitions that already opened, is logged with what it got.
+  instead of sending them. It always saves the whole listing, and `seed.py` takes the sample. A run adds to what's
+  there and writes `complete` at the end, so one that stopped goes on where it was.
 - **`seed.py events`** (`make seed-events`) waits for the API, then loads the posts not yet there as the bot, four at
-  a time. By default it loads a sample, chosen the way a snapshot is (each category's share, spread over the days), so a
-  reset is quick; `SIZE=N` picks another size and `SIZE=all` the whole snapshot. The same size gives everyone the same
+  a time. By default it loads a sample: each top category gets a quota by power allocation, the square root of how many
+  events it lists (Bankier, 1988), which gives big categories more without drowning the small ones, and within a
+  category events are taken one per day before a second of any day, so they spread over the days. A reset is quick; `SIZE=N` picks another size and `SIZE=all` the whole snapshot. The same size gives everyone the same
   posts, and a bigger one later only adds what's missing. Every date moves forward by the same whole number of days on the Warsaw clock, the fewest that put every
   start at least two hours ahead, so the snapshot's days keep their order and each event its hour.
 - **`seed.py reactions`** (`make seed-reactions`) ranks the bot's posts by cosine distance between each post's
@@ -58,9 +54,8 @@ A local stack gets its events from a snapshot, so nobody waits for a live scrape
 
 The snapshot is gitignored, like the ledger, because scraped text and photos stay out of the public repository.
 
-Most of a run is waiting: the site gets at most one request a second, and a local write took a median of 3.3 s. The
-listings alone are about 120 pages, two minutes locally and about four on AWS. The
-geocoder is ours, so it isn't paced. Later runs skip the events already imported, without opening their pages. Each post then reaches
+Most of a run is waiting: the site gets at most one request a second, with one listing page per day and a page per
+event. The geocoder is ours, so it isn't paced. Later runs skip the events already imported, without opening their pages. Each post then reaches
 `post-embedding` as usual. Locally that needs `make embed-posts`, because there are no S3 events.
 
 A throttled request is tried 3 more times, waiting what the server's `Retry-After` asks, up to 2 minutes each. A failure to reach the site's listing,
@@ -147,8 +142,8 @@ The page's text becomes plain paragraphs, separated by a blank line:
   that opened earlier.
 - **Imported posts aren't updated.** A later change on the site isn't picked up, and posts imported before photos have none.
 - **An event with no hour starts at 12:00.**
-- **A deleted post stays out only on the machine that saw it.** `GET /posts` never returns a deleted post, so the scraper keeps the URLs it has seen
-  in `scraper/.imported-<api host>.txt`, which git ignores. That covers one operator per environment: a post deleted before this machine ever saw it
-  can't be known. A database with none of the bot's posts counts as a new one, so the file starts over after `make reset-db`.
-- **Tests use invented text, and imports stay local.** The site's terms don't settle whether its text can be reused, so don't commit scraped text, or
+- **A deleted post stays out only where the ledger saw it.** `GET /posts` never returns a deleted post, so the scraper keeps the URLs it has seen: on a
+  machine in `scraper/.imported-<api host>.txt`, which git ignores, on AWS in the Lambda's S3 bucket. That covers one ledger per environment: a post deleted
+  before it was seen can't be known. A database with none of the bot's posts counts as a new one, so the file starts over after `make reset-db`.
+- **Tests use invented text, and imports stay in the team's own environments.** The site's terms don't settle whether its text can be reused, so don't commit scraped text, or
   import it anywhere people outside the team can see it, until we have the site's permission.

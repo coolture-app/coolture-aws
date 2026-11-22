@@ -199,8 +199,8 @@ require-geocoder:
 scrape: $(VENV_PY) require-geocoder ## Import trojmiasto.pl events live through the local API, needs `make local` (ARGS="--limit 20")
 	@SCRAPER_USER_ID=$${SCRAPER_USER_ID:-00000000-0000-0000-0000-00000000b07a} $(VENV_PY) scraper/scrape.py $(ARGS)
 
-scrape-snapshot: $(VENV_PY) require-geocoder ## Save every listed event, with photos, to scraper/snapshot (~30 min once; SIZE=120 for a sample across categories)
-	@$(VENV_PY) scraper/scrape.py --snapshot $(SNAPSHOT_DIR) $(if $(filter-out all,$(SIZE)),--size $(SIZE),--all)
+scrape-snapshot: $(VENV_PY) require-geocoder ## Save every listed event, with photos, to scraper/snapshot (~30 min once, resumable)
+	@$(VENV_PY) scraper/scrape.py --snapshot $(SNAPSHOT_DIR)
 
 ##@ Tests
 
