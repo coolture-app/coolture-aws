@@ -245,8 +245,8 @@ invoke_worker() {
         echo
         [[ "$function_error" == None ]] && return 0
     done
-    echo "The worker's $action failed: $consequence." >&2
-    return 1
+    # A warning, not a stop: the actions can be sent again, and waf and frontend still need deploying.
+    echo "Warning: the worker's $action failed: $consequence. Send {\"action\":\"$action\"} to coolture-$ENVIRONMENT-post-embedding again by hand." >&2
 }
 
 stack_param() {
