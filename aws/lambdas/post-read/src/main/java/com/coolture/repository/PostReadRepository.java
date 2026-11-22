@@ -58,13 +58,11 @@ public class PostReadRepository {
 
             ParamBinder b = new ParamBinder(stmt, conn);
 
-            // JOIN params
             b.bindUUID(callerId)
              .bindUUID(callerId);
 
             PostFilterSql.bind(b, f, callerId);
 
-            // Blocks
             b.bindNullableUUID(callerId)
                 .bindNullableUUID(callerId);
 
@@ -286,7 +284,6 @@ public class PostReadRepository {
 
             PostFilterSql.bind(b, f, callerId);
 
-            // Blocks
             b.bindNullableUUID(callerId)
                 .bindNullableUUID(callerId);
 
@@ -297,7 +294,6 @@ public class PostReadRepository {
                 PostSql.bindNotMine(b, callerId);
             }
 
-            // Bounds
             b.bindDouble(bounds.leftUpper().longitude())
              .bindDouble(bounds.rightBottom().latitude())
              .bindDouble(bounds.rightBottom().longitude())

@@ -139,7 +139,7 @@ Resources:
                 Resource: !GetAtt ScraperFunction.Arn
 
   # A random moment in every 6 hours, so the runs never fall on the same times. The window stops 30 minutes short of
-  # the next slot, so two runs of up to 15 minutes can't overlap and post the same event twice.
+  # the next slot, so two runs, each up to the function's timeout, can't overlap and post the same event twice.
   Schedule:
     Type: AWS::Scheduler::Schedule
     Properties:

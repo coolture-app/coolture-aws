@@ -26,7 +26,7 @@ public final class UserVector {
     /**
      * What the database adds up for one viewer. {@code interests} and {@code kinds} are the sums of the picked ones'
      * vectors, null when they picked none with a vector. The averages are over every interest and every post of the
-     * model, null when there are none. Kinds stay out of the interest average, which is the survey's.
+     * model, null when there are none. Kinds stay out of the interest average, which is over interest_embeddings only.
      */
     public record Parts(List<Stance> stances, double[] interests, double[] kinds, List<Category> categories,
                         double[] interestAverage, double[] postAverage) {}

@@ -103,7 +103,7 @@ public class UserService {
         return toProfileDto(user, callerId);
     }
 
-    /** Someone's followers, following and interests are as hidden across a block as their profile. */
+    /** A block hides followers and following both ways, as it hides the profile from whoever was blocked. */
     private void requireNoBlock(UUID targetUserId, UUID callerId) throws SQLException {
         if (userRepository.isBlockedEitherDirection(callerId, targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
@@ -203,7 +203,6 @@ public class UserService {
         }
     }
 
-    /** 2 decimals, about 1.1 km, as the feed rounds a browser position. */
     private static double roundToKilometre(double coordinate) {
         return Math.round(coordinate * 100) / 100.0;
     }
@@ -218,7 +217,6 @@ public class UserService {
         return toFollowPage(userRepository.findFollowing(targetUserId, callerId, q, after, limit + 1), limit);
     }
 
-    /** Throws for a bad limit or cursor, a missing user and a block; returns where the page starts. */
     private NameCursor checkFollowList(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
         if (limit < 1 || limit > 100) {
             throw new IllegalArgumentException("Limit must be between 1 and 100");

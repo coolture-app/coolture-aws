@@ -14,7 +14,6 @@ public record PostMarkDto(
     String title,
     Instant startsAt,
     Instant endsAt,
-    /** No end date: endsAt is null and the event never ends (EventTime). */
     boolean openEnded,
     String coverMediaUrl,
     /** The description's start for the map's preview, whitespace joined, at most `PostReadRepository.EXCERPT_CHARS`. */

@@ -1,6 +1,6 @@
 package com.coolture.feed;
 
-/** How a feed page was ordered. RANKED is the scorer, also for guests. UPCOMING is the fallback when ranking failed. */
+/** How a feed page was ordered. See contracts/README.md. */
 public enum FeedMode {
     RANKED,
     UPCOMING

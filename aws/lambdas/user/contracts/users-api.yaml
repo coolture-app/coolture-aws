@@ -7,8 +7,7 @@ info:
     /users/{userId} that changes or reads private data works only on the caller's own id and answers 403 for anyone
     else's. A block works both ways: when either of two users blocked the other, neither finds the other in search,
     followers or following, and each gets 404 for the other's interests, followers and following. Whoever was blocked
-    also gets 404 for the blocker's profile, as if the account didn't exist. Change this file first, in its own pull request or commit, then the code; ContractTest checks the handler's
-    responses against it.
+    also gets 404 for the blocker's profile, as if the account didn't exist.
 servers:
   - url: http://localhost:3000
     description: Local stack. On AWS, the same paths are behind /api.

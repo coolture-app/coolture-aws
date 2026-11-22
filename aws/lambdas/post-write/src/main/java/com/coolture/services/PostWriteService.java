@@ -109,7 +109,7 @@ public class PostWriteService {
             req.description() != null ? req.description() : existing.description(),
             newEventUrl, newLinks, newType, newStartsAt, newEndsAt, openEnded);
         PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave, fields);
-        // Every edit, so which fields make up the embedded text stays only in the worker's PostContent.
+        // Asked on every edit, so the worker alone decides which fields are embedded.
         embeddingPublisher.requestPost(updated.id());
         return updated;
     }

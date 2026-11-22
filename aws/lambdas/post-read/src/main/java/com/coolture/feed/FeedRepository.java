@@ -27,8 +27,7 @@ import java.util.UUID;
 public class FeedRepository {
 
     /**
-     * What the feed may show, narrowed by the person's filters. The ranked feed and its fallback both use exactly this.
-     * Ended events only when the filters ask for past events; the fallback, being the upcoming order, never shows them.
+     * What the feed may show, narrowed by the person's filters. Ended events only when the filters ask for past events, and the fallback never shows them.
      * Bind with bindRules.
      */
     private static String feedRules(boolean showsEnded) {
@@ -44,7 +43,7 @@ public class FeedRepository {
      * Each post loses the post average once (centred), and is compared with the viewer's vector and with each of the
      * viewer's "Nie dla mnie" marks, centred the same way. Marks count up to asOf, fade as stances do, and only the newest
      * NOT_FOR_ME_MARKS. MATERIALIZED, because an inlined CTE would run again for every candidate, and OFFSET 0, because a
-     * flattened lateral would read and centre the post's vector again for every mark (100 marks took 6 s at 2,000 posts).
+     * flattened lateral would read and centre the post's vector again for every mark.
      * The PageRank score comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf, so a run landing
      * mid-session doesn't move its pages, and less than PPR_RUN_MAX_AGE_HOURS before now too, since a cursor's asOf
      * comes from the client.
@@ -86,12 +85,10 @@ public class FeedRepository {
 
     /**
      * The sums UserVector blends, each from one model's vectors. Stances count up to asOf, so every page of a session
-     * gets the same vector. Each fades with its age in whole days by asOf, half every STANCE_HALF_LIFE_DAYS: summed per
-     * day first, then each day's sum weighed once, so a stance type comes back as one row; past STANCE_MAX_AGE_DAYS
-     * they'd weigh next to nothing and are left out. Interests have no time and count as they are. Each row is a part: a stance, with the sum of its fading
-     * weights as the amount, the picked interests, the picked kinds, one category picked from with all of its interests, or the average of
-     * every interest or every post. The post average counts posts created up to asOf, ended and deleted ones too, so
-     * nothing done during a session moves it.
+     * gets the same vector; their fade is UserVector's. Each row is a part: a stance type with the sum of its fading
+     * weights, the picked interests, the picked kinds, one category picked from with all of its interests, or the
+     * average of every interest or every post. The post average counts posts created up to asOf, ended and deleted ones
+     * too, so nothing done during a session moves it.
      */
     private static final String VECTOR_PARTS = """
         WITH stances AS (
@@ -331,7 +328,6 @@ public class FeedRepository {
 
     private static void bindRules(ParamBinder b, UUID viewer, Instant asOf, PostFeedFilters filters) throws SQLException {
         b.bindTimestamp(asOf);
-        // Not blocked
         b.bindNullableUUID(viewer)
          .bindNullableUUID(viewer);
         PostSql.bindNotMine(b, viewer);

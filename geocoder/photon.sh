@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs Photon the same way in the local container and on the AWS instance, which gets this file from make geo-publish.
 #   import: builds the Poland index from GraphHopper's weekly dump, with 3 GB of heap.
-#   serve:  answers on port 2322, in the 1 GB of a t4g.micro.
+#   serve:  answers on port 2322.
 set -eu
 
 DATA="${DATA:-/data}"

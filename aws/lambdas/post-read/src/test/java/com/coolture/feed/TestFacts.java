@@ -4,8 +4,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * FeedScorer.Facts for tests, so each test names only what it's about. By default: a new id, no end, no reactions,
- * no vector, no place, no "Nie dla mnie" mark, not standing, no PageRank score.
+ * FeedScorer.Facts for tests, so each test names only what it's about. Each field starts empty or neutral.
  */
 public final class TestFacts {
 

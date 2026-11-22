@@ -133,8 +133,7 @@ def test_a_friend_who_marked_many_events_gets_less_on_each_but_isnt_drowned_out(
 
 
 def test_a_friends_old_stance_counts_less_than_anothers_fresh_one():
-    # u1 was interested in event 12 98 days ago; u2 is going to event 0 now.
-    old = 1.5 * 0.5 ** (98 / 14)
+    old = 0.01  # a stance faded to almost nothing
     got = by_event(scores(inputs(user_ids=["u0", "u1", "u2"], stances=[(1, 12, old), (2, 0, 2.0)],
                                  friends=[(0, 1), (0, 2)])))
     assert got[12] < max(got[e] for e in group(0) - {0})
@@ -224,8 +223,8 @@ def test_matches_a_walk_over_edges_written_by_hand():
     for a, b in [("e0", "hall"), ("e3", "hall"), ("e0", "e1"), ("e0", "e2"), ("e1", "e2")]:
         edges.setdefault(a, {})[b] = 1
         edges.setdefault(b, {})[a] = 1
-    # The user and what their friend shows are nodes here. No edge leads into either, so this is the code's walk, which
-    # starts on the friend's events, scaled by 0.7 squared, with the same ranks.
+    # Edges written out by hand, with the user and what their friend shows as nodes before the events. The ranks match
+    # the code's walk, which starts on the events.
     edges["u0"] = {"u1 shown": 1}
     edges["u1 shown"] = {"e3": 2, "e1": 1.5}
 

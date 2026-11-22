@@ -22,7 +22,6 @@ public record UpdatePostRequest(
     @Pattern(regexp = "(?s).*\\S.*", message = "Description must not be blank")
     String description,
 
-    /** The page the scraper imported the post from. Unique per author. */
     @Size(max = 2048)
     String eventUrl,
 
@@ -33,7 +32,6 @@ public record UpdatePostRequest(
 
     Instant endsAt,
 
-    /** No end date ("do odwołania"). Can't come with an endsAt. */
     Boolean openEnded,
 
     PostType type,

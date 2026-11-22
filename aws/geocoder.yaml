@@ -140,8 +140,8 @@ Resources:
           Ebs: {VolumeType: gp3, VolumeSize: 10, Encrypted: true}
       Tags:
         - {Key: Name, Value: !Sub 'coolture-${Environment}-geocoder'}
-      # Runs once, at the first boot. The service fetches Photon and the index on every start, so a new index needs only
-      # a reboot (make geo-publish does it), and the instance keeps its ARN, which the VPC origin points at.
+      # Runs once, at the first boot. The service fetches Photon and the index on every start, so a new index needs a
+      # reboot, not a new instance: the VPC origin points at the instance's ARN.
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash

@@ -199,7 +199,7 @@ public class PostWriteRepository {
         }
     }
 
-    /** The unique index on a post's author and event_url, from V10. */
+    /** The unique index on a post's author and event_url. */
     private static final String EVENT_URL_INDEX = "posts_author_event_url_key";
 
     private static void refuseDuplicateEvent(SQLException e) {
@@ -543,10 +543,9 @@ public class PostWriteRepository {
     }
 
     /**
-     * "Nie dla mnie" isn't counted as a participant, and takes back the viewer's like. Only it can be set once the event
-     * has ended, since interested and going mean nothing then. A changed stance starts its time
-     * again, because the feed reads stances up to a session's start and a changed one must not act on the session it was
-     * changed in.
+     * "Nie dla mnie" isn't counted as a participant and takes back the viewer's like. After the event has ended only it
+     * can be set, since interested and going mean nothing then. A changed stance restarts its time: the feed reads
+     * stances up to a session's start, and a changed one must not act on the session it was changed in.
      */
     public void upsertParticipation(UUID postId, UUID userId, ParticipationType newType) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {

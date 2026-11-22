@@ -399,7 +399,7 @@ HTTP *
 status < 300
 
 # The start can't move to the past, but an edit may send an unchanged start back, as the edit form always does. (Once
-# an event has ended, Interesuje mnie and Biorę udział are refused too; PostWriteDbTest shows it, since a post can't be
+# an event has ended, Interesuje mnie and Biorę udział are refused too; the database tests cover it, since a post can't be
 # created in the past.)
 POST {{api}}/posts
 X-User-Id: {{anna}}

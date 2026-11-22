@@ -207,7 +207,7 @@ public final class Upcoming {
             boolean continues = lastId(at) != null;
             String sql = query.sql()
                 + "  AND " + within + "\n"
-                // A null key is the end of a post with no end date, which an ended event never has.
+                // A running post with no end date has a null last key, read as infinity. An ended event always has an end.
                 + (continues ? "  AND (" + key + ", p.id) " + after
                     + " (COALESCE(?::timestamptz, 'infinity'::timestamptz), ?::uuid)\n" : "")
                 + "ORDER BY " + key + " " + order + ", p.id " + order + "\n"

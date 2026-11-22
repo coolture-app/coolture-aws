@@ -19,7 +19,7 @@ public class InterestRepository {
 
     public record KindEntity(String key, String labelPl, String labelEn) {}
 
-    /** Not offered: nobody can pick it. Those who already hold it keep the row, and it shows on their profile. */
+    /** Not offered: nobody can pick it, and a save drops it from whoever still holds it. */
     public record InterestEntity(String key, String categoryKey, String labelPl, String labelEn, boolean offered) {}
 
     public List<KindEntity> findKinds() throws SQLException {

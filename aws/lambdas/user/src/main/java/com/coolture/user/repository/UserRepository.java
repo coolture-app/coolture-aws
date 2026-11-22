@@ -285,9 +285,9 @@ public class UserRepository {
     }
 
     /**
-     * The user's posts, and of them those not ended; their Biorę udział and Interesuje mnie not ended, as the viewer's
-     * tabs would list them: null unless the viewer is the user or a friend they share their stances with, and without
-     * posts in a block with the viewer.
+     * Counts for a profile's tabs: the user's posts and those not ended, and their Biorę udział and Interesuje mnie
+     * not ended. The stance counts are null unless the viewer is the user or a friend they share stances with. Posts in
+     * a block with the viewer aren't counted.
      */
     public ProfileEventsDto countEvents(UUID userId, UUID viewer) throws SQLException {
         String sql = "SELECT own.posts, own.upcoming,"
