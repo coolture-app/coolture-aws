@@ -34,7 +34,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 BOT_ID = '00000000-0000-0000-0000-00000000b07a'
 # A local write takes about 1.3 s. Four at a time took about 40% of the time of one at a time, and more gave nothing.
 WORKERS = 4
-# Enough for every category and day in a few minutes; `--size all` loads the whole snapshot.
+# Every category and day at about a quarter of the whole snapshot's load time; `--size all` loads all of it.
 SEED_SIZE = 200
 # An event must still be ahead when it's posted, since POST /posts refuses a past start.
 START_MARGIN = timedelta(hours=2)
