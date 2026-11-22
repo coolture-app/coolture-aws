@@ -199,7 +199,7 @@ public class PostWriteRepository {
         }
     }
 
-    /** The unique index on a post's author and event_url, from V14. */
+    /** The unique index on a post's author and event_url, from V10. */
     private static final String EVENT_URL_INDEX = "posts_author_event_url_key";
 
     private static void refuseDuplicateEvent(SQLException e) {
