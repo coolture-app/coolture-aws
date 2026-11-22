@@ -2,6 +2,7 @@ package com.coolture.repository;
 
 import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.EventTime;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
@@ -39,13 +40,13 @@ public class PostReadRepository {
     /** Enough for three lines of the map's preview, so a pin's preview needs no request of its own. */
     static final int EXCERPT_CHARS = 200;
 
-    /** Every sort but UPCOMING, which is {@link #findUpcoming}. These hide only long-ended events, and can show those too. */
+    /** Every sort but UPCOMING, which is {@link #findUpcoming}. These hide ended events unless asked; PAST shows only them. */
     public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit) throws SQLException {
         String sql = PostSql.CARD_SELECT
             + "WHERE p.deleted_at IS NULL\n"
             + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
-            + "  AND " + PostSql.NOT_ENDED_UNLESS_PAST + "\n"
+            + "  AND " + (sort.endedOnly() ? EventTime.ENDED : PostSql.NOT_ENDED_UNLESS_PAST) + "\n"
             + (sort.needsPosition() ? "  AND el.coordinates IS NOT NULL\n" : "")
             + "  AND " + PARTICIPATION_AND_REACTION + "\n"
             + (cursor != null ? "  AND " + sort.keysetSql() + "\n" : "")
@@ -67,8 +68,9 @@ public class PostReadRepository {
             b.bindNullableUUID(callerId)
                 .bindNullableUUID(callerId);
 
-            // Past events
-            b.bindBoolean(f.showsAllPastEvents());
+            if (!sort.endedOnly()) {
+                b.bindBoolean(f.showsAllPastEvents());
+            }
 
             bindParticipationAndReaction(b, f, callerId);
 
@@ -109,7 +111,10 @@ public class PostReadRepository {
         }
     }
 
-    /** My Events: the viewer's participations or reactions of the given types. Bind with bindParticipationAndReaction. */
+    /**
+     * My Events, or a friend's: the participations of the given types of the viewer or filters.participantId, or the
+     * viewer's reactions. Bind with bindParticipationAndReaction.
+     */
     private static final String PARTICIPATION_AND_REACTION = """
         (?::varchar[] IS NULL
                OR EXISTS (SELECT 1 FROM post_participations pp WHERE pp.post_id = p.id AND pp.user_id = ?::uuid AND pp.type = ANY(?::varchar[])))
@@ -119,8 +124,9 @@ public class PostReadRepository {
     private static void bindParticipationAndReaction(ParamBinder b, PostFeedFilters f, UUID callerId) throws SQLException {
         boolean hasPart = f.participationTypes() != null && !f.participationTypes().isEmpty() && callerId != null;
         String[] partArr = hasPart ? f.participationTypes().toArray(new String[0]) : null;
+        UUID participant = f.participantId() != null ? f.participantId() : callerId;
         b.bindVarcharArray(partArr)
-         .bindNullableUUID(hasPart ? callerId : null)
+         .bindNullableUUID(hasPart ? participant : null)
          .bindVarcharArray(partArr);
 
         boolean hasReaction = f.reactionType() != null && callerId != null;
@@ -210,6 +216,12 @@ public class PostReadRepository {
     }
 
     /** Empty when the post's page would be a 404. */
+    public boolean sharesWith(UUID viewer, UUID user) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Friends.sharesWith(conn, viewer, user);
+        }
+    }
+
     public Optional<PostFriendsDto> findFriends(UUID postId, UUID callerId) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {
             if (!PostQueries.isPostVisible(conn, postId, callerId)) {

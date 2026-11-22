@@ -64,6 +64,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -613,6 +614,40 @@ class PostReadDbTest {
     }
 
     @Test
+    void browse_past_showsOnlyEndedEvents_latestEndFirst_acrossPages() throws SQLException {
+        List<PostCardDto> cards = walkPosts(ME, filters("PAST", false, null, null), 2).stream()
+            .filter(c -> RULE_TITLES.contains(c.title())).toList();
+
+        assertEquals(ENDED, ruleTitles(cards));
+        for (int i = 1; i < cards.size(); i++) {
+            Instant before = EventTime.end(cards.get(i - 1).startsAt(), cards.get(i - 1).endsAt(), cards.get(i - 1).openEnded());
+            Instant after = EventTime.end(cards.get(i).startsAt(), cards.get(i).endsAt(), cards.get(i).openEnded());
+            assertFalse(after.isAfter(before), cards.get(i).title() + " after " + cards.get(i - 1).title());
+        }
+    }
+
+    @Test
+    void browse_aFriendsStances_onlyWhileTheyShare_andNeverTheirNotForMe() throws SQLException {
+        assertEquals(Set.of("friend_going", "friends_crowd"), titlesOf(walkPosts(ME, stancesOf("6", "TAKES_PART"), 100)));
+        assertEquals(Set.of("friend_interested"), titlesOf(walkPosts(ME, stancesOf("6", "INTERESTED"), 100)));
+        // quiet_friend doesn't share, and `followed` isn't a friend.
+        assertEquals(Set.of(), titlesOf(walkPosts(ME, stancesOf("8", "TAKES_PART"), 100)));
+        assertEquals(Set.of(), titlesOf(walkPosts(ME, stancesOf("3", "TAKES_PART"), 100)));
+
+        assertThrows(IllegalArgumentException.class, () -> walkPosts(ME, stancesOf("6", "NOT_INTERESTED"), 100));
+        assertThrows(SecurityException.class, () -> walkPosts(null, stancesOf("6", "TAKES_PART"), 100));
+    }
+
+    private static PostFeedFilters stancesOf(String who, String type) {
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            List.of(type), null, null, 20, "UPCOMING", false, null, false, UUID.fromString("a0000000-0000-0000-0000-00000000000" + who));
+    }
+
+    private static Set<String> titlesOf(List<PostCardDto> cards) {
+        return cards.stream().map(PostCardDto::title).collect(Collectors.toSet());
+    }
+
+    @Test
     void browse_guest_seesPublicPostsWithoutBlocks() throws SQLException {
         assertEquals(union(PUBLIC_LIVE, INTERACTED, Set.of("by_i_blocked", "by_blocked_me", "mine", "created_after_as_of")),
             ruleTitles(walkPosts(null, filters("RECENT", false, null, null), 100)));
@@ -943,7 +978,7 @@ class PostReadDbTest {
     // ===== Walks =====
 
     @ParameterizedTest
-    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = {"NEAREST", "STANCE_NEWEST", "UPCOMING"})
+    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = {"NEAREST", "STANCE_NEWEST", "UPCOMING", "PAST"})
     void walkingASort_showsEveryPostOnceInOrder(PostSort sort) throws SQLException {
         for (boolean includePast : List.of(false, true)) {
             PostFeedFilters filters = filters(sort.name(), includePast, null, null);

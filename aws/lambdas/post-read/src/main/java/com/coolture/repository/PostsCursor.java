@@ -21,7 +21,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Upcoming.Po
         return CursorCodec.encode(switch (sort) {
             case RECENT -> new PostsCursor(sort, card.id(), card.createdAt(), null);
             case UPCOMING -> throw new IllegalArgumentException("UPCOMING pages with upcoming()");
-            case POPULAR, NEAREST, STANCE_NEWEST -> new PostsCursor(sort, card.id(), null, null);
+            case POPULAR, PAST, NEAREST, STANCE_NEWEST -> new PostsCursor(sort, card.id(), null, null);
         });
     }
 
@@ -38,7 +38,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Upcoming.Po
             boolean valid = switch (sort) {
                 case RECENT -> c.id != null && c.createdAt != null;
                 case UPCOMING -> c.upcoming != null && c.upcoming.isValid();
-                case POPULAR, NEAREST, STANCE_NEWEST -> c.id != null;
+                case POPULAR, PAST, NEAREST, STANCE_NEWEST -> c.id != null;
             };
             if (!valid) {
                 throw new IllegalArgumentException("Invalid cursor");
@@ -51,7 +51,7 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Upcoming.Po
     void bindKeyset(ParamBinder binder, Double latitude, Double longitude, UUID viewer) throws SQLException {
         switch (sort) {
             case RECENT -> binder.bindTimestamp(createdAt);
-            case POPULAR -> binder.bindUUID(id);
+            case POPULAR, PAST -> binder.bindUUID(id);
             case UPCOMING -> throw new IllegalStateException("UPCOMING binds through Upcoming");
             case NEAREST -> binder.bindDouble(longitude).bindDouble(latitude)
                 .bindDouble(longitude).bindDouble(latitude)

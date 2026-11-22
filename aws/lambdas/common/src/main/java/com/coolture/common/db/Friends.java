@@ -36,6 +36,20 @@ public final class Friends {
             + " AND EXISTS (SELECT 1 FROM users fu WHERE fu.id = " + userColumn + " AND fu.share_stances))";
     }
 
+    /** Whether the user is the viewer's friend and shares their stances, so the viewer may see them. */
+    public static boolean sharesWith(Connection conn, UUID viewer, UUID user) throws SQLException {
+        if (viewer == null || user == null) {
+            return false;
+        }
+        String sql = "SELECT " + sharingFriend("u.id") + " FROM users u WHERE u.id = ?::uuid";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            new ParamBinder(stmt, conn).bindUUID(viewer).bindUUID(viewer).bindUUID(user);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        }
+    }
+
     /** Each post's friend stances, with one query for the whole list. Empty for a guest. */
     public static Map<UUID, FriendStancesDto> forPosts(Connection conn, UUID viewer, Collection<UUID> postIds) throws SQLException {
         if (viewer == null || postIds.isEmpty()) {

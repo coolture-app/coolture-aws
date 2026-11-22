@@ -11,6 +11,7 @@ import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
+import com.coolture.common.dto.ProfileEventsDto;
 import com.coolture.common.dto.UserProfileDto;
 import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.dto.enums.MediaPurpose;
@@ -76,7 +77,7 @@ class ContractTest {
 
     private static UserProfileDto fullProfile(UUID id) {
         return new UserProfileDto(id, "jan", "Jan", "Demo", avatar(), 1, 2, "Teatr", Instant.now(), true, false, true,
-            List.of("theatre", "cinema"), List.of("stage", "cinema"));
+            List.of("theatre", "cinema"), List.of("stage", "cinema"), new ProfileEventsDto(3, 1, 2, 0));
     }
 
     private static CursorPage<UserListItemDto> page() {

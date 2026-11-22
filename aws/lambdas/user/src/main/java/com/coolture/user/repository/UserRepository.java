@@ -2,8 +2,11 @@ package com.coolture.user.repository;
 
 import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.EventTime;
+import com.coolture.common.db.Friends;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.TextSearch;
+import com.coolture.common.dto.ProfileEventsDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.MediaStatus;
 
@@ -278,6 +281,33 @@ public class UserRepository {
                 }
             }
             return users;
+        }
+    }
+
+    /** The user's posts, and of them those not ended; with stances, their Biorę udział and Interesuje mnie not ended. */
+    public ProfileEventsDto countEvents(UUID userId, boolean stances) throws SQLException {
+        String stanceCount = "(SELECT COUNT(*) FROM post_participations pp JOIN posts p ON p.id = pp.post_id"
+            + " WHERE pp.user_id = ?::uuid AND pp.type = ? AND p.deleted_at IS NULL AND " + EventTime.NOT_ENDED + ")";
+        String sql = "SELECT COUNT(*), COUNT(*) FILTER (WHERE " + EventTime.NOT_ENDED + "), " + stanceCount + ", " + stanceCount
+            + " FROM posts p WHERE p.author_id = ?::uuid AND p.deleted_at IS NULL";
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, userId);
+            stmt.setString(2, "TAKES_PART");
+            stmt.setObject(3, userId);
+            stmt.setString(4, "INTERESTED");
+            stmt.setObject(5, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                rs.next();
+                return new ProfileEventsDto(rs.getInt(1), rs.getInt(2),
+                    stances ? rs.getInt(3) : null, stances ? rs.getInt(4) : null);
+            }
+        }
+    }
+
+    public boolean sharesStancesWith(UUID viewer, UUID userId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Friends.sharesWith(conn, viewer, userId);
         }
     }
 

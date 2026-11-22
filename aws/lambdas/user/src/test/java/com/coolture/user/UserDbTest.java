@@ -6,6 +6,7 @@ import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.storage.S3StorageService;
 import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.dto.UserListItemDto;
+import com.coolture.user.dto.UserProfileUpdateRequest;
 import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.service.InterestService;
@@ -58,6 +59,8 @@ class UserDbTest {
 
     @AfterEach
     void removeRows() throws SQLException {
+        execute("DELETE FROM post_participations WHERE user_id IN (" + ALL + ")");
+        execute("DELETE FROM posts WHERE author_id IN (" + ALL + ")");
         execute("DELETE FROM user_relations WHERE source_user_id IN (" + ALL + ") OR target_user_id IN (" + ALL + ")");
         execute("DELETE FROM user_interests WHERE user_id IN (" + ALL + ")");
         execute("DELETE FROM user_kinds WHERE user_id IN (" + ALL + ")");
@@ -116,6 +119,35 @@ class UserDbTest {
         assertEquals(List.of("BLOCK"), relations(JAN, ANNA));
         assertThrows(IllegalArgumentException.class, () -> users.getByIdForCaller(JAN, ANNA));
         assertTrue(users.getByIdForCaller(ANNA, JAN).isBlocked());
+    }
+
+    @Test
+    void events_countEveryPost_andStancesOnlyForTheUserAndAFriendWhoShares() throws SQLException {
+        execute("INSERT INTO posts (author_id, title, starts_at, ends_at, type) VALUES ('" + ANNA + "', 'udb_soon', now() + interval '1 day', NULL, 'ONLINE'),"
+            + " ('" + ANNA + "', 'udb_over', now() - interval '2 days', now() - interval '1 day', 'ONLINE')");
+        execute("INSERT INTO post_participations (post_id, user_id, type) SELECT id, '" + JAN + "', 'TAKES_PART' FROM posts WHERE title = 'udb_soon'");
+        execute("INSERT INTO post_participations (post_id, user_id, type) SELECT id, '" + JAN + "', 'INTERESTED' FROM posts WHERE title = 'udb_over'");
+
+        var annas = users.getByIdForCaller(ANNA, OLA).events();
+        assertEquals(2, annas.posts());
+        assertEquals(1, annas.upcomingPosts());
+
+        assertEquals(1, users.getByIdForCaller(JAN, ANNA).events().takesPart());
+        assertEquals(0, users.getByIdForCaller(JAN, ANNA).events().interested());
+        assertEquals(1, users.getByIdForCaller(JAN, JAN).events().takesPart());
+        // Ola follows Jan, but he doesn't follow her back.
+        assertNull(users.getByIdForCaller(JAN, OLA).events().takesPart());
+        assertNull(users.getByIdForCaller(JAN, null).events().takesPart());
+
+        execute("UPDATE users SET share_stances = false WHERE id = '" + JAN + "'");
+        assertNull(users.getByIdForCaller(JAN, ANNA).events().takesPart());
+        assertEquals(1, users.getByIdForCaller(JAN, JAN).events().takesPart());
+    }
+
+    @Test
+    void aTakenUsername_isAConflict() {
+        assertThrows(IllegalStateException.class, () -> users.update(ANNA, ANNA,
+            new UserProfileUpdateRequest("udb_jan", null, null, null, null)));
     }
 
     @Test

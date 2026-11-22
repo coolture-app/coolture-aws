@@ -19,6 +19,8 @@ import com.coolture.user.repository.UserRepository.AvatarRecord;
 import com.coolture.user.repository.UserRepository.UserEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.sql.SQLException;
 import java.time.Instant;
@@ -227,6 +229,34 @@ class UserServiceTest {
         assertNotNull(profile);
         assertEquals("updated_name", profile.username());
         assertEquals("New bio", profile.bio());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ab", "Anna", "jan kowalski", "jan!", "", "abcdefghijabcdefghijabcdefghijabc"})
+    void update_refusesAUsernameOutsideTheRules(String username) {
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest(username, null, null, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.update(USER_ID, USER_ID, request));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void update_trimsTheUsernameAndNames() throws SQLException {
+        var updated = new UserEntity(USER_ID, "jan.k_2", "Jan", "Nowak", null, Instant.now());
+        when(repository.updateUser(USER_ID, "jan.k_2", "Jan", "Nowak", null, null)).thenReturn(updated);
+
+        service.update(USER_ID, USER_ID, new UserProfileUpdateRequest(" jan.k_2 ", " Jan", "Nowak ", null, null));
+
+        verify(repository).updateUser(USER_ID, "jan.k_2", "Jan", "Nowak", null, null);
+    }
+
+    @Test
+    void update_aTakenUsername_isAConflict() throws SQLException {
+        when(repository.updateUser(USER_ID, "taken", null, null, null, null))
+            .thenThrow(new SQLException("duplicate key", "23505"));
+
+        assertThrows(IllegalStateException.class,
+            () -> service.update(USER_ID, USER_ID, new UserProfileUpdateRequest("taken", null, null, null, null)));
     }
 
     @Test

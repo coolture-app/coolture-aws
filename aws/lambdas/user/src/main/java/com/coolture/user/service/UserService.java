@@ -24,10 +24,14 @@ import com.coolture.user.repository.UserRepository.UserEntity;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Pattern;
 
 public class UserService {
 
     private static final int MAX_USERNAME_LENGTH = 32;
+    /** What a person may choose. Accounts made from an email can hold less, such as two letters, until they change it. */
+    private static final Pattern USERNAME = Pattern.compile("[a-z0-9._]{3,32}");
+    private static final String UNIQUE_VIOLATION = "23505";
 
     private final UserRepository userRepository;
     private final InterestRepository interestRepository;
@@ -106,18 +110,27 @@ public class UserService {
 
     public UserProfileDto update(UUID targetId, UUID callerId, UserProfileUpdateRequest request) throws SQLException {
         requireSelf(targetId, callerId, "You can only update your own profile");
-        if (request.username() != null && request.username().length() > 32) {
-            throw new IllegalArgumentException("Username must not exceed 32 characters");
+        String username = request.username() != null ? request.username().trim() : null;
+        if (username != null && !USERNAME.matcher(username).matches()) {
+            throw new IllegalArgumentException("Username must be 3-32 lowercase letters, digits, dots or underscores");
         }
 
-        UserEntity user = userRepository.updateUser(
-                targetId,
-                request.username(),
-                request.firstName(),
-                request.lastName(),
-                request.bio(),
-                request.shareStances()
-        );
+        UserEntity user;
+        try {
+            user = userRepository.updateUser(
+                    targetId,
+                    username,
+                    request.firstName() != null ? request.firstName().trim() : null,
+                    request.lastName() != null ? request.lastName().trim() : null,
+                    request.bio(),
+                    request.shareStances()
+            );
+        } catch (SQLException e) {
+            if (UNIQUE_VIOLATION.equals(e.getSQLState())) {
+                throw new IllegalStateException("Username is taken");
+            }
+            throw e;
+        }
 
         return toProfileDto(user, callerId);
     }
@@ -379,6 +392,8 @@ public class UserService {
         boolean followsYou = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(user.id(), callerId);
 
         UserInterestsDto picks = interestRepository.findPicks(user.id());
+        boolean seesStances = callerId != null
+            && (callerId.equals(user.id()) || (isFollowing && followsYou && userRepository.sharesStancesWith(callerId, user.id())));
 
         return new UserProfileDto(
                 user.id(),
@@ -394,7 +409,8 @@ public class UserService {
                 isBlocked,
                 followsYou,
                 picks.interests(),
-                picks.kinds()
+                picks.kinds(),
+                userRepository.countEvents(user.id(), seesStances)
         );
     }
 

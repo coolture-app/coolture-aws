@@ -106,10 +106,11 @@ All existing parameters keep their meaning. What's specific to this contract:
 | Parameter or behaviour | Rule |
 |---|---|
 | `includePast` | Default `false`. See the table below |
-| `sortBy` | `RECENT`, `POPULAR`, `UPCOMING` or `NEAREST`. Anything else, including `RECOMMENDED`, returns `400` |
+| `sortBy` | `RECENT`, `POPULAR`, `UPCOMING`, `PAST`, `NEAREST` or `STANCE_NEWEST`. Anything else, including `RECOMMENDED`, returns `400` |
 | `NEAREST` | Needs `latitude` and `longitude`, else `400`. Only posts with a place |
 | `cursor` | Continues the sort it was created for. Using it with a different sort returns `400` |
-| Order | `RECENT`: `created_at, id` descending. `POPULAR`: popularity's count, likes + Interesuje mnie + Biorę udział, then `id`, descending. `UPCOMING`: below. `NEAREST`: metres from the position, `id` ascending |
+| Order | `RECENT`: `created_at, id` descending. `POPULAR`: popularity's count, likes + Interesuje mnie + Biorę udział, then `id`, descending. `UPCOMING`: below. `PAST`: the event's end, `id` descending. `NEAREST`: metres from the position, `id` ascending |
+| `participantId` | Whose stances `participationTypes` reads. Someone else's are an empty list unless they're the viewer's friend and share their stances, as on cards; only `INTERESTED` and `TAKES_PART` |
 
 ### Past events
 
@@ -119,6 +120,7 @@ All existing parameters keep their meaning. What's specific to this contract:
 | `includePast=true` | All visible events |
 | `from` or `to` set | All visible events running in that window, because a chosen date is explicit |
 | `sortBy=UPCOMING` | Never an ended event, even with `includePast=true` or a date filter |
+| `sortBy=PAST` | Only ended events, with or without `includePast`. A profile's Minione |
 | My Events | The frontend sends `includePast=true`, so attended events stay |
 
 Blocks apply here too, in both directions, for signed-in viewers. A guest has no blocks.
