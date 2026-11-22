@@ -80,8 +80,8 @@ class ContractTest {
 
     private static CursorPage<UserListItemDto> page() {
         return new CursorPage<>(List.of(
-            new UserListItemDto(new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, null, 0, 0), false),
-            new UserListItemDto(new UserSummaryDto(UUID.randomUUID(), "ola", "Ola", "Demo", avatar(), Instant.now(), 3, 4), true)),
+            new UserListItemDto(new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, null, 0, 0), false, false),
+            new UserListItemDto(new UserSummaryDto(UUID.randomUUID(), "ola", "Ola", "Demo", avatar(), Instant.now(), 3, 4), true, true)),
             new PaginationMeta(2, true, "abc"));
     }
 

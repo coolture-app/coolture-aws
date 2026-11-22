@@ -175,7 +175,7 @@ class UserHandlerTest {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users", null, null);
 
         var summary = new UserSummaryDto(USER_ID, FAKE_USERNAME, "Kunegunda", "Kowalska", null, Instant.now(), 0, 0);
-        var page = new CursorPage<>(List.of(new UserListItemDto(summary, true)), new PaginationMeta(20, false, null));
+        var page = new CursorPage<>(List.of(new UserListItemDto(summary, true, true)), new PaginationMeta(20, false, null));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
@@ -185,6 +185,7 @@ class UserHandlerTest {
 
             assertEquals(200, response.getStatusCode());
             assertTrue(response.getBody().contains("\"username\":\"" + FAKE_USERNAME + "\""));
+            assertTrue(response.getBody().contains("\"isFollowing\":true"));
             assertTrue(response.getBody().contains("\"followsYou\":true"));
         }
     }

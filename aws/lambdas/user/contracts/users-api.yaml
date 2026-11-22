@@ -535,7 +535,7 @@ components:
     UserSummary:
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount, followsYou]
+      required: [id, username, followersCount, followingCount, isFollowing, followsYou]
       properties:
         id: {type: string, format: uuid}
         username: {type: string}
@@ -545,6 +545,7 @@ components:
         createdAt: {type: string, format: date-time}
         followersCount: {type: integer}
         followingCount: {type: integer}
+        isFollowing: {type: boolean, description: "Whether you follow this user, so a list needs no second request for who you follow. False for yourself and for a guest."}
         followsYou: {type: boolean, description: Whether this user follows you. False for a guest.}
     UserPage:
       type: object

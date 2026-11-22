@@ -66,7 +66,7 @@ public class UserService {
         Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(users.stream().map(u -> u.user().id()).toList());
         List<UserListItemDto> dtos = new ArrayList<>();
         for (ListedUser listed : users) {
-            dtos.add(toListItem(listed.user(), listed.followsYou(), avatarMap));
+            dtos.add(toListItem(listed.user(), listed.isFollowing(), listed.followsYou(), avatarMap));
         }
 
         return CursorPage.of(dtos, limit, dto -> dto.summary().id(), dto -> dto.summary().createdAt());
@@ -238,7 +238,7 @@ public class UserService {
         Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(page.items().stream().map(r -> r.user().id()).toList());
         List<UserListItemDto> dtos = new ArrayList<>();
         for (FollowRow row : page.items()) {
-            dtos.add(toListItem(row.user(), row.followsYou(), avatarMap));
+            dtos.add(toListItem(row.user(), row.isFollowing(), row.followsYou(), avatarMap));
         }
         return new CursorPage<>(dtos, page.page());
     }
@@ -332,13 +332,14 @@ public class UserService {
         List<UserListItemDto> dtos = new ArrayList<>();
         for (UserRepository.UserRelationRow row : rows) {
             relationCreatedAtMap.put(row.user().id(), row.relationCreatedAt());
-            dtos.add(toListItem(row.user(), row.followsYou(), avatarMap));
+            dtos.add(toListItem(row.user(), row.isFollowing(), row.followsYou(), avatarMap));
         }
 
         return CursorPage.of(dtos, limit, dto -> dto.summary().id(), dto -> relationCreatedAtMap.get(dto.summary().id()));
     }
 
-    private UserListItemDto toListItem(UserEntity user, boolean followsYou, Map<UUID, AvatarRecord> avatarMap) throws SQLException {
+    private UserListItemDto toListItem(UserEntity user, boolean isFollowing, boolean followsYou,
+                                       Map<UUID, AvatarRecord> avatarMap) throws SQLException {
         MediaResourceDto avatar = null;
         AvatarRecord record = avatarMap.get(user.id());
         if (record != null) {
@@ -365,7 +366,7 @@ public class UserService {
                 userRepository.countFollowers(user.id()),
                 userRepository.countFollowing(user.id())
         );
-        return new UserListItemDto(summary, followsYou);
+        return new UserListItemDto(summary, isFollowing, followsYou);
     }
 
     private MediaResourceDto avatarOf(UUID userId) throws SQLException {

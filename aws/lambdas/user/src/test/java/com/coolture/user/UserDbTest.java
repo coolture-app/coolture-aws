@@ -24,6 +24,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -225,9 +226,32 @@ class UserDbTest {
         assertEquals(List.of("udb_jan"), usernames(users.getBlocking(ANNA, ANNA, null, 20)));
     }
 
+    @Test
+    void everyList_saysWhomTheViewerFollows_andIsFalseForThemselvesAndAGuest() throws SQLException {
+        // Ola follows Anna and Jan, Anna and Jan follow each other, and nobody follows Ola.
+        assertEquals(Map.of("udb_anna", true, "udb_jan", true, "udb_ola", false), flags(users.search(OLA, "udb_", null, 20)));
+        assertEquals(Map.of("udb_anna", false, "udb_jan", true, "udb_ola", false), flags(users.search(ANNA, "udb_", null, 20)));
+
+        assertEquals(Map.of("udb_jan", false, "udb_ola", false), flags(users.getFollowers(ANNA, JAN, null, null, 20)),
+            "Jan is in his own list, and doesn't follow Ola");
+        assertEquals(Map.of("udb_jan", true, "udb_ola", false), flags(users.getFollowers(ANNA, OLA, null, null, 20)));
+        assertEquals(Map.of("udb_anna", true, "udb_jan", true), flags(users.getFollowing(OLA, OLA, null, null, 20)));
+        assertEquals(Map.of("udb_anna", false, "udb_jan", true), flags(users.getFollowing(OLA, ANNA, null, null, 20)));
+        assertEquals(Map.of("udb_anna", false, "udb_jan", false), flags(users.getFollowing(OLA, null, null, null, 20)),
+            "a guest follows no one");
+
+        users.block(ANNA, JAN);
+        assertEquals(Map.of("udb_jan", false), flags(users.getBlocking(ANNA, ANNA, null, 20)), "a block ended the follow");
+    }
+
     private static void assertNotFound(org.junit.jupiter.api.function.Executable call) {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, call);
         assertTrue(e.getMessage().toLowerCase().contains("not found"), e.getMessage());
+    }
+
+    private static Map<String, Boolean> flags(CursorPage<UserListItemDto> page) {
+        return page.items().stream().filter(item -> item.summary().username().startsWith("udb_"))
+            .collect(java.util.stream.Collectors.toMap(item -> item.summary().username(), UserListItemDto::isFollowing));
     }
 
     private static List<String> usernames(CursorPage<UserListItemDto> page) {

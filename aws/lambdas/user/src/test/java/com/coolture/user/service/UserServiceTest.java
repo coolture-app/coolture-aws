@@ -121,7 +121,7 @@ class UserServiceTest {
     void search_enrichesWithAvatarsAndFollowerCounts() throws SQLException {
         var user = new UserEntity(USER_ID, "testuser", "Jan", "Kowalski", "Bio", Instant.now());
         when(repository.search(eq(CALLER_ID), eq(null), any(), any(), eq(21)))
-                .thenReturn(List.of(new UserRepository.ListedUser(user, true)));
+                .thenReturn(List.of(new UserRepository.ListedUser(user, true, true)));
 
         var avatarRecord = new AvatarRecord(
                 THUMBNAIL_ID,
@@ -142,6 +142,7 @@ class UserServiceTest {
 
         assertNotNull(page);
         assertEquals(1, page.items().size());
+        assertTrue(page.items().get(0).isFollowing());
         assertTrue(page.items().get(0).followsYou());
         UserSummaryDto item = page.items().get(0).summary();
         assertEquals("testuser", item.username());
@@ -311,13 +312,14 @@ class UserServiceTest {
         when(repository.existsById(USER_ID)).thenReturn(true);
         var follower = new UserEntity(CALLER_ID, "follower1", "F", "L", null, Instant.now());
         when(repository.findFollowers(eq(USER_ID), eq(CALLER_ID), any(), any(), eq(21)))
-                .thenReturn(List.of(new UserRepository.FollowRow(follower, true, "f l")));
+                .thenReturn(List.of(new UserRepository.FollowRow(follower, false, true, "f l")));
 
         var page = service.getFollowers(USER_ID, CALLER_ID, null, null, 20);
 
         assertNotNull(page);
         assertEquals(1, page.items().size());
         assertEquals("follower1", page.items().get(0).summary().username());
+        assertFalse(page.items().get(0).isFollowing());
         assertTrue(page.items().get(0).followsYou());
     }
 
@@ -326,11 +328,12 @@ class UserServiceTest {
         when(repository.existsById(USER_ID)).thenReturn(true);
         var followed = new UserEntity(UUID.randomUUID(), "followed1", "F", "L", null, Instant.now());
         when(repository.findFollowing(eq(USER_ID), eq(CALLER_ID), any(), any(), eq(21)))
-                .thenReturn(List.of(new UserRepository.FollowRow(followed, false, "f l")));
+                .thenReturn(List.of(new UserRepository.FollowRow(followed, true, false, "f l")));
 
         var page = service.getFollowing(USER_ID, CALLER_ID, null, null, 20);
 
         assertEquals(1, page.items().size());
+        assertTrue(page.items().get(0).isFollowing());
         assertFalse(page.items().get(0).followsYou());
     }
 
