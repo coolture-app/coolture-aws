@@ -77,6 +77,23 @@ def test_events_are_loaded_once_with_photos_and_moved_dates(tmp_path):
     assert sorted(photos[0] for _, photos in api.created) == [b'photo1', b'photo2']
 
 
+def test_a_sized_load_takes_a_sample_and_moves_dates_by_the_whole_snapshot(tmp_path):
+    snapshot = Snapshot(tmp_path)
+    events = [('film', '2026-11-20T18:00:00Z'), ('film', '2026-11-21T18:00:00Z'), ('film', '2026-11-22T18:00:00Z'),
+              ('sport', '2026-11-03T18:00:00Z')]
+    for number, (category, starts_at) in enumerate(events):
+        snapshot.create_post({'eventUrl': f'https://site.test/{number}', 'startsAt': starts_at}, category=category)
+    snapshot.mark_complete()
+    api = FakeApi()
+
+    stats = seed_events(tmp_path, 'http://api.test', clock=lambda: datetime(2026, 11, 9, 12, tzinfo=UTC),
+                        api_factory=lambda: api, size=1)
+
+    # One film is loaded; the sport event isn't, but its start on 3 November still sets the shift, 6 days.
+    assert stats['created'] == 1
+    assert [post['startsAt'] for post, _ in api.created] == ['2026-11-26T18:00:00Z']
+
+
 def test_a_refused_event_is_counted(tmp_path):
     saved_snapshot(tmp_path, count=1)
 

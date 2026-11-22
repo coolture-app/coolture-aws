@@ -39,9 +39,11 @@ cd ../coolture-frontend && npm install && npm start    # terminal 3: http://loca
 
 `make seed` skips whatever is already done:
 
-1. Scrapes a snapshot of trojmiasto.pl into the gitignored `scraper/snapshot/`, if there's none yet: every listed event, about 30 minutes, once.
-   `SIZE=120` takes a sample across categories instead. An older, smaller snapshot stays until it's deleted.
-2. Loads it through the API as `coolture_bot`, with every date moved forward so all events are ahead. About 5 minutes.
+1. Scrapes a snapshot of trojmiasto.pl into the gitignored `scraper/snapshot/`, if there's none yet: every event of the
+   next 30 days, about 40 minutes, once. A teammate's snapshot copied there skips it. `SIZE=120` scrapes a sample across
+   categories instead. An older, smaller snapshot stays until it's deleted.
+2. Loads a sample of it through the API as `coolture_bot`, every category and day covered, with every date moved forward
+   so all events are ahead. A few minutes. `SIZE=all` loads the whole snapshot, `SIZE=N` another sample.
 3. Embeds interests and posts. The first run builds the embedding image (3.5 GB, about 10 minutes).
 4. Lets the demo users react to posts close to their interests, so their feeds are personal.
 5. Has Anna's, Jan's and Ola's friends mark the soonest posts, so the top of Wszystkie, sorted Nadchodzące, shows every

@@ -10,12 +10,13 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from typing import TypeVar
 from itertools import islice, zip_longest
 from pathlib import Path, PurePosixPath
 
 from api import MAX_PHOTOS, Outcome
 from images import Image
-from trojmiasto import ListingItem
+from trojmiasto import WARSAW, ListingItem
 
 DEFAULT_DIR = Path(__file__).parent / 'snapshot'
 DEFAULT_SIZE = 120
@@ -26,12 +27,17 @@ COMPLETE_FILE = 'complete'
 NO_CATEGORY = '-'
 # Between proportional (1) and equal (0): big categories get more, small ones still get enough to matter.
 ALLOCATION_POWER = 0.5
+T = TypeVar('T')
 SUFFIXES = {'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif'}
 
 
 def category_of(item: ListingItem) -> str:
     """The site's top category, the first part of what a snapshot keeps as `category`."""
-    return (item.category or NO_CATEGORY).split(', ')[0]
+    return top_category(item.category)
+
+
+def top_category(label: str | None) -> str:
+    return (label or NO_CATEGORY).split(', ')[0]
 
 
 def allocate(supply: dict[str, int], total: int, power: float = ALLOCATION_POWER) -> dict[str, int]:
@@ -63,11 +69,11 @@ def allocate(supply: dict[str, int], total: int, power: float = ALLOCATION_POWER
     return quotas
 
 
-def spread_over_dates(items: Iterable[ListingItem]) -> list[ListingItem]:
+def spread_over_dates(items: Iterable[T], day_of: Callable[[T], date | None] = lambda item: item.start_date) -> list[T]:
     """Orders items so that any first few cover as many days as they can: each day's first event, then each day's second."""
-    by_day: dict[date, list[ListingItem]] = defaultdict(list)
+    by_day: dict[date, list[T]] = defaultdict(list)
     for item in items:
-        by_day[item.start_date or date.max].append(item)
+        by_day[day_of(item) or date.max].append(item)
     rounds = zip_longest(*(by_day[day] for day in sorted(by_day)))
     return [item for round_ in rounds for item in round_ if item is not None]
 
@@ -94,6 +100,22 @@ def read(directory: Path) -> list[Entry]:
             entries.append(Entry(datetime.fromisoformat(saved['scrapedAt']), saved['post'], tuple(saved['images']),
                                  category))
     return entries
+
+
+def sample(entries: list[Entry], size: int) -> list[Entry]:
+    """`size` entries chosen as a snapshot is: each category a share by allocate, each spread over the days. The same
+    snapshot and size give the same entries, in the snapshot's order."""
+    groups: dict[str, list[Entry]] = defaultdict(list)
+    for entry in entries:
+        groups[top_category(entry.category)].append(entry)
+    quotas = allocate({category: len(group) for category, group in groups.items()}, size)
+    chosen = {id(entry) for category, group in groups.items()
+              for entry in spread_over_dates(group, _local_day)[:quotas[category]]}
+    return [entry for entry in entries if id(entry) in chosen]
+
+
+def _local_day(entry: Entry) -> date:
+    return datetime.fromisoformat(entry.post['startsAt'].replace('Z', '+00:00')).astimezone(WARSAW).date()
 
 
 def is_complete(directory: Path) -> bool:

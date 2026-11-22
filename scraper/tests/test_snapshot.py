@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timezone
 
 from images import Image
 from scrape import run_snapshot
-from snapshot import Snapshot, allocate, category_of, is_complete, load_images, read, spread_over_dates
+from snapshot import Snapshot, allocate, category_of, is_complete, load_images, read, sample, spread_over_dates
 from trojmiasto import ListingItem
 
 from test_scrape import NOW, FakeGeocoder, FakeSite
@@ -122,3 +122,24 @@ def test_whole_listing_when_size_is_none(tmp_path):
                  clock=lambda: datetime(2026, 11, 2, tzinfo=timezone.utc))
 
     assert len(read(tmp_path)) == 5
+
+
+def saved(directory, events):
+    """events: (category, start in UTC) each, saved in this order."""
+    snapshot = Snapshot(directory)
+    for number, (category, starts_at) in enumerate(events):
+        snapshot.create_post({'eventUrl': f'https://site.test/{number}', 'startsAt': starts_at}, category=category)
+    return read(directory)
+
+
+def test_a_sample_shares_out_the_categories_and_spreads_each_over_the_days(tmp_path):
+    concerts = [('koncerty, jazz', f'2026-11-{day:02d}T18:00:00Z') for day in (5, 5, 5, 6, 6, 7)]
+    films = [('film', '2026-11-05T18:00:00Z'), ('film', '2026-11-08T22:30:00Z')]
+    entries = saved(tmp_path, concerts + films)
+
+    chosen = sample(entries, 5)
+
+    # allocate gives 3 to 6 concerts and 2 to 2 films; 22:30 UTC on 8 November is already the 9th in Warsaw.
+    assert [entry.post['eventUrl'][-1] for entry in chosen] == ['0', '3', '5', '6', '7']
+    assert sample(entries, 5) == chosen
+    assert sample(entries, 100) == entries

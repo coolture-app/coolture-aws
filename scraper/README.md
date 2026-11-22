@@ -16,7 +16,7 @@ started it. That holds when the run sends to AWS too.
 
 ```bash
 make scrape-snapshot                                  # saves every listed event to scraper/snapshot, no API needed (SIZE=120: a sample)
-make seed                                             # loads the snapshot into the local stack, see README.md "Run locally"
+make seed                                             # loads a sample of the snapshot into the local stack (SIZE=all: all of it)
 
 make local                                            # in another terminal
 make scrape                                           # imports live as the local bot user
@@ -38,7 +38,9 @@ A local stack gets its events from a snapshot, so nobody waits for a live scrape
   there and writes `complete` at the end, so one that stopped goes on where it was. A category with too few events
   ahead, such as exhibitions that already opened, is logged with what it got.
 - **`seed.py events`** (`make seed-events`) waits for the API, then loads the posts not yet there as the bot, four at
-  a time. Every date moves forward by the same whole number of days on the Warsaw clock, the fewest that put every
+  a time. By default it loads a sample, chosen the way a snapshot is (each category's share, spread over the days), so a
+  reset is quick; `SIZE=N` picks another size and `SIZE=all` the whole snapshot. The same size gives everyone the same
+  posts, and a bigger one later only adds what's missing. Every date moves forward by the same whole number of days on the Warsaw clock, the fewest that put every
   start at least two hours ahead, so the snapshot's days keep their order and each event its hour.
 - **`seed.py reactions`** (`make seed-reactions`) ranks the bot's posts by cosine distance between each post's
   embedding and the mean of a demo user's interest embeddings. The user likes the posts ranked 4, 7, 10, 13 and 16,
