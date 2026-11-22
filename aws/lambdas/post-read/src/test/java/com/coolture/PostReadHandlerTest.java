@@ -76,7 +76,10 @@ class PostReadHandlerTest {
         Map<String, String> query = Map.of(
             "q", "jazz",
             "limit", "10",
-            "cursor", "abc123"
+            "cursor", "abc123",
+            "includePast", "true",
+            "kinds", "concerts, stage",
+            "kids", "true"
         );
 
         APIGatewayV2HTTPEvent event =
@@ -114,6 +117,9 @@ class PostReadHandlerTest {
         PostFeedFilters filters = filtersCaptor.getValue();
 
         assertEquals("jazz", filters.q());
+        org.junit.jupiter.api.Assertions.assertTrue(filters.includePast());
+        assertEquals(List.of("concerts", "stage"), filters.kinds());
+        org.junit.jupiter.api.Assertions.assertTrue(filters.kids());
     }
 
     @Test
@@ -296,29 +302,6 @@ class PostReadHandlerTest {
 
         assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
         verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
-    }
-
-    @Test
-    void getFeed_whenIncludePastIsSet_thenPassesItToService() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("includePast", "true"));
-        ArgumentCaptor<PostFeedFilters> filters = ArgumentCaptor.forClass(PostFeedFilters.class);
-        when(postReadService.getFeed(any(), filters.capture(), any(), anyInt()))
-            .thenReturn(CursorPage.of(List.<PostCardDto>of(), 20, PostCardDto::id, PostCardDto::createdAt));
-
-        assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
-        org.junit.jupiter.api.Assertions.assertTrue(filters.getValue().includePast());
-    }
-
-    @Test
-    void getFeed_whenKindsAreSet_thenPassesEachKindAndTheKidsSwitch() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("kinds", "concerts, stage", "kids", "true"));
-        ArgumentCaptor<PostFeedFilters> filters = ArgumentCaptor.forClass(PostFeedFilters.class);
-        when(postReadService.getFeed(any(), filters.capture(), any(), anyInt()))
-            .thenReturn(CursorPage.of(List.<PostCardDto>of(), 20, PostCardDto::id, PostCardDto::createdAt));
-
-        assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
-        assertEquals(List.of("concerts", "stage"), filters.getValue().kinds());
-        org.junit.jupiter.api.Assertions.assertTrue(filters.getValue().kids());
     }
 
     @Test

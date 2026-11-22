@@ -187,11 +187,7 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         UUID otherUser = UUID.randomUUID();
 
-        PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
-            postId, authorId, null, "Title", "Desc", "url", null,
-            Instant.now(), null, false, PostType.ONLINE,
-            PostStatus.ACTIVE, Instant.now(), null, null, null
-        );
+        PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         UpdatePostRequest req = new UpdatePostRequest(
@@ -228,11 +224,7 @@ class PostWriteServiceTest {
         UUID authorId = UUID.randomUUID();
         UUID callerId = UUID.randomUUID();
 
-        PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
-            postId, authorId, null, "Title", "Desc", "url", null,
-            Instant.now(), null, false, PostType.ONLINE,
-            PostStatus.ACTIVE, Instant.now(), null, null, null
-        );
+        PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         assertThrows(SecurityException.class, () -> service.deletePost(postId, callerId));
@@ -244,11 +236,7 @@ class PostWriteServiceTest {
         UUID postId = UUID.randomUUID();
         UUID authorId = UUID.randomUUID();
 
-        PostWriteRepository.ExistingPost existing = new PostWriteRepository.ExistingPost(
-            postId, authorId, null, "Title", "Desc", "url", null,
-            Instant.now(), null, false, PostType.ONLINE,
-            PostStatus.ACTIVE, Instant.now(), null, null, null
-        );
+        PostWriteRepository.ExistingPost existing = activeExistingPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
 
         service.deletePost(postId, authorId);

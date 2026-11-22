@@ -53,6 +53,8 @@ class PostWriteDbTest {
         execute("DELETE FROM user_relations WHERE source_user_id IN ('" + AUTHOR + "', '" + VIEWER + "')");
         execute("DELETE FROM post_reactions WHERE post_id = '" + POST + "'");
         execute("DELETE FROM post_participations WHERE post_id = '" + POST + "'");
+        execute("DELETE FROM post_media WHERE post_id = '" + POST + "'");
+        execute("DELETE FROM media WHERE id::text LIKE 'b0000000-0000-0000-0000-0000000002%'");
         execute("DELETE FROM posts WHERE author_id = '" + AUTHOR + "'");
         execute("DELETE FROM users WHERE id IN ('" + AUTHOR + "', '" + VIEWER + "')");
     }
@@ -217,6 +219,34 @@ class PostWriteDbTest {
         existing = repository.findById(POST).orElseThrow();
         assertNull(repository.updatePost(POST, AUTHOR, existing, none, withLinks(existing, List.of())).links());
         assertEquals("[]", queryString("SELECT links::text FROM posts WHERE id = '" + POST + "'"));
+    }
+
+    @Test
+    void aNamedCover_movesToTheFront_andTheOthersKeepTheirOrder_andOneNotOnThePostIsRefused() throws SQLException {
+        List<UUID> photos = List.of(photo(1), photo(2), photo(3));
+        UUID elsewhere = photo(4);
+        for (int position = 0; position < photos.size(); position++) {
+            execute("INSERT INTO post_media (post_id, media_id, position) VALUES ('" + POST + "', '" + photos.get(position) + "', " + position + ")");
+        }
+
+        PostWriteRepository.ExistingPost existing = repository.findById(POST).orElseThrow();
+        UpdatePostRequest cover = new UpdatePostRequest(null, null, null, null, null, null, null, null, null, null, photos.get(2));
+        repository.updatePost(POST, AUTHOR, existing, cover, ending(existing, existing.endsAt(), existing.openEnded()));
+
+        assertEquals("0:" + photos.get(2) + ",1:" + photos.get(0) + ",2:" + photos.get(1),
+            queryString("SELECT string_agg(position || ':' || media_id, ',' ORDER BY position) FROM post_media WHERE post_id = '" + POST + "'"));
+
+        UpdatePostRequest unattached = new UpdatePostRequest(null, null, null, null, null, null, null, null, null, null, elsewhere);
+        assertThrows(IllegalArgumentException.class,
+            () -> repository.updatePost(POST, AUTHOR, repository.findById(POST).orElseThrow(), unattached,
+                ending(repository.findById(POST).orElseThrow(), null, false)));
+    }
+
+    private static UUID photo(int number) throws SQLException {
+        UUID id = UUID.fromString("b0000000-0000-0000-0000-00000000020" + number);
+        execute("INSERT INTO media (id, owner_id, object_key, purpose, status) VALUES ('" + id + "', '" + AUTHOR + "', 'pwdb/" + id
+            + "', 'EVENT_MEDIA', 'ATTACHED')");
+        return id;
     }
 
     @Test

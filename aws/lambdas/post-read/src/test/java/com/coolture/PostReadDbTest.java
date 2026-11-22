@@ -227,11 +227,15 @@ class PostReadDbTest {
     }
 
     @Test
-    void feed_theFallback_appliesExactlyTheSameRules() throws SQLException {
+    void feed_theFallback_appliesTheSameRulesAndFilters() throws SQLException {
         assertEquals(ruleTitles(walkFeed(feedService, ME, 100, null, null, FeedMode.RANKED)),
             ruleTitles(feedRepository.findUpcoming(ME, PostFeedFilters.none(), Upcoming.Position.start(Instant.now()), 1000).items()));
         assertEquals(ruleTitles(walkFeed(feedService, null, 100, null, null, FeedMode.RANKED)),
             ruleTitles(feedRepository.findUpcoming(null, PostFeedFilters.none(), Upcoming.Position.start(Instant.now()), 1000).items()));
+
+        PostFeedFilters radius = around(null, 1.0);
+        assertEquals(new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, radius, FeedMode.RANKED)))),
+            new HashSet<>(distances(titles(feedRepository.findUpcoming(ME, radius, Upcoming.Position.start(Instant.now()), 1000).items()))));
     }
 
     @Test
@@ -882,28 +886,20 @@ class PostReadDbTest {
         return new HashSet<>(titles(walkPosts(ME, by(SEARCHER, "RECENT", null, null, q), 100)));
     }
 
-    @Test
-    void aSearch_ignoresDiacritics_onBothSides() throws SQLException {
-        assertEquals(Set.of("Śpiew gospel"), searched("spiew"));
-        assertEquals(Set.of("Śpiew gospel"), searched("ŚPIEW"));
-        assertEquals(Set.of("Muzyka w filharmonii"), searched("lodz"));
-    }
-
-    @Test
-    void aSearch_findsAnotherFormOfAWord() throws SQLException {
-        assertEquals(Set.of("Wieczór koncertowy"), searched("koncertu"));
-    }
-
-    @Test
-    void aSearch_needsEveryWord_inAnyField_inAnyOrder() throws SQLException {
-        assertEquals(Set.of("Muzyka w filharmonii"), searched("muzyka klasyczna"));
-        assertEquals(Set.of("Muzyka w filharmonii"), searched("Łódź  muzyka"));
-        assertEquals(Set.of(), searched("muzyka opera"));
-    }
-
-    @Test
-    void aSearch_takesPercentAsALetter() throws SQLException {
-        assertEquals(Set.of("Zniżka 50%"), searched("50%"));
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', quoteCharacter = '"', value = {
+        "spiew | Śpiew gospel",
+        "ŚPIEW | Śpiew gospel",
+        "lodz | Muzyka w filharmonii",
+        "koncertu | Wieczór koncertowy",
+        "muzyka klasyczna | Muzyka w filharmonii",
+        "\"Łódź  muzyka\" | Muzyka w filharmonii",
+        "muzyka opera | \"\"",
+        "50% | Zniżka 50%"
+    })
+    void aSearch_ignoresDiacritics_findsOtherFormsOfAWord_needsEveryWordInAnyOrder_andTakesPercentAsALetter(String q, String expected)
+        throws SQLException {
+        assertEquals(expected.isEmpty() ? Set.of() : Set.of(expected), searched(q));
     }
 
     @Test
@@ -939,13 +935,6 @@ class PostReadDbTest {
     void feed_includePast_letsEndedEventsIn_andKeepsHidingWhatIsMine() throws SQLException {
         assertEquals(union(PUBLIC_LIVE, ENDED),
             ruleTitles(walkFeed(feedService, ME, 100, null, null, filters(null, true, null, null), FeedMode.RANKED)));
-    }
-
-    @Test
-    void feed_theFallback_appliesTheSameFilters() throws SQLException {
-        PostFeedFilters filters = around(null, 1.0);
-        assertEquals(new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, filters, FeedMode.RANKED)))),
-            new HashSet<>(distances(titles(feedRepository.findUpcoming(ME, filters, Upcoming.Position.start(Instant.now()), 1000).items()))));
     }
 
     @Test
@@ -1026,33 +1015,28 @@ class PostReadDbTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"true, true", "true, false", "false, true", "false, false"})
-    void walkingTheFeed_showsEveryCandidateOnce(boolean signedIn, boolean withLocation) throws SQLException {
+    @CsvSource({"true, true, false", "true, false, false", "false, true, false", "false, false, false", "true, false, true"})
+    void walkingTheFeed_showsEveryCandidateOnce(boolean signedIn, boolean withLocation, boolean rankingDown) throws SQLException {
         UUID viewer = signedIn ? ME : null;
         Double latitude = withLocation ? 54.35 : null;
         Double longitude = withLocation ? 18.65 : null;
+        FeedService service = feedService;
+        if (rankingDown) {
+            FeedRepository down = new FeedRepository("test") {
+                @Override
+                public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
+                                                             Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
+                    throw new SQLException("ranking is down");
+                }
+            };
+            service = new FeedService(down, FeedConfig.DEFAULTS, Clock.systemUTC(), () -> 42);
+        }
 
-        List<UUID> walked = walkFeed(feedService, viewer, 7, latitude, longitude, FeedMode.RANKED).stream().map(PostCardDto::id).toList();
+        List<UUID> walked = walkFeed(service, viewer, 7, latitude, longitude, rankingDown ? FeedMode.UPCOMING : FeedMode.RANKED)
+            .stream().map(PostCardDto::id).toList();
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
         assertEquals(ids(feedRepository.findCandidates(viewer, null, null, Instant.now(), latitude, longitude, PostFeedFilters.none())), new HashSet<>(walked));
-    }
-
-    @Test
-    void walkingTheFallback_showsTheSamePostsOnce() throws SQLException {
-        FeedRepository rankingDown = new FeedRepository("test") {
-            @Override
-            public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
-                                                         Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
-                throw new SQLException("ranking is down");
-            }
-        };
-        FeedService fallback = new FeedService(rankingDown, FeedConfig.DEFAULTS, Clock.systemUTC(), () -> 42);
-
-        List<UUID> walked = walkFeed(fallback, ME, 7, null, null, FeedMode.UPCOMING).stream().map(PostCardDto::id).toList();
-
-        assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
-        assertEquals(ids(feedRepository.findCandidates(ME, null, null, Instant.now(), null, null, PostFeedFilters.none())), new HashSet<>(walked));
     }
 
     @Test
