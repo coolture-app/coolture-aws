@@ -140,6 +140,20 @@ def test_street_without_a_number():
     assert (page.street, page.building_number) == ('Targ Węglowy', None)
 
 
+@pytest.mark.parametrize('name, street_address, venue', [
+    ('Hevelianum', 'Hevelianum - Dom Zdrojowy, Gdańsk, Zdrojowa 2', 'Hevelianum - Dom Zdrojowy'),
+    ('Sala Koncertowa', 'Sala Koncertowa Portu Gdynia, Gdynia, Waszyngtona 2', 'Sala Koncertowa Portu Gdynia'),
+    ('Polska Filharmonia Bałtycka', 'Filharmonia Bałtycka, Gdańsk, Ołowianka 1', 'Polska Filharmonia Bałtycka'),
+    ('Fine Wine', 'Fine Wine - Gdańsk, Gdańsk, Długa 1', 'Fine Wine'),
+    ('Sala', 'Salamandra, Gdańsk, Długa 1', 'Sala'),
+    ('Hevelianum', 'Hevelianum, Gdańsk, Gradowa 6', 'Hevelianum'),
+])
+def test_the_address_names_the_place_when_it_says_more_than_the_venue(name, street_address, venue):
+    page = parse_event_page(event_page(location={'name': name, 'address': {'streetAddress': street_address}}))
+
+    assert page.venue == venue
+
+
 def test_address_holding_only_a_city_has_no_street():
     page = parse_event_page(event_page(location={'name': 'Klub', 'address': {'streetAddress': 'Gdańsk'}}))
 

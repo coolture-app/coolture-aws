@@ -203,6 +203,21 @@ def _split_street(street_address: str) -> tuple[str | None, str | None]:
     return match['street'], match['number']
 
 
+def _fuller_venue(name: str, street_address: str) -> str:
+    """The address's name for the place when it is the venue's name and more, as "Hevelianum - Dom Zdrojowy" for
+    Hevelianum's events in Brzeźno, which the name alone would put on Góra Gradowa. A shortened name ("Filharmonia
+    Bałtycka" for "Polska Filharmonia Bałtycka") or one that only adds the city ("Fine Wine - Gdańsk") isn't."""
+    parts = [part.strip() for part in street_address.split(',')]
+    if len(parts) < 3 or not name:
+        return name
+    named, city = parts[0], parts[1]
+    rest = named[len(name):]
+    if not named.casefold().startswith(name.casefold()) or rest[:1] not in (' ', '-', '–', '('):
+        return name
+    added = rest.strip(' -–,()')
+    return named if added and added.casefold() != city.casefold() else name
+
+
 def _parse_moment(value: str) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
@@ -336,14 +351,15 @@ def parse_event_page(page_html: str) -> EventPage | None:
     place = location[0] if isinstance(location, list) and location else location
     # An address can also be plain text, such as "Trójmiasto", which _text reads as no fields.
     address = place.get('address') if isinstance(place, dict) else None
-    street, building_number = _split_street(_text(address, 'streetAddress'))
+    street_address = _text(address, 'streetAddress')
+    street, building_number = _split_street(street_address)
 
     return EventPage(
         start_date=start.date() if start else None,
         end=_parse_moment(_text(block, 'endDate')),
         online='online' in _text(block, 'eventAttendanceMode').lower(),
         description=description,
-        venue=_real_venue(_text(place, 'name')),
+        venue=_real_venue(_fuller_venue(_text(place, 'name'), street_address)),
         street=street,
         building_number=building_number,
         postal_code=_text(address, 'postalCode') or None,
