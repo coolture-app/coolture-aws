@@ -1,0 +1,96 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stacks:
+        description: 'Stacks to deploy, space separated (auth backend embeddings waf frontend); empty = all'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      stacks: ${{ steps.detect.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: detect
+        env:
+          FROM: ${{ github.event.pull_request.base.sha || github.event.before }}
+          REQUESTED: ${{ inputs.stacks }}
+        run: echo "stacks=${REQUESTED:-$(ci/changed-stacks.sh "$FROM")}" | tee -a "$GITHUB_OUTPUT"
+
+  test-java:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - run: ci/test-java.sh
+
+  test-python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: '**/requirements*.txt'
+      - run: ci/test-python.sh
+
+  deploy:
+    needs: [changes, test-java, test-python]
+    if: github.event_name != 'pull_request' && needs.changes.outputs.stacks != ''
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    environment: dev
+    concurrency: coolture-aws-dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SAM_CLI_TELEMETRY: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - run: ci/install-tools.sh
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-duration-seconds: 7200
+          aws-region: eu-north-1
+          mask-aws-account-id: true
+      - run: ci/deploy.sh $STACKS
+        env:
+          STACKS: ${{ needs.changes.outputs.stacks }}
+          CFN_ROLE_ARN: ${{ secrets.AWS_CFN_ROLE_ARN }}
