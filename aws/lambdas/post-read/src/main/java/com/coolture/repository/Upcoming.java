@@ -79,15 +79,10 @@ public final class Upcoming {
         void bind(ParamBinder b) throws SQLException;
     }
 
-    /** Both streams from the given position, merged, with photos and friends' stances. */
-    public static Page find(Connection conn, Query query, UUID viewer, Instant from, Position at, int limit)
-            throws SQLException {
-        return find(conn, query, null, viewer, from, at, limit);
-    }
-
     /**
-     * As above, then, once both streams ran out and ended isn't null, the events of ended (the list's query with ended
-     * events in place of its rule against them) that ended before asOf.
+     * Both streams from the given position, merged, with photos and friends' stances. Once both ran out and ended isn't
+     * null, the events of ended (the list's query with ended events in place of its rule against them) that ended before
+     * asOf.
      */
     public static Page find(Connection conn, Query query, Query ended, UUID viewer, Instant from, Position at, int limit)
             throws SQLException {
@@ -137,7 +132,7 @@ public final class Upcoming {
     /** Each stream orders by its key and the id, and continues after the position's last key for it. */
     private enum Stream {
 
-        DATED("p.starts_at >= ?::timestamptz", "p.starts_at", false) {
+        DATED("p.starts_at >= ?::timestamptz", "p.starts_at", "ASC", ">") {
             @Override
             void bindWithin(ParamBinder b, Position at, Instant from) throws SQLException {
                 b.bindTimestamp(at.moment(from));
@@ -154,7 +149,7 @@ public final class Upcoming {
             }
         },
 
-        RUNNING("p.starts_at < ?::timestamptz AND " + EventTime.END + " >= ?::timestamptz", EventTime.END, false) {
+        RUNNING("p.starts_at < ?::timestamptz AND " + EventTime.END + " >= ?::timestamptz", EventTime.END, "ASC", ">") {
             @Override
             void bindWithin(ParamBinder b, Position at, Instant from) throws SQLException {
                 Instant moment = at.moment(from);
@@ -173,7 +168,7 @@ public final class Upcoming {
         },
 
         /** Bounded by asOf, not now, so an event that ends while the list is read can't come a second time here. */
-        ENDED(EventTime.END + " < ?::timestamptz", EventTime.END, true) {
+        ENDED(EventTime.END + " < ?::timestamptz", EventTime.END, "DESC", "<") {
             @Override
             void bindWithin(ParamBinder b, Position at, Instant from) throws SQLException {
                 b.bindTimestamp(at.asOf());
@@ -192,12 +187,14 @@ public final class Upcoming {
 
         private final String within;
         private final String key;
-        private final boolean latestFirst;
+        private final String order;
+        private final String after;
 
-        Stream(String within, String key, boolean latestFirst) {
+        Stream(String within, String key, String order, String after) {
             this.within = within;
             this.key = key;
-            this.latestFirst = latestFirst;
+            this.order = order;
+            this.after = after;
         }
 
         abstract void bindWithin(ParamBinder b, Position at, Instant from) throws SQLException;
@@ -208,13 +205,12 @@ public final class Upcoming {
 
         List<PostCardDto> read(Connection conn, Query query, Position at, Instant from, int limit) throws SQLException {
             boolean continues = lastId(at) != null;
-            String order = latestFirst ? " DESC" : " ASC";
             String sql = query.sql()
                 + "  AND " + within + "\n"
                 // A null key is the end of a post with no end date, which an ended event never has.
-                + (continues ? "  AND (" + key + ", p.id) " + (latestFirst ? "<" : ">")
+                + (continues ? "  AND (" + key + ", p.id) " + after
                     + " (COALESCE(?::timestamptz, 'infinity'::timestamptz), ?::uuid)\n" : "")
-                + "ORDER BY " + key + order + ", p.id" + order + "\n"
+                + "ORDER BY " + key + " " + order + ", p.id " + order + "\n"
                 + "LIMIT ?";
 
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
