@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from collections.abc import Callable
@@ -7,7 +8,9 @@ import requests
 
 from trojmiasto import Event
 
-# Our Photon: the container make up starts once make geo-index has built its index, the same index the app uses on AWS.
+log = logging.getLogger(__name__)
+
+# Our Photon, started by `make up`.
 DEFAULT_URL = 'http://localhost:2322'
 # Pomerania, as west, south, east, north. A name matched outside it is another place with the same name.
 REGION = '16.5,53.3,20.0,55.0'
@@ -88,6 +91,10 @@ class Geocoder:
         try:
             response = self._session.get(f'{self._base_url}/{path}', timeout=20,
                                          params={**params, 'limit': 1, 'lang': 'default'})
+            if response.status_code == 400:
+                # Photon answers 400 to some inputs. Another event's run would stop at this one every time.
+                log.warning('Photon refused path=%s params=%s', path, params)
+                return None
             response.raise_for_status()
             features = response.json()['features']
             if features == []:

@@ -1,6 +1,6 @@
 """The scheduled scraper on AWS: a Lambda outside the VPC, so it can reach trojmiasto.pl, that EventBridge Scheduler
-starts at a random moment in every 6 hours (aws/scraper.yaml). Each run does what make scrape does, as the bot, and
-stops in time for its 15 minutes; the next run goes on from there.
+starts on a schedule (aws/scraper.yaml). Each run does what make scrape does, as the bot, and stops in time for the
+Lambda's limit; the next run goes on from there.
 
 boto3 and botocore come with the Lambda runtime, so only this file imports them.
 """
@@ -20,7 +20,7 @@ from botocore.exceptions import ClientError
 
 from api import CooltureApi
 from geocoder import Geocoder
-from scrape import http_session, run, utc_now
+from scrape import exit_code, http_session, run, utc_now
 from trojmiasto import Site
 
 log = logging.getLogger('scraper')
@@ -96,7 +96,6 @@ def secret(secrets, secret_id: str) -> str:
 
 def handler(event, context) -> dict:
     logging.getLogger().setLevel(logging.INFO)
-    # A retry that fails ends in one error, so its warnings would only repeat it.
     logging.getLogger('urllib3').setLevel(logging.ERROR)
     env = os.environ
     session = boto3.session.Session()
@@ -121,4 +120,7 @@ def handler(event, context) -> dict:
         run(site, Geocoder(geocoder_session, env['GEOCODER_URL']), api, stats, None, stop_at=stop_at)
     finally:
         log.info('Done: %s', dict(stats))
+    # A failed invocation is what CloudWatch's Errors metric counts.
+    if exit_code(stats):
+        raise RuntimeError(f'The run failed: {dict(stats)}')
     return dict(stats)

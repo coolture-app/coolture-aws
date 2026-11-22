@@ -161,12 +161,20 @@ def test_a_geocoder_that_is_not_running_says_how_to_start_it():
         geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
 
 
-def test_a_failed_request_on_a_street_does_not_fall_back_to_the_city_centre():
+@pytest.mark.parametrize('status', [403, 502])
+def test_a_failed_request_on_a_street_does_not_fall_back_to_the_city_centre(status):
     session = FakeSession({'Gdynia': feature()})
-    session.get = lambda url, params, timeout: FakeResponse({}, status=400)
+    session.get = lambda url, params, timeout: FakeResponse({}, status=status)
 
     with pytest.raises(GeocoderUnavailable):
         geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia'))
+
+
+def test_an_input_photon_refuses_finds_nothing_and_does_not_stop_the_run():
+    session = FakeSession()
+    session.get = lambda url, params, timeout: FakeResponse({}, status=400)
+
+    assert geocoder(session).locate(event('Klub', 'Portowa', '9', 'Gdynia')) is None
 
 
 def test_a_failed_request_is_not_remembered():

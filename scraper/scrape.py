@@ -181,7 +181,7 @@ def main() -> int:
         geocoder = Geocoder(http_session(retry_timeouts=True), os.getenv('SCRAPER_GEOCODER_URL', DEFAULT_URL))
         if args.snapshot:
             run_snapshot(Site(http_session(retry_timeouts=True)), geocoder, Snapshot(args.snapshot), stats, None if args.all else args.size)
-            return _exit_code(stats)
+            return exit_code(stats)
         sink = DryRun() if args.dry_run else CooltureApi(
             http_session(), http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
             token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
@@ -196,10 +196,10 @@ def main() -> int:
     finally:
         log.info('Done: %s', dict(stats))
 
-    return _exit_code(stats)
+    return exit_code(stats)
 
 
-def _exit_code(stats: Counter) -> int:
+def exit_code(stats: Counter) -> int:
     if not stats['listed']:
         log.error('The listing gave no events, so its markup has probably changed')
         return 1

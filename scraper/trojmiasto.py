@@ -18,8 +18,7 @@ from images import Image
 log = logging.getLogger(__name__)
 
 SITE_URL = 'https://www.trojmiasto.pl'
-# One listing per day: the 30-day listing (dni,30dni.html) stops at page 19, 400 events, while the days held 534 on
-# 2026-11-22. A busy Saturday is about 100.
+# One listing per day: the site's 30-day listing is cut off part-way and loses events.
 DAY_LISTING_URL = SITE_URL + '/imprezy/dzien,{day}'
 LISTING_DAYS = 30
 LISTING_PAGE_PARAMETER = 'strona'
@@ -50,7 +49,6 @@ PHOTO_ID = re.compile(r'/(\d+)(?:__\w+)?\.\w+$')
 OTHER_CONTENT = ['events-list', 'event__item', 'articles', 'SpectacleItem']
 TRICITY = ('Gdańsk', 'Gdynia', 'Sopot')
 
-# Paragraphs and their lines, as a post shows them.
 PARAGRAPH_TAGS = 'p, div, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote'
 LINE_EDGES = {'br', 'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'blockquote'}
 HEADING_MAX = 60
@@ -391,10 +389,10 @@ def _written_end(text: str, start: datetime) -> datetime | None:
     year = int(match.group(3)) if match.group(3) else start.year
     try:
         end = datetime.combine(date(year, month, day), time(23, 59), tzinfo=WARSAW)
+        if end <= start and not match.group(3):
+            end = end.replace(year=year + 1)
     except ValueError:
         return None
-    if end <= start and not match.group(3):
-        end = end.replace(year=year + 1)
     return end if end > start else None
 
 
@@ -459,9 +457,8 @@ class Site:
         return response
 
     def listing_items(self) -> Iterator[ListingItem]:
-        """Each day's listing from today, each until a page adds nothing to that day, because the site repeats its last
-        page past the end. An event listed on several days comes once, with its first day, and a later day's page
-        holding only those still leads to its next page."""
+        """Each day's listing from today, page by page until a page adds nothing new to that day. An event listed on
+        several days comes once, with its first day."""
         yielded: set[str] = set()
         first = self._today()
         for offset in range(self._days):

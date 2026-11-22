@@ -32,7 +32,7 @@ log = logging.getLogger('seed')
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 BOT_ID = '00000000-0000-0000-0000-00000000b07a'
-# A local write takes about 1.3 s. Four at a time took about 40% of the time of one at a time, and more gave nothing.
+# Four at a time was fastest; more gave nothing.
 WORKERS = 4
 # Every category and day at a fraction of the whole snapshot's load time; `--size all` loads all of it.
 SEED_SIZE = 200
@@ -53,7 +53,7 @@ LIKE_RANKS = (3, 6, 9, 12, 15)
 INTERESTED_RANKS = (4, 10)
 NOT_FOR_ME_FROM_THE_END = 2
 # The API stamps a reaction with the time it's made. The feed lets older stances fade, so the demo users get a past,
-# 2 to 6 weeks back, and what someone likes in the app leads their taste, as it would for a real user.
+# some weeks back, and what someone likes in the app leads their taste, as it would for a real user.
 HISTORY_DAYS = (14, 42)
 # The friends line's cases are props for cards, whoever the friends are, and every friend is a persona. Fresh, a case's
 # stances led its friends' own feeds; dated as far back as reactions go, they fade there like old reactions and still

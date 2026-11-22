@@ -648,6 +648,12 @@ def test_a_written_end_without_a_year_is_the_next_such_day():
     assert merge(listed(), page).end == datetime(2027, 1, 10, 23, 59, tzinfo=WARSAW)
 
 
+def test_a_written_end_on_a_day_the_next_year_lacks_gives_none():
+    page = read_page(start_date=date(2028, 3, 1), description='Ekspozycja potrwa do 29 lutego.')
+
+    assert merge(listed(), page).end is None
+
+
 def test_the_pages_own_end_comes_before_the_text():
     page = read_page(end=datetime(2026, 12, 1), description='Wystawa czynna do 28 lutego 2027')
 
