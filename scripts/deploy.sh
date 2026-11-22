@@ -222,6 +222,7 @@ deploy_stack() {
         # Without kinds derived, every post would have none until edited.
         invoke_worker embed-interests "selections will not reach recommendations"
         invoke_worker derive-kinds "posts have no kinds"
+        embed_posts
     fi
     if [[ "$stack" == geocoder ]] && ! aws s3api head-object \
         --bucket "$(stack_output "coolture-geocoder-$ENVIRONMENT" IndexBucketName)" --key photon/index.tar.gz > /dev/null 2>&1; then
@@ -233,6 +234,7 @@ deploy_stack() {
     fi
 }
 
+# Leaves the worker's reply in WORKER_REPLY, empty when every attempt failed.
 invoke_worker() {
     local action="$1" consequence="$2" response function_error attempt
     response="$(mktemp)"
@@ -241,12 +243,28 @@ invoke_worker() {
         function_error="$(aws lambda invoke --function-name "coolture-$ENVIRONMENT-post-embedding" \
             --region "$AWS_DEFAULT_REGION" --cli-binary-format raw-in-base64-out --cli-read-timeout 150 \
             --query FunctionError --output text --payload "{\"action\":\"$action\"}" "$response")" || function_error=Failed
-        cat "$response"
-        echo
+        WORKER_REPLY="$(cat "$response")"
+        echo "$WORKER_REPLY"
         [[ "$function_error" == None ]] && return 0
     done
+    WORKER_REPLY=""
     # A warning, not a stop: the actions can be sent again, and waf and frontend still need deploying.
     echo "Warning: the worker's $action failed: $consequence. Send {\"action\":\"$action\"} to coolture-$ENVIRONMENT-post-embedding again by hand." >&2
+}
+
+# One run stops before the worker's timeout and says how many posts are left.
+embed_posts() {
+    local embedded left
+    while :; do
+        invoke_worker embed-posts "posts without a vector of the current model are neutral in the feed and have no kinds"
+        embedded="$(sed -n 's/.*"posts": *\([0-9]*\).*/\1/p' <<< "$WORKER_REPLY")"
+        left="$(sed -n 's/.*"left": *\([0-9]*\).*/\1/p' <<< "$WORKER_REPLY")"
+        [[ "${left:-0}" -gt 0 ]] || return 0
+        if [[ "${embedded:-0}" -eq 0 ]]; then
+            echo "Warning: embed-posts embedded nothing and $left post(s) are left. Check the worker's log, then send {\"action\":\"embed-posts\"} again by hand." >&2
+            return 0
+        fi
+    done
 }
 
 stack_param() {
