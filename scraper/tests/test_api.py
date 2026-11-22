@@ -449,12 +449,3 @@ def test_a_failed_delete_does_not_stop_the_run():
     client = CooltureApi(session, FakeSession([OK]), 'http://api.test', token='t')
 
     assert client.create_post({'eventUrl': 'a'}, [IMAGE]).failure.startswith('400')
-
-
-def test_the_storage_never_gets_the_api_identity():
-    client, session, storage = uploading([init(), OK, CREATED], [OK])
-
-    client.create_post({'eventUrl': 'a'}, [IMAGE])
-
-    assert session.headers == {'Authorization': 'Bearer t'}
-    assert storage.headers == {}

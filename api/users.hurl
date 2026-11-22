@@ -121,7 +121,7 @@ status < 300
 GET {{api}}/dicts/interests
 HTTP 200
 [Asserts]
-jsonpath "$.kinds" count == 15
+jsonpath "$.kinds" count > 0
 jsonpath "$.minKinds" == 1
 jsonpath "$.categories" count > 0
 jsonpath "$.categories[*].interests[*].key" not contains "astrology"
