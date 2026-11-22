@@ -13,7 +13,9 @@ stacks_for() {
         aws/auth.yaml | aws/lambdas/authorizer/*) echo auth ;;
         aws/frontend.yaml | aws/lambdas/ssr/*) echo frontend ;;
         aws/waf.yaml) echo waf ;;
-        embedding-workers/*) echo embeddings ;;
+        recommender/*) echo embeddings ;;
+        # The geocoder's stack, deployed by hand.
+        aws/lambdas/geo-proxy/*) ;;
         aws/backend.yaml | aws/lambdas/* | migrations/*) echo backend ;;
     esac
 }
