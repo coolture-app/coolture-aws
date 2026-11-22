@@ -19,6 +19,8 @@ import com.coolture.user.service.InterestService;
 import com.coolture.user.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
 import java.time.Instant;
@@ -120,14 +122,15 @@ class UserHandlerTest {
         }
     }
 
-    @Test
-    void usernameInterests_isNotTreatedAsInterestsRoute() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"interests", "home", "follow", "block", "blocking", "followers", "following"})
+    void aUsernameThatIsAnotherRoutesLastWord_isStillAProfile(String username) throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-                "GET", "/users/by-username/interests", null, Map.of("username", "interests"));
+                "GET", "/users/by-username/" + username, null, Map.of("username", username));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
-            when(service.getByUsernameForCaller("interests", null)).thenReturn(profile(USER_ID, "interests"));
+            when(service.getByUsernameForCaller(username, null)).thenReturn(profile(USER_ID, username));
 
             assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
             verifyNoInteractions(interestService);

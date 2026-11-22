@@ -52,6 +52,14 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
                 return ApiResponse.badRequest("Unsupported method for /auth/me: " + method);
             }
 
+            // A username can be any route's last word, such as home or follow, so this comes before them.
+            if (path.contains("/by-username/")) {
+                if ("GET".equalsIgnoreCase(method)) {
+                    return getByUsername(event);
+                }
+                return ApiResponse.badRequest("Unsupported method for by-username: " + method);
+            }
+
             if (path.endsWith("/dicts/interests")) {
                 if ("GET".equalsIgnoreCase(method)) {
                     return ApiResponse.ok(interestService.getCatalog());
@@ -110,13 +118,6 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
                     case "DELETE" -> unblock(event);
                     default -> ApiResponse.badRequest("Unsupported method for block: " + method);
                 };
-            }
-
-            if (path.contains("/by-username/")) {
-                if ("GET".equalsIgnoreCase(method)) {
-                    return getByUsername(event);
-                }
-                return ApiResponse.badRequest("Unsupported method for by-username: " + method);
             }
 
             if (path.endsWith("/interests")) {
