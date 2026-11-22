@@ -158,6 +158,7 @@ VALUES ('a0000000-0000-0000-0000-000000000100', ST_SetSRID(ST_MakePoint(18.65, 5
 INSERT INTO posts (author_id, event_location_id, title, starts_at, ends_at, type) VALUES
   ('a0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000100', 'map_open',            now() + interval '2 days',   NULL,                         'OFFLINE'),
   ('a0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000100', 'map_ended_last_year', now() - interval '400 days', now() - interval '399 days',  'OFFLINE'),
+  ('a0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000100', 'map_ended_1h_ago',    now() - interval '3 hours',  now() - interval '1 hour',    'OFFLINE'),
   ('a0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000100', 'map_by_i_blocked',    now() + interval '2 days',   NULL,                         'OFFLINE'),
   ('a0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000100', 'map_by_blocked_me',   now() + interval '2 days',   NULL,                         'OFFLINE');
 

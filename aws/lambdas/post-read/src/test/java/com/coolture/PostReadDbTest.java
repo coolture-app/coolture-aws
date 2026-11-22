@@ -81,16 +81,15 @@ class PostReadDbTest {
         "by_followed", "by_fan", "friend_going", "friend_interested", "friend_not_for_me", "followed_going", "fan_going",
         "quiet_friend_going", "friends_crowd");
     private static final Set<String> INTERACTED = Set.of("liked", "marked", "interested", "attending");
-    private static final Set<String> ENDED_RECENTLY = Set.of("no_end_started_4h", "no_end_started_14h", "ended_1h_ago", "ended_11h_ago");
-    private static final Set<String> ENDED_LONG_AGO = Set.of("no_end_started_16h", "ended_13h_ago", "ended_last_year");
+    private static final Set<String> ENDED = Set.of("no_end_started_4h", "no_end_started_14h", "ended_1h_ago", "ended_11h_ago",
+        "no_end_started_16h", "ended_13h_ago", "ended_last_year");
     private static final Set<String> HIDDEN_FROM_ME = Set.of("deleted", "by_i_blocked", "by_blocked_me");
     private static final Set<String> MY_VIEW_ONLY = Set.of("mine", "created_after_as_of");
 
-    private static final Set<String> BROWSE_DEFAULT = union(PUBLIC_LIVE, INTERACTED, ENDED_RECENTLY, MY_VIEW_ONLY);
     private static final Set<String> NOT_ENDED_FOR_ME = union(PUBLIC_LIVE, INTERACTED, MY_VIEW_ONLY);
 
     /** Every post that tests a rule. The database also holds demo data and the walk posts, which these checks ignore. */
-    private static final Set<String> RULE_TITLES = union(PUBLIC_LIVE, INTERACTED, ENDED_RECENTLY, ENDED_LONG_AGO, HIDDEN_FROM_ME, MY_VIEW_ONLY);
+    private static final Set<String> RULE_TITLES = union(PUBLIC_LIVE, INTERACTED, ENDED, HIDDEN_FROM_ME, MY_VIEW_ONLY);
 
     private static final MapBoundsDto AROUND_THE_FIXTURES = new MapBoundsDto(new GeoPointDto(55.0, 18.0), new GeoPointDto(54.0, 19.0));
 
@@ -590,18 +589,18 @@ class PostReadDbTest {
 
     @ParameterizedTest
     @CsvSource({"RECENT", "POPULAR"})
-    void browse_hidesEventsEndedOver12HoursAgo_unlessOptedIn(String sort) throws SQLException {
-        assertEquals(BROWSE_DEFAULT, ruleTitles(walkPosts(ME, filters(sort, false, null, null), 100)));
-        assertEquals(union(BROWSE_DEFAULT, ENDED_LONG_AGO), ruleTitles(walkPosts(ME, filters(sort, true, null, null), 100)));
+    void browse_hidesEndedEvents_unlessOptedIn(String sort) throws SQLException {
+        assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters(sort, false, null, null), 100)));
+        assertEquals(union(NOT_ENDED_FOR_ME, ENDED), ruleTitles(walkPosts(ME, filters(sort, true, null, null), 100)));
     }
 
     @Test
-    void browse_aChosenDateTurnsTheWindowOff() throws SQLException {
+    void browse_aChosenDateShowsEndedEvents() throws SQLException {
         Instant longAgo = Instant.now().minus(Duration.ofDays(500));
         Instant farAway = Instant.now().plus(Duration.ofDays(500));
 
-        assertEquals(union(BROWSE_DEFAULT, ENDED_LONG_AGO), ruleTitles(walkPosts(ME, filters("RECENT", false, longAgo, null), 100)));
-        assertEquals(union(BROWSE_DEFAULT, ENDED_LONG_AGO), ruleTitles(walkPosts(ME, filters("RECENT", false, null, farAway), 100)));
+        assertEquals(union(NOT_ENDED_FOR_ME, ENDED), ruleTitles(walkPosts(ME, filters("RECENT", false, longAgo, null), 100)));
+        assertEquals(union(NOT_ENDED_FOR_ME, ENDED), ruleTitles(walkPosts(ME, filters("RECENT", false, null, farAway), 100)));
     }
 
     @Test
@@ -615,7 +614,7 @@ class PostReadDbTest {
 
     @Test
     void browse_guest_seesPublicPostsWithoutBlocks() throws SQLException {
-        assertEquals(union(PUBLIC_LIVE, INTERACTED, ENDED_RECENTLY, Set.of("by_i_blocked", "by_blocked_me", "mine", "created_after_as_of")),
+        assertEquals(union(PUBLIC_LIVE, INTERACTED, Set.of("by_i_blocked", "by_blocked_me", "mine", "created_after_as_of")),
             ruleTitles(walkPosts(null, filters("RECENT", false, null, null), 100)));
     }
 
@@ -755,12 +754,12 @@ class PostReadDbTest {
     // ===== Map rules =====
 
     @Test
-    void map_appliesBlocksAndThePastWindow() throws SQLException {
+    void map_appliesBlocks_andHidesEndedEvents() throws SQLException {
         assertEquals(Set.of("map_open", "map_mine"),
             marks(postRepository.findPostMarks(filters(null, false, null, null), AROUND_THE_FIXTURES, ME, false)));
-        assertEquals(Set.of("map_open", "map_mine", "map_ended_last_year"),
+        assertEquals(Set.of("map_open", "map_mine", "map_ended_1h_ago", "map_ended_last_year"),
             marks(postRepository.findPostMarks(filters(null, true, null, null), AROUND_THE_FIXTURES, ME, false)));
-        assertEquals(Set.of("map_open", "map_mine", "map_ended_last_year"),
+        assertEquals(Set.of("map_open", "map_mine", "map_ended_1h_ago", "map_ended_last_year"),
             marks(postRepository.findPostMarks(filters(null, false, Instant.now().minus(Duration.ofDays(500)), null), AROUND_THE_FIXTURES, ME, false)));
     }
 
@@ -888,7 +887,7 @@ class PostReadDbTest {
 
     @Test
     void feed_includePast_letsEndedEventsIn_andKeepsHidingWhatIsMine() throws SQLException {
-        assertEquals(union(PUBLIC_LIVE, ENDED_RECENTLY, ENDED_LONG_AGO),
+        assertEquals(union(PUBLIC_LIVE, ENDED),
             ruleTitles(walkFeed(feedService, ME, 100, null, null, filters(null, true, null, null), FeedMode.RANKED)));
     }
 
