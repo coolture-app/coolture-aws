@@ -34,7 +34,11 @@ post-write (create, or a change to title or description)
 - `{"action":"embed-interests"}` to `PostEmbeddingFunction` embeds every interest with no vector, or whose
   `embedding_text` or model changed, and every kind of event the same way (a kind's vector is the normalised mean of its
   `embedding_texts`, in `event_kind_embeddings`). `{"action":"derive-kinds"}` re-derives every post's kinds from the
-  stored post vectors, so a changed kind text takes both. `scripts/deploy.sh` sends both after deploying this stack.
+  stored post vectors, so a changed kind text takes both.
+- `{"action":"embed-posts"}` embeds every post that isn't deleted and has no vector of the current model, newest first,
+  and derives its kinds. It stops in time to answer before the function's timeout, with
+  `{"posts": <embedded>, "left": <still without one>}`. `scripts/deploy.sh` sends `embed-interests`, `derive-kinds`
+  and `embed-posts` after deploying this stack, and `embed-posts` again while posts are left.
 - **Kinds of event.** After storing a post's vector the worker writes its kinds to `rec_post_kinds`, best first: the
   closest kind, plus the second within a margin, with Dla dzieci kept or added only when close enough to the best other
   kind (`post-embedding/src/kinds.py`; constants in `settings.py`). Until every kind has a vector, posts get none.
@@ -75,36 +79,16 @@ A new model name is what marks a vector as old. A new revision, or a change to h
 way: locally, clear `interest_embeddings` and `event_kind_embeddings` and run `make embed-interests`, then
 `make embed-posts ALL=1`. There's no equivalent on AWS yet.
 
-Locally: `make build-embeddings embed-interests embed-posts`. On AWS (untested: none of this has run on AWS yet; replace
-`dev` for another environment):
+Locally: `make build-embeddings embed-interests embed-posts`. On AWS, `make deploy-embeddings` does both. When the
+deploy can't invoke the worker, it warns, and someone allowed to invoke it sends the actions by hand, `embed-posts`
+again while `left` is above 0 (replace `dev` for another environment):
 
 ```bash
-# 1. Interests. The deploy does this.
-make deploy-embeddings
-
-# 2. Posts: an empty request object per post, through the normal S3 → SQS → PostEmbeddingFunction path.
-API="$(aws cloudformation describe-stacks --stack-name coolture-backend-dev \
-    --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)"
-API="${API%/}"
-BUCKET="coolture-dev-embedding-requests-$(aws sts get-caller-identity --query Account --output text)"
-cursor=""
-while :; do
-    page="$(curl -fsS -G "$API/posts" -d includePast=true -d limit=100 ${cursor:+--data-urlencode "cursor=$cursor"})"
-    for id in $(jq -r '.items[].id' <<< "$page"); do
-        aws s3api put-object --bucket "$BUCKET" --key "posts/$id" > /dev/null
-    done
-    cursor="$(jq -r '.page.nextCursor // empty' <<< "$page")"
-    [[ -n "$cursor" ]] || break
+for action in embed-interests derive-kinds embed-posts; do
+    aws lambda invoke --function-name coolture-dev-post-embedding --cli-binary-format raw-in-base64-out \
+        --cli-read-timeout 150 --payload "{\"action\":\"$action\"}" reply.json && cat reply.json && echo
 done
-
-# Wait until both counts are 0. Anything on coolture-dev-post-embedding-dlq failed three times.
-aws sqs get-queue-attributes --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible \
-    --queue-url "$(aws sqs get-queue-url --queue-name coolture-dev-post-embedding --query QueueUrl --output text)"
 ```
-
-The listing goes through the public API, because Aurora is reachable only from inside the VPC, so it sees public posts
-only. A friends-only or private post keeps its old vector until it's next edited: it stays neutral in the feed, and likes
-of it don't count towards the viewer's vector.
 
 ## Interests and user vectors
 
