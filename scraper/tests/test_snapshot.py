@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timezone
 
 from images import Image
 from scrape import run_snapshot
-from snapshot import Snapshot, allocate, category_of, is_complete, load_images, read, sample, spread_over_dates
+from snapshot import Snapshot, allocate, is_complete, load_images, read, sample, spread_over_dates, top_category
 from trojmiasto import ListingItem
 
 from test_scrape import NOW, FakeGeocoder, FakeSite
@@ -45,8 +45,8 @@ def test_spread_takes_one_event_of_each_day_before_a_second_of_any():
 
 
 def test_category_is_the_first_part_of_the_sites_label():
-    assert category_of(listed(1, 'wystawy, spotkania')) == 'wystawy'
-    assert category_of(listed(1, None)) == '-'
+    assert top_category('wystawy, spotkania') == 'wystawy'
+    assert top_category(None) == '-'
 
 
 def test_snapshot_keeps_the_post_and_its_photos(tmp_path):

@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 
 from api import MAX_PHOTOS, Outcome
 from images import Image
-from trojmiasto import WARSAW, ListingItem
+from trojmiasto import WARSAW
 
 DEFAULT_DIR = Path(__file__).parent / 'snapshot'
 DEFAULT_SIZE = 120
@@ -31,12 +31,8 @@ T = TypeVar('T')
 SUFFIXES = {'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif'}
 
 
-def category_of(item: ListingItem) -> str:
-    """The site's top category, the first part of what a snapshot keeps as `category`."""
-    return top_category(item.category)
-
-
 def top_category(label: str | None) -> str:
+    """The site's top category, the first part of a label such as "wystawy, spotkania"."""
     return (label or NO_CATEGORY).split(', ')[0]
 
 
@@ -109,9 +105,9 @@ def sample(entries: list[Entry], size: int) -> list[Entry]:
     for entry in entries:
         groups[top_category(entry.category)].append(entry)
     quotas = allocate({category: len(group) for category, group in groups.items()}, size)
-    chosen = {id(entry) for category, group in groups.items()
+    chosen = {entry.post['eventUrl'] for category, group in groups.items()
               for entry in spread_over_dates(group, _local_day)[:quotas[category]]}
-    return [entry for entry in entries if id(entry) in chosen]
+    return [entry for entry in entries if entry.post['eventUrl'] in chosen]
 
 
 def _local_day(entry: Entry) -> date:
