@@ -8,7 +8,7 @@ X-User-Name: anna_demo
 {
   "title": "Wieczór z planszówkami online",
   "description": "Gramy w planszówki przez przeglądarkę. Link wyślemy przed startem.",
-  "eventUrl": "https://example.com/planszowki",
+  "links": [{ "url": "https://example.com/planszowki", "label": "  Zasady  " }, { "url": "https://example.org" }],
   "startsAt": "2030-01-15T18:00:00Z",
   "endsAt": "2030-01-15T21:00:00Z",
   "type": "ONLINE"
@@ -19,6 +19,8 @@ post: jsonpath "$.id"
 [Asserts]
 jsonpath "$.author.username" == "anna_demo"
 jsonpath "$.type" == "ONLINE"
+jsonpath "$.links[0].label" == "Zasady"
+jsonpath "$.links[1].label" not exists
 
 # Search ignores diacritics and word forms, and needs every word, in any order and in any field.
 GET {{api}}/posts?authorId={{anna}}&q=WIECZOR%20planszowkami%20przegladarke&limit=100
@@ -79,11 +81,11 @@ jsonpath "$.location" not exists
 PATCH {{api}}/posts/{{post}}
 X-User-Id: {{anna}}
 X-User-Name: anna_demo
-{ "endsAt": null, "eventUrl": null }
+{ "endsAt": null, "links": null }
 HTTP 200
 [Asserts]
 jsonpath "$.endsAt" not exists
-jsonpath "$.eventUrl" not exists
+jsonpath "$.links" not exists
 jsonpath "$.openEnded" == false
 jsonpath "$.title" == "Wieczór z planszówkami online, edycja zimowa"
 
@@ -305,6 +307,27 @@ GET {{api}}/posts/{{post}}/friends
 X-User-Id: {{jan}}
 X-User-Name: jan_demo
 HTTP 404
+
+# One author can't have two posts from one event page, so a scraper run that retries a post gets a 409.
+POST {{api}}/posts
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Z importu", "description": "Opis.", "eventUrl": "https://example.com/imp-{{newUuid}}", "startsAt": "2030-03-01T20:00:00Z", "type": "ONLINE" }
+HTTP 201
+[Captures]
+imported: jsonpath "$.id"
+page: jsonpath "$.eventUrl"
+
+POST {{api}}/posts
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+{ "title": "Z importu", "description": "Opis.", "eventUrl": "{{page}}", "startsAt": "2030-03-01T20:00:00Z", "type": "ONLINE" }
+HTTP 409
+
+DELETE {{api}}/posts/{{imported}}
+X-User-Id: {{anna}}
+X-User-Name: anna_demo
+HTTP 204
 
 # Popularne counts likes and stances, as the feed does: two stances outrank one like.
 POST {{api}}/posts

@@ -4,7 +4,11 @@ import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.ReactionType;
 import com.coolture.common.dto.PostDetailDto;
+import com.coolture.common.dto.PostLinkDto;
+import com.coolture.common.dto.enums.PostType;
+import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
+import com.coolture.repository.DuplicateEventException;
 import com.coolture.repository.PostWriteRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +53,7 @@ class PostWriteDbTest {
         execute("DELETE FROM user_relations WHERE source_user_id IN ('" + AUTHOR + "', '" + VIEWER + "')");
         execute("DELETE FROM post_reactions WHERE post_id = '" + POST + "'");
         execute("DELETE FROM post_participations WHERE post_id = '" + POST + "'");
-        execute("DELETE FROM posts WHERE id = '" + POST + "'");
+        execute("DELETE FROM posts WHERE author_id = '" + AUTHOR + "'");
         execute("DELETE FROM users WHERE id IN ('" + AUTHOR + "', '" + VIEWER + "')");
     }
 
@@ -185,7 +189,7 @@ class PostWriteDbTest {
     @Test
     void anEdit_removesTheEndAndTheLink_andSetsNoEndDate_andBack() throws SQLException {
         execute("UPDATE posts SET ends_at = starts_at + interval '2 hours', event_url = 'https://example.com' WHERE id = '" + POST + "'");
-        UpdatePostRequest title = new UpdatePostRequest("still a stance test", null, null, null, null, null, null, null, null, null);
+        UpdatePostRequest title = new UpdatePostRequest("still a stance test", null, null, null, null, null, null, null, null, null, null);
 
         PostWriteRepository.ExistingPost existing = repository.findById(POST).orElseThrow();
         PostDetailDto standing = repository.updatePost(POST, AUTHOR, existing, title, ending(existing, null, true));
@@ -200,9 +204,45 @@ class PostWriteDbTest {
         assertEquals(end, dated.endsAt());
     }
 
+    @Test
+    void anEdit_savesTheLinks_inOrder_andAnEmptyListRemovesThem() throws SQLException {
+        UpdatePostRequest none = new UpdatePostRequest(null, null, null, null, null, null, null, null, null, null, null);
+        List<PostLinkDto> links = List.of(new PostLinkDto("https://b.example", "Bilety"), new PostLinkDto("https://a.example", null));
+
+        PostWriteRepository.ExistingPost existing = repository.findById(POST).orElseThrow();
+        PostDetailDto linked = repository.updatePost(POST, AUTHOR, existing, none, withLinks(existing, links));
+        assertEquals(links, linked.links());
+        assertEquals(links, repository.findById(POST).orElseThrow().links());
+
+        existing = repository.findById(POST).orElseThrow();
+        assertNull(repository.updatePost(POST, AUTHOR, existing, none, withLinks(existing, List.of())).links());
+        assertEquals("[]", queryString("SELECT links::text FROM posts WHERE id = '" + POST + "'"));
+    }
+
+    @Test
+    void aSecondPostFromTheSameEventPage_isRefused_butAnotherAuthorMayHaveOne() throws SQLException {
+        String page = "https://www.trojmiasto.pl/imprezy/pwdb-imp1.html";
+        repository.createPost(AUTHOR, online(page));
+
+        assertThrows(DuplicateEventException.class, () -> repository.createPost(AUTHOR, online(page)));
+        execute("UPDATE posts SET author_id = '" + VIEWER + "' WHERE author_id = '" + AUTHOR + "' AND event_url = '" + page + "'");
+        repository.createPost(AUTHOR, online(page));
+        execute("DELETE FROM posts WHERE author_id = '" + VIEWER + "'");
+    }
+
+    private static CreatePostRequest online(String eventUrl) {
+        return new CreatePostRequest("imported", "Opis", eventUrl, null, Instant.now().plusSeconds(86_400), null, null,
+            PostType.ONLINE, null, null, null);
+    }
+
+    private static PostWriteRepository.Fields withLinks(PostWriteRepository.ExistingPost post, List<PostLinkDto> links) {
+        return new PostWriteRepository.Fields(post.title(), post.description(), null, links, post.type(), post.startsAt(),
+            null, false);
+    }
+
     /** The saved post with no link and the given end. */
     private static PostWriteRepository.Fields ending(PostWriteRepository.ExistingPost post, Instant endsAt, boolean openEnded) {
-        return new PostWriteRepository.Fields(post.title(), post.description(), null, post.type(), post.startsAt(), endsAt,
+        return new PostWriteRepository.Fields(post.title(), post.description(), null, null, post.type(), post.startsAt(), endsAt,
             openEnded);
     }
 

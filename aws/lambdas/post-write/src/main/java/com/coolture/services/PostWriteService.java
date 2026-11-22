@@ -2,6 +2,7 @@ package com.coolture.services;
 
 import com.coolture.common.dto.EventLocationDto;
 import com.coolture.common.dto.PostDetailDto;
+import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
@@ -56,7 +57,7 @@ public class PostWriteService {
 
     /**
      * Merge-patch: a field left out of the request keeps its value, and one in removed (sent as null) loses it. Only
-     * endsAt and eventUrl can be removed; a null in any other field keeps it.
+     * endsAt, eventUrl and links can be removed; a null in any other field keeps it.
      */
     public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req, Set<String> removed) throws SQLException {
         PostWriteRepository.ExistingPost existing = repository.findById(postId)
@@ -87,6 +88,9 @@ public class PostWriteService {
         String newEventUrl = req.eventUrl() != null ? req.eventUrl()
             : removed.contains("eventUrl") ? null
             : existing.eventUrl();
+        List<PostLinkDto> newLinks = req.links() != null ? req.links()
+            : removed.contains("links") ? List.of()
+            : existing.links();
         Instant newStartsAt = req.startsAt() != null ? req.startsAt() : existing.startsAt();
         validateDateRange(newStartsAt, newEndsAt);
         refuseStartMovedToPast(existing.startsAt(), req.startsAt(), Instant.now());
@@ -103,7 +107,7 @@ public class PostWriteService {
         PostWriteRepository.Fields fields = new PostWriteRepository.Fields(
             req.title() != null ? req.title() : existing.title(),
             req.description() != null ? req.description() : existing.description(),
-            newEventUrl, newType, newStartsAt, newEndsAt, openEnded);
+            newEventUrl, newLinks, newType, newStartsAt, newEndsAt, openEnded);
         PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave, fields);
         // Every edit, so which fields make up the embedded text stays only in the worker's PostContent.
         embeddingPublisher.requestPost(updated.id());

@@ -157,7 +157,7 @@ class PostReadServiceTest {
 
     private static PostCardDto card(int likes) {
         Instant now = Instant.parse("2026-11-02T12:00:00.123456Z");
-        return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, now.plusSeconds(60), null, false,
+        return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, null, now.plusSeconds(60), null, false,
             likes, 0, 0, 0, 0, null, null, now, null, null, null, null, null, null, null);
     }
 

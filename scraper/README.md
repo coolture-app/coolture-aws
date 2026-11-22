@@ -62,6 +62,8 @@ geocoder is ours, so it isn't paced. Later runs skip the events already imported
 A throttled request is tried 3 more times, waiting what the server's `Retry-After` asks, up to 2 minutes each. A failure to reach the site's listing,
 the API or the geocoder then ends the run with one error, the totals and exit 1. What's already imported stays, and
 the next run goes on from there. A post that timed out counts as `rejected`, because it may have been saved, and the next run's list settles it.
+The post's `eventUrl` is the event's page, and the API refuses a second post with the same one from the same author
+with a `409`, so a retried post or two runs at once can't import an event twice. The app never shows `eventUrl`.
 
 ## On a schedule
 
