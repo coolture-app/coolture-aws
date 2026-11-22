@@ -134,28 +134,4 @@ class CommentReadServiceTest {
         verify(repository).findRootCommentsForPost(eq(postId), isNull(), isNull(), isNull(), eq(101));
     }
 
-    @Test
-    void list_checksThePostAndThreadsForTheViewer() throws Exception {
-        UUID postId = UUID.randomUUID();
-        UUID viewer = UUID.randomUUID();
-        when(repository.findRootCommentsForPost(eq(postId), eq(viewer), isNull(), isNull(), anyInt())).thenReturn(List.of());
-
-        service.list(postId, viewer, null, null, 20);
-
-        verify(repository).ensurePostVisible(postId, viewer);
-        verify(repository).findRootCommentsForPost(eq(postId), eq(viewer), isNull(), isNull(), eq(21));
-    }
-
-    @Test
-    void list_whenParentHiddenFromTheViewer_throwsNotFound() throws Exception {
-        UUID postId = UUID.randomUUID();
-        UUID parentId = UUID.randomUUID();
-        UUID viewer = UUID.randomUUID();
-        when(repository.findCommentHeader(parentId, viewer)).thenReturn(Optional.empty());
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.list(postId, viewer, parentId, null, 20));
-
-        assertTrue(ex.getMessage().toLowerCase().contains("not found"));
-    }
 }

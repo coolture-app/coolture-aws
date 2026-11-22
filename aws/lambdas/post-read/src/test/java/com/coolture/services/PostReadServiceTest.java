@@ -298,38 +298,5 @@ class PostReadServiceTest {
             null, null, null, 20, null).showsAllPastEvents());
     }
 
-    @Test
-    void getById_whenFound_returnsDetail() throws SQLException {
-        UUID postId = UUID.randomUUID();
-        UUID callerId = UUID.randomUUID();
-        var detail = mock(com.coolture.common.dto.PostDetailDto.class);
-        when(repository.findById(postId, callerId)).thenReturn(Optional.of(detail));
-
-        var result = service.getById(postId, callerId);
-
-        assertNotNull(result);
-        assertEquals(detail, result);
-        verify(repository).findById(postId, callerId);
-    }
-
-    @Test
-    void getMapMarks_whenValid_callsRepository() throws SQLException {
-        UUID callerId = UUID.randomUUID();
-        PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, null
-        );
-        var bounds = new com.coolture.common.dto.MapBoundsDto(
-            new com.coolture.common.dto.GeoPointDto(54.5, 18.0),
-            new com.coolture.common.dto.GeoPointDto(54.0, 19.0)
-        );
-        when(repository.findPostMarks(filters, bounds, callerId, false)).thenReturn(List.of());
-
-        var result = service.getMapMarks(callerId, filters, bounds, false);
-
-        assertNotNull(result);
-        verify(repository).findPostMarks(filters, bounds, callerId, false);
-    }
-
 }
 

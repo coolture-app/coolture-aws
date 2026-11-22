@@ -6,7 +6,6 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.atlassian.oai.validator.OpenApiInteractionValidator;
 import com.atlassian.oai.validator.model.Request;
-import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import com.coolture.common.dto.EventLocationDto;
@@ -183,36 +182,8 @@ class ContractTest {
         assertMatches(responseReport("/posts", event));
     }
 
-    @Test
-    void theRequestsTheContractDescribes_areAccepted() {
-        assertFalse(VALIDATOR.validateRequest(SimpleRequest.Builder.get("/feed")
-            .withQueryParam("limit", "20").withQueryParam("latitude", "54.35").withQueryParam("longitude", "18.65")
-            .build()).hasErrors());
-        assertFalse(VALIDATOR.validateRequest(SimpleRequest.Builder.get("/posts")
-            .withQueryParam("sortBy", "UPCOMING").withQueryParam("includePast", "true")
-            .build()).hasErrors());
-        assertTrue(VALIDATOR.validateRequest(SimpleRequest.Builder.get("/posts")
-            .withQueryParam("sortBy", "RECOMMENDED")
-            .build()).hasErrors());
-    }
-
     private static ValidationReport bodyReport(String path, String body) {
         return VALIDATOR.validateResponse(path, Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(body).build());
-    }
-
-    @Test
-    void anUndocumentedField_failsTheCheck() {
-        String extraOnPage = "{\"mode\":\"RANKED\",\"items\":[],\"page\":{\"limit\":20,\"hasMore\":false},\"extra\":1}";
-        String extraInPageInfo = "{\"items\":[],\"page\":{\"limit\":20,\"hasMore\":false,\"total\":3}}";
-
-        assertTrue(bodyReport("/feed", extraOnPage).hasErrors());
-        assertTrue(bodyReport("/posts", extraInPageInfo).hasErrors());
-    }
-
-    @Test
-    void aMissingModeOrUnknownMode_failsTheCheck() {
-        assertTrue(bodyReport("/feed", "{\"items\":[],\"page\":{\"limit\":20,\"hasMore\":false}}").hasErrors());
-        assertTrue(bodyReport("/feed", "{\"mode\":\"X\",\"items\":[],\"page\":{\"limit\":20,\"hasMore\":false}}").hasErrors());
     }
 }

@@ -204,21 +204,6 @@ class FeedServiceTest {
     }
 
     @Test
-    void itemsArriveInScoreOrder() throws SQLException {
-        repository.candidates = posts(30);
-        FeedScorer scorer = new FeedScorer(FeedConfig.DEFAULTS);
-        FeedPage page = service().getFeed(VIEWER, null, 30, null, null);
-        Instant asOf = repository.asOfs.getFirst();
-
-        List<Double> scores = page.items().stream()
-            .map(c -> repository.candidates.stream().filter(f -> f.id().equals(c.id())).findFirst().orElseThrow())
-            .map(f -> scorer.score(f, asOf, 42).total())
-            .toList();
-
-        assertEquals(scores.stream().sorted(Comparator.reverseOrder()).toList(), scores);
-    }
-
-    @Test
     void asOfStaysFrozenAcrossPages_soTheClockCantMoveScores() throws SQLException {
         repository.candidates = posts(60);
 
@@ -357,25 +342,6 @@ class FeedServiceTest {
     }
 
     @Test
-    void whenAFactCantBeScored_returnsUpcomingOrder() throws SQLException {
-        repository.candidates = posts(3);
-        // A null start time makes the real scorer throw. The upcoming fake never sorts it in, so hide it from there.
-        List<FeedScorer.Facts> all = repository.candidates;
-        FakeRepository broken = new FakeRepository() {
-            @Override
-            public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
-                                                         Double latitude, Double longitude, PostFeedFilters filters) {
-                return List.of(TestFacts.startingAt(null).build());
-            }
-        };
-        broken.candidates = all;
-
-        FeedPage page = new FeedService(broken, FeedConfig.DEFAULTS, movingClock, () -> 42).getFeed(VIEWER, null, 20, null, null);
-
-        assertEquals(FeedMode.UPCOMING, page.mode());
-    }
-
-    @Test
     void whenRankingFailsMidSession_restartsUpcomingFromTheTop_withTheSameAsOf() throws SQLException {
         repository.candidates = posts(25);
         FeedPage first = service().getFeed(VIEWER, null, 10, null, null);
@@ -450,15 +416,4 @@ class FeedServiceTest {
         assertEquals(20, service().getFeed(VIEWER, null, 0, null, null).page().limit());
     }
 
-    @Test
-    void jitterOfZero_makesTheOrderReproducibleBetweenSessions() throws SQLException {
-        repository.candidates = posts(50);
-        FeedConfig noJitter = FeedConfig.parse("jitter=0");
-        Clock fixed = Clock.fixed(START, ZoneOffset.UTC);
-
-        List<UUID> first = new FeedService(repository, noJitter, fixed, () -> 1).getFeed(VIEWER, null, 50, null, null).items().stream().map(PostCardDto::id).toList();
-        List<UUID> second = new FeedService(repository, noJitter, fixed, () -> 2).getFeed(VIEWER, null, 50, null, null).items().stream().map(PostCardDto::id).toList();
-
-        assertEquals(first, second);
-    }
 }

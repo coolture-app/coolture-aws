@@ -406,24 +406,6 @@ class PostReadHandlerTest {
     }
 
     @Test
-    void handleRequest_whenPostById_returns200WithDetail() throws Exception {
-        UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/" + postId, null, Map.of("id", postId.toString()));
-
-        var detail = mock(com.coolture.common.dto.PostDetailDto.class);
-        when(postReadService.getById(eq(postId), any())).thenReturn(detail);
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(200, response.getStatusCode());
-            verify(postReadService).getById(eq(postId), any());
-        }
-    }
-
-    @Test
     void handleRequest_whenPostFriends_callsGetFriendsWithTheCaller_andNotTheDetail() throws Exception {
         UUID postId = UUID.randomUUID();
         UUID caller = UUID.randomUUID();

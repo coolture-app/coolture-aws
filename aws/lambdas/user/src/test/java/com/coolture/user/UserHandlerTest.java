@@ -20,6 +20,7 @@ import com.coolture.user.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
@@ -583,9 +584,10 @@ class UserHandlerTest {
         }
     }
 
-    @Test
-    void follow_returns204_whenSuccessful() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/users/" + USER_ID + "/follow", null, Map.of("userId", USER_ID.toString()));
+    @ParameterizedTest
+    @CsvSource({"POST, follow", "DELETE, follow", "POST, block", "DELETE, block"})
+    void followAndBlock_return204_whenSuccessful(String method, String route) throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(method, "/users/" + USER_ID + "/" + route, null, Map.of("userId", USER_ID.toString()));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
@@ -593,7 +595,12 @@ class UserHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(204, response.getStatusCode());
-            verify(service).follow(CALLER_ID, USER_ID);
+            switch (method + " " + route) {
+                case "POST follow" -> verify(service).follow(CALLER_ID, USER_ID);
+                case "DELETE follow" -> verify(service).unfollow(CALLER_ID, USER_ID);
+                case "POST block" -> verify(service).block(CALLER_ID, USER_ID);
+                default -> verify(service).unblock(CALLER_ID, USER_ID);
+            }
         }
     }
 
@@ -608,48 +615,6 @@ class UserHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(409, response.getStatusCode());
-        }
-    }
-
-    @Test
-    void unfollow_returns204_whenSuccessful() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("DELETE", "/users/" + USER_ID + "/follow", null, Map.of("userId", USER_ID.toString()));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).unfollow(CALLER_ID, USER_ID);
-        }
-    }
-
-    @Test
-    void block_returns204_whenSuccessful() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/users/" + USER_ID + "/block", null, Map.of("userId", USER_ID.toString()));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).block(CALLER_ID, USER_ID);
-        }
-    }
-
-    @Test
-    void unblock_returns204_whenSuccessful() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("DELETE", "/users/" + USER_ID + "/block", null, Map.of("userId", USER_ID.toString()));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).unblock(CALLER_ID, USER_ID);
         }
     }
 

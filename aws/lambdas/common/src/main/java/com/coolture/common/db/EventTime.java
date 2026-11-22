@@ -48,15 +48,6 @@ public final class EventTime {
         return endsAt != null ? endsAt : startsAt.plus(Duration.ofHours(DEFAULT_EVENT_HOURS));
     }
 
-    public static boolean hasEnded(Instant startsAt, Instant endsAt, boolean openEnded, Instant now) {
-        Instant end = end(startsAt, endsAt, openEnded);
-        return end != null && end.isBefore(now);
-    }
-
-    public static boolean isRunning(Instant startsAt, Instant endsAt, boolean openEnded, Instant at) {
-        return !startsAt.isAfter(at) && !hasEnded(startsAt, endsAt, openEnded, at);
-    }
-
     public static boolean isStanding(Instant startsAt, Instant endsAt, boolean openEnded) {
         return openEnded || endsAt != null && Duration.between(startsAt, endsAt).compareTo(Duration.ofDays(STANDING_AFTER_DAYS)) > 0;
     }
