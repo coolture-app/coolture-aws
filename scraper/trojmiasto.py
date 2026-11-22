@@ -18,7 +18,10 @@ from images import Image
 log = logging.getLogger(__name__)
 
 SITE_URL = 'https://www.trojmiasto.pl'
-LISTING_URL = f'{SITE_URL}/imprezy/dni,30dni.html'
+# One listing per day: the 30-day listing (dni,30dni.html) stops at page 19, 400 events, while the days held 534 on
+# 2026-11-22. A busy Saturday is about 100.
+DAY_LISTING_URL = SITE_URL + '/imprezy/dzien,{day}'
+LISTING_DAYS = 30
 LISTING_PAGE_PARAMETER = 'strona'
 SITE_PAUSE_S = 1.0
 WARSAW = ZoneInfo('Europe/Warsaw')
@@ -203,6 +206,21 @@ def _split_street(street_address: str) -> tuple[str | None, str | None]:
     return match['street'], match['number']
 
 
+def _fuller_venue(name: str, street_address: str) -> str:
+    """The address's name for the place when it is the venue's name and more, as "Hevelianum - Dom Zdrojowy" for
+    Hevelianum's events in Brzeźno, which the name alone would put on Góra Gradowa. A shortened name ("Filharmonia
+    Bałtycka" for "Polska Filharmonia Bałtycka") or one that only adds the city ("Fine Wine - Gdańsk") isn't."""
+    parts = [part.strip() for part in street_address.split(',')]
+    if len(parts) < 3 or not name:
+        return name
+    named, city = parts[0], parts[1]
+    rest = named[len(name):]
+    if not named.casefold().startswith(name.casefold()) or rest[:1] not in (' ', '-', '–', '('):
+        return name
+    added = rest.strip(' -–,()')
+    return named if added and added.casefold() != city.casefold() else name
+
+
 def _parse_moment(value: str) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
@@ -336,14 +354,15 @@ def parse_event_page(page_html: str) -> EventPage | None:
     place = location[0] if isinstance(location, list) and location else location
     # An address can also be plain text, such as "Trójmiasto", which _text reads as no fields.
     address = place.get('address') if isinstance(place, dict) else None
-    street, building_number = _split_street(_text(address, 'streetAddress'))
+    street_address = _text(address, 'streetAddress')
+    street, building_number = _split_street(street_address)
 
     return EventPage(
         start_date=start.date() if start else None,
         end=_parse_moment(_text(block, 'endDate')),
         online='online' in _text(block, 'eventAttendanceMode').lower(),
         description=description,
-        venue=_real_venue(_text(place, 'name')),
+        venue=_real_venue(_fuller_venue(_text(place, 'name'), street_address)),
         street=street,
         building_number=building_number,
         postal_code=_text(address, 'postalCode') or None,
@@ -425,10 +444,13 @@ def merge(item: ListingItem, page: EventPage) -> Event | None:
 class Site:
 
     def __init__(self, session: requests.Session, sleep: Callable[[float], None] = clock.sleep,
-                 pause: Callable[[], float] = lambda: SITE_PAUSE_S) -> None:
+                 pause: Callable[[], float] = lambda: SITE_PAUSE_S,
+                 today: Callable[[], date] = lambda: datetime.now(WARSAW).date(), days: int = LISTING_DAYS) -> None:
         self._session = session
         self._sleep = sleep
         self._pause = pause
+        self._today = today
+        self._days = days
 
     def _get(self, url: str, params: dict | None = None) -> requests.Response:
         self._sleep(self._pause())
@@ -437,18 +459,26 @@ class Site:
         return response
 
     def listing_items(self) -> Iterator[ListingItem]:
-        """Walks the listing until a page adds nothing, because the site repeats its last page past the end."""
-        seen: set[str] = set()
-        page_number = 0
-        while True:
-            page_html = self._get(LISTING_URL, {LISTING_PAGE_PARAMETER: page_number}).text
-            items = [i for i in parse_listing(page_html) if i.url not in seen]
-            if not items:
-                return
-            for item in items:
-                seen.add(item.url)
-                yield item
-            page_number += 1
+        """Each day's listing from today, each until a page adds nothing to that day, because the site repeats its last
+        page past the end. An event listed on several days comes once, with its first day, and a later day's page
+        holding only those still leads to its next page."""
+        yielded: set[str] = set()
+        first = self._today()
+        for offset in range(self._days):
+            url = DAY_LISTING_URL.format(day=(first + timedelta(days=offset)).isoformat())
+            on_day: set[str] = set()
+            page_number = 0
+            while True:
+                page_html = self._get(url, {LISTING_PAGE_PARAMETER: page_number}).text
+                items = [i for i in parse_listing(page_html) if i.url not in on_day]
+                if not items:
+                    break
+                for item in items:
+                    on_day.add(item.url)
+                    if item.url not in yielded:
+                        yielded.add(item.url)
+                        yield item
+                page_number += 1
 
     def event(self, item: ListingItem) -> Event | None:
         try:

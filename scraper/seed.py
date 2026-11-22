@@ -25,7 +25,7 @@ import requests
 from api import TIMEOUT_S, ApiError, CooltureApi, Outcome
 from images import Image, solid_png
 from scrape import DEFAULT_API_URL, http_session, utc_now
-from snapshot import DEFAULT_DIR, Entry, is_complete, load_images, read
+from snapshot import DEFAULT_DIR, Entry, is_complete, load_images, read, sample
 from trojmiasto import WARSAW
 
 log = logging.getLogger('seed')
@@ -34,6 +34,8 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 BOT_ID = '00000000-0000-0000-0000-00000000b07a'
 # A local write takes about 1.3 s. Four at a time took about 40% of the time of one at a time, and more gave nothing.
 WORKERS = 4
+# Every category and day at a fraction of the whole snapshot's load time; `--size all` loads all of it.
+SEED_SIZE = 200
 # An event must still be ahead when it's posted, since POST /posts refuses a past start.
 START_MARGIN = timedelta(hours=2)
 API_WAIT_S = 15 * 60
@@ -188,17 +190,20 @@ def wait_for_api(base_url: str, timeout_s: float = API_WAIT_S, sleep: Callable[[
 
 
 def seed_events(directory: Path, base_url: str, workers: int = WORKERS, clock: Callable[[], datetime] = utc_now,
-                api_factory: Callable[[], CooltureApi] | None = None) -> Counter:
-    entries = read(directory)
-    if not entries:
+                api_factory: Callable[[], CooltureApi] | None = None, size: int | None = SEED_SIZE) -> Counter:
+    """Loads `size` of the snapshot's events (snapshot.sample), or all of them when size is None."""
+    snapshot = read(directory)
+    if not snapshot:
         raise SeedError(f'No snapshot in {directory}. Make one with `make scrape-snapshot`.')
     if not is_complete(directory):
         log.warning('The snapshot in %s is unfinished; run `make scrape-snapshot` to complete it.', directory)
     new_api = api_factory or (lambda: CooltureApi(http_session(), http_session(), base_url, user_id=BOT_ID))
 
+    entries = snapshot if size is None else sample(snapshot, size)
     existing = new_api().existing_event_urls()
     todo = [entry for entry in entries if entry.post['eventUrl'] not in existing]
-    days = shift_days([_parse(entry.post['startsAt']) for entry in entries], clock())
+    # From the whole snapshot, so every size moves the dates alike and a later, bigger load fits the first.
+    days = shift_days([_parse(entry.post['startsAt']) for entry in snapshot], clock())
     log.info('Snapshot: %d events, %d already loaded, %d to load, dates moved %d days forward',
              len(entries), len(entries) - len(todo), len(todo), days)
 
@@ -349,11 +354,17 @@ def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
     return stats
 
 
+def _size(value: str) -> int | None:
+    return None if value == 'all' else int(value)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Fill the local stack with realistic data')
     parser.add_argument('step', choices=['events', 'reactions', 'friends'])
     parser.add_argument('--snapshot', type=Path, default=DEFAULT_DIR, metavar='DIR', help='the snapshot to load')
     parser.add_argument('--workers', type=int, default=WORKERS, help=f'posts loaded at a time (default {WORKERS})')
+    parser.add_argument('--size', type=_size, default=SEED_SIZE, metavar='N|all',
+                        help=f'events: how many of the snapshot to load (default {SEED_SIZE})')
     parser.add_argument('--reset', action='store_true',
                         help="reactions: take back the demo users' reactions and stances first, then seed them again")
     args = parser.parse_args()
@@ -365,7 +376,7 @@ def main() -> int:
     try:
         wait_for_api(base_url)
         if args.step == 'events':
-            stats = seed_events(args.snapshot, base_url, args.workers)
+            stats = seed_events(args.snapshot, base_url, args.workers, size=args.size)
         else:
             stats = seed_reactions(base_url, reset=args.reset) if args.step == 'reactions' else seed_friends(base_url)
     except (SeedError, ApiError) as error:

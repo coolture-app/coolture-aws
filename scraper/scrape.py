@@ -17,7 +17,7 @@ from api import MAX_PHOTOS, ApiError, CooltureApi, Outcome
 from geocoder import DEFAULT_URL, Geocoder, GeocoderUnavailable
 from images import Image
 from posts import to_post
-from snapshot import DEFAULT_SIZE, Snapshot, allocate, category_of, spread_over_dates
+from snapshot import DEFAULT_SIZE, Snapshot, allocate, spread_over_dates, top_category
 from trojmiasto import WARSAW, ListingItem, Site
 
 log = logging.getLogger('scraper')
@@ -103,7 +103,7 @@ def run_snapshot(site: Site, geocoder: Geocoder, snapshot: Snapshot, stats: Coun
         stats['listed'] += 1
         # One that started before today would be skipped anyway, and shouldn't take a share of the quota.
         if item.start_date is None or item.start_date >= today:
-            groups[category_of(item)].append(item)
+            groups[top_category(item.category)].append(item)
     supply = {category: len(items) for category, items in groups.items()}
     quotas = supply if size is None else allocate(supply, size)
     existing = snapshot.existing_event_urls()
