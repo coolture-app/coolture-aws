@@ -191,8 +191,8 @@ class UserDbTest {
 
     @Test
     void followLists_goByNameFromAToZ_elseByUsername_andPageInThatOrder() throws SQLException {
-        // Bartek has no names, so "udb_bartek" places him, after every name here.
-        execute("INSERT INTO users (id, username) VALUES ('" + BARTEK + "', 'udb_bartek')");
+        // Bartek has a last name but no first, so "udb_bartek" places him, after every name here.
+        execute("INSERT INTO users (id, username, last_name) VALUES ('" + BARTEK + "', 'udb_bartek', 'Adamski')");
         follow(BARTEK, ANNA);
         follow(OLA, BARTEK);
 

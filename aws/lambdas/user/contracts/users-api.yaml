@@ -284,7 +284,7 @@ paths:
       operationId: getFollowers
       summary: Who follows this user, by name from A to Z
       description: >
-        Sorted by the first and last name, or the username when both are empty, ignoring case and diacritics.
+        Sorted by the first and last name, or the username when there's no first name, ignoring case and diacritics.
       security: [{}, {bearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/PeopleQuery'
@@ -306,7 +306,7 @@ paths:
       operationId: getFollowing
       summary: Who this user follows, by name from A to Z
       description: >
-        Sorted by the first and last name, or the username when both are empty, ignoring case and diacritics.
+        Sorted by the first and last name, or the username when there's no first name, ignoring case and diacritics.
       security: [{}, {bearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/PeopleQuery'

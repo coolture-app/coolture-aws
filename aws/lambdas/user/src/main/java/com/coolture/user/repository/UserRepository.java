@@ -376,11 +376,11 @@ public class UserRepository {
     public record UserRelationRow(UserEntity user, Instant relationCreatedAt, boolean followsYou) {}
 
     /**
-     * The name a follow list sorts by: first and last name, else the username, folded as {@link TextSearch} folds it.
-     * "C" so a local database and AWS's sort alike, whatever their default collation.
+     * The name a follow list sorts by, the one its rows show: first and last name, or the username when there's no
+     * first name, folded as {@link TextSearch} folds it. "C" so a local database and AWS's sort alike.
      */
-    private static final String SORT_NAME =
-        "unaccent(lower(coalesce(nullif(btrim(concat_ws(' ', u.first_name, u.last_name)), ''), u.username))) COLLATE \"C\"";
+    private static final String SORT_NAME = "unaccent(lower(coalesce(nullif(u.first_name, '') || coalesce(' ' || nullif(u.last_name, ''), ''),"
+        + " u.username))) COLLATE \"C\"";
 
     public record FollowRow(UserEntity user, boolean followsYou, String sortName) {}
 
