@@ -215,13 +215,13 @@ public class PostReadRepository {
         return Optional.empty();
     }
 
-    /** Empty when the post's page would be a 404. */
     public boolean sharesWith(UUID viewer, UUID user) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {
             return Friends.sharesWith(conn, viewer, user);
         }
     }
 
+    /** Empty when the post's page would be a 404. */
     public Optional<PostFriendsDto> findFriends(UUID postId, UUID callerId) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {
             if (!PostQueries.isPostVisible(conn, postId, callerId)) {
