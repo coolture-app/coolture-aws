@@ -94,7 +94,7 @@ public class UserService {
         if (callerId != null && !callerId.equals(user.id())) {
             if (userRepository.isBlocked(callerId, user.id())) {
                 return new UserProfileDto(user.id(), user.username(), user.firstName(), user.lastName(), avatarOf(user.id()),
-                    null, null, null, null, false, true, false, null, null);
+                    null, null, null, null, false, true, false, null, null, null);
             }
             if (userRepository.isBlocked(user.id(), callerId)) {
                 throw new IllegalArgumentException("User " + asked + " not found");
@@ -399,8 +399,6 @@ public class UserService {
         boolean followsYou = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(user.id(), callerId);
 
         UserInterestsDto picks = interestRepository.findPicks(user.id());
-        boolean seesStances = callerId != null
-            && (callerId.equals(user.id()) || (isFollowing && followsYou && userRepository.sharesStancesWith(callerId, user.id())));
 
         return new UserProfileDto(
                 user.id(),
@@ -417,7 +415,7 @@ public class UserService {
                 followsYou,
                 picks.interests(),
                 picks.kinds(),
-                userRepository.countEvents(user.id(), seesStances)
+                userRepository.countEvents(user.id(), callerId)
         );
     }
 

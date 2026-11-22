@@ -140,9 +140,16 @@ class UserDbTest {
         assertNull(users.getByIdForCaller(JAN, OLA).events().takesPart());
         assertNull(users.getByIdForCaller(JAN, null).events().takesPart());
 
+        // As the tab's list, the count leaves out a post whose author is in a block with the viewer.
+        execute("INSERT INTO posts (author_id, title, starts_at, ends_at, type) VALUES ('" + OLA + "', 'udb_blocked', now() + interval '1 day', NULL, 'ONLINE')");
+        execute("INSERT INTO post_participations (post_id, user_id, type) SELECT id, '" + JAN + "', 'TAKES_PART' FROM posts WHERE title = 'udb_blocked'");
+        execute("INSERT INTO user_relations (source_user_id, target_user_id, type) VALUES ('" + ANNA + "', '" + OLA + "', 'BLOCK')");
+        assertEquals(1, users.getByIdForCaller(JAN, ANNA).events().takesPart());
+        assertEquals(2, users.getByIdForCaller(JAN, JAN).events().takesPart());
+
         execute("UPDATE users SET share_stances = false WHERE id = '" + JAN + "'");
         assertNull(users.getByIdForCaller(JAN, ANNA).events().takesPart());
-        assertEquals(1, users.getByIdForCaller(JAN, JAN).events().takesPart());
+        assertEquals(2, users.getByIdForCaller(JAN, JAN).events().takesPart());
     }
 
     @Test

@@ -146,6 +146,34 @@ class PostReadServiceTest {
     }
 
     @Test
+    void someoneElsesStances_goWithNeitherAReactionNorStanceNewest_onTheListOrTheMap() {
+        UUID friend = UUID.randomUUID();
+        PostFeedFilters withReaction = ofParticipant(friend, "RECENT", "LIKE");
+        PostFeedFilters newest = ofParticipant(friend, "STANCE_NEWEST", null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), withReaction, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getMapMarks(UUID.randomUUID(), withReaction, null, false));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), newest, null, 20));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void ownStances_byParticipantId_sortByStanceNewest() throws SQLException {
+        UUID me = UUID.randomUUID();
+        PostFeedFilters filters = ofParticipant(me, "STANCE_NEWEST", null);
+        when(repository.findFeed(any(), any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        service.getFeed(me, filters, null, 20);
+
+        verify(repository).findFeed(eq(filters), eq(PostSort.STANCE_NEWEST), eq(me), isNull(), eq(21));
+    }
+
+    private static PostFeedFilters ofParticipant(UUID participant, String sortBy, String reaction) {
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            List.of("TAKES_PART"), reaction, null, 20, sortBy, false, null, false, participant);
+    }
+
+    @Test
     void getFeed_whenNearestHasNoPosition_throws() {
         PostFeedFilters noPosition = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,

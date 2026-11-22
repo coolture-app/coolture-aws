@@ -43,9 +43,11 @@ public class PostReadService {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
 
+        validateParticipant(filters, callerId);
+
         PostSort sort = PostSort.parse(filters.sortBy());
-        if (!seesParticipant(filters, sort, callerId)) {
-            return new CursorPage<>(List.of(), new PaginationMeta(clampLimit(limit), false, null));
+        if (sort.needsStances() && someoneElse(filters, callerId)) {
+            throw new IllegalArgumentException("participantId can't go with STANCE_NEWEST");
         }
         if (sort.needsPosition() && (filters.latitude() == null || filters.longitude() == null)) {
             throw new IllegalArgumentException("sortBy NEAREST needs latitude and longitude");
@@ -82,20 +84,17 @@ public class PostReadService {
     public List<PostMarkDto> getMapMarks(UUID callerId, PostFeedFilters filters, MapBoundsDto bounds, boolean excludeMine) throws SQLException {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
-        if (!seesParticipant(filters, PostSort.RECENT, callerId)) {
-            return List.of();
-        }
+        validateParticipant(filters, callerId);
         return repository.findPostMarks(filters, bounds, callerId, excludeMine);
     }
 
     /**
-     * Someone else's stances are readable only as their friend while they share them, and only Interesuje mnie and
-     * Biorę udział. A refused friend gets an empty list, as on cards, where their names are simply missing.
+     * Of someone else, only Interesuje mnie and Biorę udział can be asked for. Whether the viewer may see them is the
+     * query's rule, as on cards: a refused friend gets an empty list.
      */
-    private boolean seesParticipant(PostFeedFilters filters, PostSort sort, UUID callerId) throws SQLException {
-        UUID participant = filters.participantId();
-        if (participant == null || participant.equals(callerId)) {
-            return true;
+    private static void validateParticipant(PostFeedFilters filters, UUID callerId) {
+        if (!someoneElse(filters, callerId)) {
+            return;
         }
         if (callerId == null) {
             throw new SecurityException("Authentication is required to filter by participantId");
@@ -104,10 +103,13 @@ public class PostReadService {
             || !SHARED_PARTICIPATION_TYPES.containsAll(filters.participationTypes())) {
             throw new IllegalArgumentException("participantId needs participationTypes of INTERESTED or TAKES_PART");
         }
-        if (filters.reactionType() != null || sort.needsStances()) {
-            throw new IllegalArgumentException("participantId can't go with reactionType or STANCE_NEWEST");
+        if (filters.reactionType() != null) {
+            throw new IllegalArgumentException("participantId can't go with reactionType");
         }
-        return repository.sharesWith(callerId, participant);
+    }
+
+    private static boolean someoneElse(PostFeedFilters filters, UUID callerId) {
+        return filters.participantId() != null && !filters.participantId().equals(callerId);
     }
 
 

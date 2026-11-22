@@ -284,30 +284,37 @@ public class UserRepository {
         }
     }
 
-    /** The user's posts, and of them those not ended; with stances, their Biorę udział and Interesuje mnie not ended. */
-    public ProfileEventsDto countEvents(UUID userId, boolean stances) throws SQLException {
-        String stanceCount = "(SELECT COUNT(*) FROM post_participations pp JOIN posts p ON p.id = pp.post_id"
-            + " WHERE pp.user_id = ?::uuid AND pp.type = ? AND p.deleted_at IS NULL AND " + EventTime.NOT_ENDED + ")";
-        String sql = "SELECT COUNT(*), COUNT(*) FILTER (WHERE " + EventTime.NOT_ENDED + "), " + stanceCount + ", " + stanceCount
-            + " FROM posts p WHERE p.author_id = ?::uuid AND p.deleted_at IS NULL";
+    /**
+     * The user's posts, and of them those not ended; their Biorę udział and Interesuje mnie not ended, as the viewer's
+     * tabs would list them: null unless the viewer is the user or a friend they share their stances with, and without
+     * posts in a block with the viewer.
+     */
+    public ProfileEventsDto countEvents(UUID userId, UUID viewer) throws SQLException {
+        String sql = "SELECT own.posts, own.upcoming,"
+            + " CASE WHEN sees.stances THEN stances.takes_part::int END AS takes_part,"
+            + " CASE WHEN sees.stances THEN stances.interested::int END AS interested"
+            + " FROM users u"
+            + " CROSS JOIN LATERAL (SELECT u.id = ?::uuid OR " + Friends.sharingFriend("u.id") + " AS stances) sees"
+            + " CROSS JOIN LATERAL (SELECT COUNT(*) AS posts, COUNT(*) FILTER (WHERE " + EventTime.NOT_ENDED + ") AS upcoming"
+            + "   FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL) own"
+            + " CROSS JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE pp.type = 'TAKES_PART') AS takes_part,"
+            + "   COUNT(*) FILTER (WHERE pp.type = 'INTERESTED') AS interested"
+            + "   FROM post_participations pp JOIN posts p ON p.id = pp.post_id"
+            + "   WHERE pp.user_id = u.id AND p.deleted_at IS NULL AND " + EventTime.NOT_ENDED
+            + "   AND " + Blocks.notWithViewer("p.author_id") + ") stances"
+            + " WHERE u.id = ?::uuid";
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, userId);
-            stmt.setString(2, "TAKES_PART");
-            stmt.setObject(3, userId);
-            stmt.setString(4, "INTERESTED");
-            stmt.setObject(5, userId);
+            ParamBinder b = new ParamBinder(stmt, conn)
+                .bindNullableUUID(viewer)
+                .bindNullableUUID(viewer)
+                .bindNullableUUID(viewer);
+            Blocks.bindViewer(b, viewer).bindUUID(userId);
             try (ResultSet rs = stmt.executeQuery()) {
                 rs.next();
-                return new ProfileEventsDto(rs.getInt(1), rs.getInt(2),
-                    stances ? rs.getInt(3) : null, stances ? rs.getInt(4) : null);
+                return new ProfileEventsDto(rs.getInt("posts"), rs.getInt("upcoming"),
+                    rs.getObject("takes_part", Integer.class), rs.getObject("interested", Integer.class));
             }
-        }
-    }
-
-    public boolean sharesStancesWith(UUID viewer, UUID userId) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            return Friends.sharesWith(conn, viewer, userId);
         }
     }
 

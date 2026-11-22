@@ -90,7 +90,6 @@ public class PostReadRepository {
         }
     }
 
-    /** Nadchodzące. Never an ended event, even with includePast or a date. */
     /** With includePast, the ended events follow. A date range alone doesn't bring them, unlike in the other sorts. */
     public Upcoming.Page findUpcoming(PostFeedFilters f, UUID callerId, Upcoming.Position at, int limit) throws SQLException {
         Upcoming.Binds binds = b -> {
@@ -118,12 +117,15 @@ public class PostReadRepository {
     }
 
     /**
-     * My Events, or a friend's: the participations of the given types of the viewer or filters.participantId, or the
-     * viewer's reactions. Bind with bindParticipationAndReaction.
+     * My Events, or a friend's: the participations of the given types of the viewer or filters.participantId, someone
+     * else's only while they're the viewer's friend and share them; or the viewer's reactions. Bind with
+     * bindParticipationAndReaction.
      */
     private static final String PARTICIPATION_AND_REACTION = """
         (?::varchar[] IS NULL
-               OR EXISTS (SELECT 1 FROM post_participations pp WHERE pp.post_id = p.id AND pp.user_id = ?::uuid AND pp.type = ANY(?::varchar[])))
+               OR EXISTS (SELECT 1 FROM post_participations pp WHERE pp.post_id = p.id AND pp.user_id = ?::uuid AND pp.type = ANY(?::varchar[])
+                          AND (pp.user_id = ?::uuid OR """ + Friends.sharingFriend("pp.user_id") + """
+        )))
           AND (?::varchar IS NULL
                OR EXISTS (SELECT 1 FROM post_reactions pr WHERE pr.post_id = p.id AND pr.user_id = ?::uuid AND pr.type::varchar = ?::varchar))""";
 
@@ -131,9 +133,13 @@ public class PostReadRepository {
         boolean hasPart = f.participationTypes() != null && !f.participationTypes().isEmpty() && callerId != null;
         String[] partArr = hasPart ? f.participationTypes().toArray(new String[0]) : null;
         UUID participant = f.participantId() != null ? f.participantId() : callerId;
+        UUID viewer = hasPart ? callerId : null;
         b.bindVarcharArray(partArr)
          .bindNullableUUID(hasPart ? participant : null)
-         .bindVarcharArray(partArr);
+         .bindVarcharArray(partArr)
+         .bindNullableUUID(viewer)
+         .bindNullableUUID(viewer)
+         .bindNullableUUID(viewer);
 
         boolean hasReaction = f.reactionType() != null && callerId != null;
         b.bindString(hasReaction ? f.reactionType() : null)
@@ -219,12 +225,6 @@ public class PostReadRepository {
             }
         }
         return Optional.empty();
-    }
-
-    public boolean sharesWith(UUID viewer, UUID user) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            return Friends.sharesWith(conn, viewer, user);
-        }
     }
 
     /** Empty when the post's page would be a 404. */
