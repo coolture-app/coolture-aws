@@ -91,24 +91,30 @@ public class PostReadRepository {
     }
 
     /** Nadchodzące. Never an ended event, even with includePast or a date. */
+    /** With includePast, the ended events follow. A date range alone doesn't bring them, unlike in the other sorts. */
     public Upcoming.Page findUpcoming(PostFeedFilters f, UUID callerId, Upcoming.Position at, int limit) throws SQLException {
-        String sql = PostSql.CARD_SELECT
-            + "WHERE p.deleted_at IS NULL\n"
-            + "  AND " + PostFilterSql.MATCHES + "\n"
-            + "  AND " + PostSql.NOT_BLOCKED + "\n"
-            + "  AND " + PostSql.NOT_ENDED + "\n"
-            + "  AND " + PARTICIPATION_AND_REACTION + "\n";
-        Upcoming.Query query = new Upcoming.Query(sql, b -> {
+        Upcoming.Binds binds = b -> {
             b.bindUUID(callerId)
              .bindUUID(callerId);
             PostFilterSql.bind(b, f, callerId);
             b.bindNullableUUID(callerId)
                 .bindNullableUUID(callerId);
             bindParticipationAndReaction(b, f, callerId);
-        });
+        };
+        Upcoming.Query query = new Upcoming.Query(upcomingSql(PostSql.NOT_ENDED), binds);
+        Upcoming.Query ended = f.includePast() ? new Upcoming.Query(upcomingSql(EventTime.ENDED), binds) : null;
         try (Connection conn = DatabaseConfig.getConnection()) {
-            return Upcoming.find(conn, query, callerId, f.from(), at, limit);
+            return Upcoming.find(conn, query, ended, callerId, f.from(), at, limit);
         }
+    }
+
+    private static String upcomingSql(String endRule) {
+        return PostSql.CARD_SELECT
+            + "WHERE p.deleted_at IS NULL\n"
+            + "  AND " + PostFilterSql.MATCHES + "\n"
+            + "  AND " + PostSql.NOT_BLOCKED + "\n"
+            + "  AND " + endRule + "\n"
+            + "  AND " + PARTICIPATION_AND_REACTION + "\n";
     }
 
     /**

@@ -79,7 +79,7 @@ paths:
           description: >
             NEAREST needs latitude and longitude, and shows only posts with a place. STANCE_NEWEST needs participationTypes
             and puts the viewer's newest of those stances first. UPCOMING mixes events already running into the events
-            to come, every 5th card. PAST shows only ended events, the latest end first. POPULAR orders by likes +
+            to come, every 5th card, and with includePast the ended events follow them. PAST shows only ended events, the latest end first. POPULAR orders by likes +
             Interesuje mnie + Biorę udział (README.md).
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/Q'
@@ -265,7 +265,7 @@ components:
     IncludePast:
       name: includePast
       in: query
-      description: When false, ended events are hidden. UPCOMING always hides them.
+      description: When false, ended events are hidden. UPCOMING puts them after every event to come.
       schema: {type: boolean, default: false}
   responses:
     BadRequest:

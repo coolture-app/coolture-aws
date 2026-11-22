@@ -119,7 +119,7 @@ All existing parameters keep their meaning. What's specific to this contract:
 | Default, any filter or search | Events not ended |
 | `includePast=true` | All visible events |
 | `from` or `to` set | All visible events running in that window, because a chosen date is explicit |
-| `sortBy=UPCOMING` | Never an ended event, even with `includePast=true` or a date filter |
+| `sortBy=UPCOMING` | Events not ended, then with `includePast=true` the ended ones, latest end first. A date filter alone doesn't add them |
 | `sortBy=PAST` | Only ended events, with or without `includePast`. A profile's Minione |
 | My Events | The frontend sends `includePast=true`, so attended events stay |
 
@@ -136,7 +136,8 @@ cursor) and `from`.
 | Running | Events started before `m` and not ended at `m` | End ascending, `id` ascending; no end date last |
 
 Every 5th card (the 5th, 10th, ...) comes from the running stream, the others from the dated stream. When one stream runs
-out, the other continues alone. The filters apply to both. `/feed`'s `UPCOMING` fallback uses the same merge.
+out, the other continues alone. The filters apply to both. With `includePast=true`, once both run out, the events that ended
+before `asOf` follow, in `PAST`'s order. `/feed`'s `UPCOMING` fallback uses the same merge, without the ended events.
 
 ## Paging
 

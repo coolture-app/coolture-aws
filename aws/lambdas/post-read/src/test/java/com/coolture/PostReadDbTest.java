@@ -33,6 +33,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -605,12 +606,26 @@ class PostReadDbTest {
     }
 
     @Test
-    void browse_upcoming_neverShowsAnEndedEvent() throws SQLException {
+    void browse_upcoming_showsAnEndedEventOnlyWithIncludePast() throws SQLException {
         Instant longAgo = Instant.now().minus(Duration.ofDays(500));
 
         assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters("UPCOMING", false, null, null), 100)));
-        assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters("UPCOMING", true, null, null), 100)));
-        assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters("UPCOMING", true, longAgo, null), 100)));
+        assertEquals(NOT_ENDED_FOR_ME, ruleTitles(walkPosts(ME, filters("UPCOMING", false, longAgo, null), 100)));
+        assertEquals(union(NOT_ENDED_FOR_ME, ENDED), ruleTitles(walkPosts(ME, filters("UPCOMING", true, null, null), 100)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 7, 100})
+    void browse_upcoming_withIncludePast_endsWithPastsOrder_onceEach(int pageSize) throws SQLException {
+        List<UUID> upcoming = walkPosts(ME, filters("UPCOMING", false, null, null), 100).stream().map(PostCardDto::id).toList();
+        List<UUID> past = walkPosts(ME, filters("PAST", false, null, null), 100).stream().map(PostCardDto::id).toList();
+        List<UUID> both = new ArrayList<>(upcoming);
+        both.addAll(past);
+
+        List<UUID> walked = walkPosts(ME, filters("UPCOMING", true, null, null), pageSize).stream().map(PostCardDto::id).toList();
+
+        assertFalse(past.isEmpty());
+        assertEquals(both, walked);
     }
 
     @Test
