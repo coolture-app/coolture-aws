@@ -115,7 +115,7 @@ All existing parameters keep their meaning. What's specific to this contract:
 
 | Request | Shows |
 |---|---|
-| Default, any filter or search | Events not ended, or ended up to 12 hours ago |
+| Default, any filter or search | Events not ended |
 | `includePast=true` | All visible events |
 | `from` or `to` set | All visible events running in that window, because a chosen date is explicit |
 | `sortBy=UPCOMING` | Never an ended event, even with `includePast=true` or a date filter |

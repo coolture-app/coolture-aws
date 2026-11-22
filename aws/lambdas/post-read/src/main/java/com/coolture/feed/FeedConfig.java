@@ -68,9 +68,6 @@ public record FeedConfig(double affinity, double proximity, double time, double 
      */
     public static final int PPR_RUN_MAX_AGE_HOURS = 24;
 
-    /** How long after its end an event still shows in browse. */
-    public static final int PAST_WINDOW_HOURS = 12;
-
     public static FeedConfig fromEnvironment() {
         return parse(System.getenv("FEED_WEIGHTS"));
     }

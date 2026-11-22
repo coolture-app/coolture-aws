@@ -258,7 +258,7 @@ components:
     IncludePast:
       name: includePast
       in: query
-      description: When false, events that ended over 12 hours ago are hidden. UPCOMING always hides ended events.
+      description: When false, ended events are hidden. UPCOMING always hides them.
       schema: {type: boolean, default: false}
   responses:
     BadRequest:

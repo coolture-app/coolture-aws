@@ -4,7 +4,6 @@ import com.coolture.common.db.Blocks;
 import com.coolture.common.db.EventTime;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.StanceCounts;
-import com.coolture.feed.FeedConfig;
 
 import java.sql.SQLException;
 import java.util.UUID;
@@ -18,9 +17,8 @@ public final class PostSql {
 
     public static final String NOT_ENDED = EventTime.NOT_ENDED;
 
-    /** Binds whether to show every past event. */
-    public static final String NOT_LONG_ENDED =
-        "(?::boolean OR " + EventTime.END + " >= now() - interval '" + FeedConfig.PAST_WINDOW_HOURS + " hours')";
+    /** Binds whether to show past events too. */
+    public static final String NOT_ENDED_UNLESS_PAST = "(?::boolean OR " + EventTime.NOT_ENDED + ")";
 
     /** Bind with Blocks.bindViewer. */
     public static final String NOT_BLOCKED = Blocks.notWithViewer("p.author_id");

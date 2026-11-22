@@ -45,7 +45,7 @@ public class PostReadRepository {
             + "WHERE p.deleted_at IS NULL\n"
             + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
-            + "  AND " + PostSql.NOT_LONG_ENDED + "\n"
+            + "  AND " + PostSql.NOT_ENDED_UNLESS_PAST + "\n"
             + (sort.needsPosition() ? "  AND el.coordinates IS NOT NULL\n" : "")
             + "  AND " + PARTICIPATION_AND_REACTION + "\n"
             + (cursor != null ? "  AND " + sort.keysetSql() + "\n" : "")
@@ -253,7 +253,7 @@ public class PostReadRepository {
             """
             + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
-            + "  AND " + PostSql.NOT_LONG_ENDED + "\n"
+            + "  AND " + PostSql.NOT_ENDED_UNLESS_PAST + "\n"
             + (hidesMine ? "  AND " + PostSql.NOT_MINE + "\n" : "")
             + "  AND (el.coordinates::geometry && ST_MakeEnvelope(?, ?, ?, ?, 4326))\n"
             + "  AND " + PARTICIPATION_AND_REACTION;
