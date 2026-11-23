@@ -1,3 +1,4 @@
+import copy
 import html
 import json
 import logging
@@ -320,7 +321,8 @@ def _page_text(body) -> str:
 def _description(page: BeautifulSoup, block: dict) -> str:
     # The block's text stops at the first quotation mark, so it's longer only when the page has lost its text.
     body = page.select_one('.text-contents')
-    text = _page_text(body) if body else ''
+    # A copy, since _page_text cuts links out of the tree and _image_urls reads the same page after it.
+    text = _page_text(copy.copy(body)) if body else ''
     return max(text, clean_description(_text(block, 'description')), key=len)
 
 
@@ -376,10 +378,11 @@ def parse_event_page(page_html: str) -> EventPage | None:
 def _ends_at(end: datetime | None, start: datetime) -> datetime | None:
     if end is None:
         return None
-    end = end if end.tzinfo else end.replace(tzinfo=WARSAW)
+    # The page's offset is fixed (+01:00 all year), so its clock is read as Warsaw's, which has the day's real length.
+    end = end.replace(tzinfo=WARSAW)
     # A multi-day event gives only its last day, as midnight, so it runs until that day ends.
-    if end.timetz().replace(tzinfo=None) == time(0, 0):
-        end = end + timedelta(days=1) - timedelta(minutes=1)
+    if end.time() == time(0, 0):
+        end = end.replace(hour=23, minute=59)
     return end if end > start else None
 
 

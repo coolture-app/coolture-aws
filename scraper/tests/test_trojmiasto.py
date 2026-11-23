@@ -404,6 +404,12 @@ def test_multi_day_event_runs_to_the_end_of_its_last_day():
         == datetime(2026, 11, 8, 22, 59, tzinfo=timezone.utc)
 
 
+def test_multi_day_event_ends_at_the_end_of_its_last_day_when_the_clocks_change_that_day():
+    end = datetime.fromisoformat('2027-03-28T00:00:00+01:00')
+
+    assert merge(listed(), read_page(end=end)).end == datetime(2027, 3, 28, 23, 59, tzinfo=WARSAW)
+
+
 def test_end_before_the_start_is_dropped():
     end = datetime.fromisoformat('2026-11-05T10:00:00+01:00')
 
@@ -570,6 +576,16 @@ def test_a_gallery_with_no_cover_still_gives_its_photos():
             'data-href="/zdj/c/n/10/1/1920x0/7.webp" href="#"><img src="/zdj/c/n/10/1/0x500/7__kr.webp"/></a></div></div>')
 
     assert parse_event_page(event_page(body)).image_urls == ('https://www.trojmiasto.pl/zdj/c/n/10/1/1920x0/7.webp',)
+
+
+def test_a_gallery_link_labelled_like_a_ticket_link_still_gives_its_photo():
+    body = ('<div class="text-contents">Opis.<div class="tinyGallery"><a class="tinyGallery__item" '
+            'data-href="/zdj/c/n/10/1/1920x0/7.webp" href="#">Zobacz zdjęcia</a></div></div>')
+
+    page = parse_event_page(event_page(body))
+
+    assert page.image_urls == ('https://www.trojmiasto.pl/zdj/c/n/10/1/1920x0/7.webp',)
+    assert 'Zobacz' not in page.description
 
 
 def test_merged_event_keeps_the_images():
