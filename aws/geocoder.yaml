@@ -20,8 +20,10 @@ Parameters:
     Type: String
     Default: t4g.micro
   ImageId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Type: AWS::EC2::Image::Id
+    Description: >-
+      deploy.sh passes the running instance's AMI. A newer one replaces the instance, and its new private DNS name is
+      refused as an export the frontend stack imports.
 
 Resources:
   IndexBucket:
@@ -175,7 +177,7 @@ Resources:
           User=photon
           Environment=HOME=/var/lib/photon BUCKET=${IndexBucket} AWS_REGION=${AWS::Region} DATA=/var/lib/photon PHOTON_JAR=/opt/photon/photon.jar
           ExecStartPre=/opt/photon/fetch.sh
-          ExecStart=/bin/sh /opt/photon/photon.sh serve
+          ExecStart=/bin/bash /opt/photon/photon.sh serve
           TimeoutStartSec=15min
           # Until make geo-publish has uploaded an index, every start fails; it retries each minute.
           Restart=always
