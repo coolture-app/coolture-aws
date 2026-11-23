@@ -1,5 +1,4 @@
 from typing import Optional
-from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -16,9 +15,3 @@ class PostContent(BaseModel):
         # right after the title it pulls posts toward others at the same venue more than toward what a user liked.
         place = ", ".join(part for part in (self.venue_name, self.city) if part)
         return " ".join(part for part in (self.title, self.description, place) if part).strip()
-
-
-class PostEmbeddingRecord(BaseModel):
-    post_id: UUID
-    embedding: list[float]
-    model: str

@@ -1,5 +1,6 @@
 import json
 import sys
+from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, call
 from uuid import UUID
 
@@ -8,10 +9,11 @@ import pytest
 from psycopg import errors
 
 import app
+from models import PostContent
 
 POST_ID = "11111111-1111-1111-1111-111111111111"
 POST_KEY = f"posts/{POST_ID}"
-POST_ROW = ("Jazz night", "Live jazz", "Klub Żak", "Gdańsk")
+POST = PostContent(title="Jazz night", description="Live jazz", venue_name="Klub Żak", city="Gdańsk")
 EMBEDDING = [0.5, 0.25, 1.0]
 MODEL = app.settings.embedding_model
 NO_FAILURES = {"batchItemFailures": []}
@@ -42,98 +44,79 @@ def failures(*message_ids: str) -> dict:
 @pytest.fixture
 def model(monkeypatch):
     m = MagicMock()
-    m.encode.return_value = np.array(EMBEDDING, dtype=np.float32)
+    m.encode.side_effect = lambda texts, **_: np.array([EMBEDDING] * len(texts), dtype=np.float32)
     monkeypatch.setattr(app, "_get_model", lambda: m)
     return m
 
 
 @pytest.fixture
-def conn(monkeypatch):
-    c = MagicMock()
-    c.execute.return_value.fetchone.return_value = POST_ROW
-    c.execute.return_value.fetchall.return_value = KIND_ROWS
-    monkeypatch.setattr(app, "_get_connection", lambda: c)
-    return c
+def db(monkeypatch):
+    """Stands in for the database: what find_* answer is set on it, what upsert_* store is read from it."""
+    db = SimpleNamespace(
+        conn=MagicMock(),
+        posts=[(UUID(POST_ID), POST)],
+        kind_vectors=dict(KIND_ROWS),
+        vectors=[],
+        kinds=[],
+    )
+    monkeypatch.setattr(app, "_get_connection", lambda: db.conn)
+    monkeypatch.setattr(app, "find_posts", lambda conn, where, params, limit=None: db.posts)
+    monkeypatch.setattr(app, "find_kind_vectors", lambda conn: db.kind_vectors)
+    monkeypatch.setattr(app, "upsert_embedding", lambda conn, post_id, vector: db.vectors.append((post_id, vector)))
+    monkeypatch.setattr(app, "upsert_post_kinds", lambda conn, rows: db.kinds.extend(rows))
+    return db
 
 
-def test_should_store_embedding_of_current_post_content_when_post_exists(model, conn):
-    # given
-    event = sqs_event(s3_body(POST_KEY))
-
+def test_should_store_embedding_and_kinds_of_current_post_content_when_post_exists(model, db):
     # when
-    result = app.lambda_handler(event, None)
+    result = app.lambda_handler(sqs_event(s3_body(POST_KEY)), None)
 
     # then
     assert result == NO_FAILURES
-    assert model.encode.call_args_list == [call("Jazz night Live jazz Klub Żak, Gdańsk", normalize_embeddings=True)]
-    assert conn.execute.call_args_list == [
-        call(ANY, (POST_ID,)),
-        call(ANY, (POST_ID, EMBEDDING, MODEL)),
-        call(ANY, (MODEL,)),
-    ]
-    assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
-        call(ANY, [(POST_ID, ["stage"], MODEL)]),
-    ]
+    assert model.encode.call_args_list == [call(["Jazz night Live jazz Klub Żak, Gdańsk"], normalize_embeddings=True)]
+    assert db.vectors == [(UUID(POST_ID), EMBEDDING)]
+    assert db.kinds == [(UUID(POST_ID), ["stage"])]
 
 
-def test_should_store_no_kinds_when_a_kind_has_no_vector_yet(model, conn):
+def test_should_store_no_kinds_when_a_kind_has_no_vector_yet(model, db):
     # given
-    conn.execute.return_value.fetchall.return_value = [("concerts", [1.0, 0.0, 0.0]), ("stage", None)]
-    event = sqs_event(s3_body(POST_KEY))
+    db.kind_vectors = None
 
     # when
-    result = app.lambda_handler(event, None)
+    result = app.lambda_handler(sqs_event(s3_body(POST_KEY)), None)
 
     # then
     assert result == NO_FAILURES
-    assert conn.cursor.call_args_list == []
-
-
-def test_should_embed_title_only_when_post_has_no_description_or_place(model, conn):
-    # given
-    conn.execute.return_value.fetchone.return_value = ("Jazz night", None, None, None)
-    event = sqs_event(s3_body(POST_KEY))
-
-    # when
-    app.lambda_handler(event, None)
-
-    # then
-    assert model.encode.call_args_list == [call("Jazz night", normalize_embeddings=True)]
+    assert db.vectors == [(UUID(POST_ID), EMBEDDING)]
+    assert db.kinds == []
 
 
 @pytest.mark.parametrize("description, venue, city, text", [
+    (None, None, None, "Jazz night"),
+    ("Live jazz", "Klub Żak", "Gdańsk", "Jazz night Live jazz Klub Żak, Gdańsk"),
     ("Live jazz", "Klub Żak", None, "Jazz night Live jazz Klub Żak"),
     ("Live jazz", None, "Gdańsk", "Jazz night Live jazz Gdańsk"),
     ("Live jazz", "", "Gdańsk", "Jazz night Live jazz Gdańsk"),
     ("Live jazz\n", None, None, "Jazz night Live jazz"),
 ])
-def test_should_embed_only_the_parts_it_has(model, conn, description, venue, city, text):
+def test_should_embed_only_the_parts_a_post_has(description, venue, city, text):
+    assert PostContent(title="Jazz night", description=description, venue_name=venue, city=city).text == text
+
+
+def test_should_skip_post_when_post_is_missing_or_deleted(model, db):
     # given
-    conn.execute.return_value.fetchone.return_value = ("Jazz night", description, venue, city)
-    event = sqs_event(s3_body(POST_KEY))
+    db.posts = []
 
     # when
-    app.lambda_handler(event, None)
-
-    # then
-    assert model.encode.call_args_list == [call(text, normalize_embeddings=True)]
-
-
-def test_should_skip_post_when_post_is_missing_or_deleted(model, conn):
-    # given
-    conn.execute.return_value.fetchone.return_value = None
-    event = sqs_event(s3_body(POST_KEY))
-
-    # when
-    result = app.lambda_handler(event, None)
+    result = app.lambda_handler(sqs_event(s3_body(POST_KEY)), None)
 
     # then
     assert result == NO_FAILURES
     assert model.encode.call_args_list == []
-    assert conn.execute.call_args_list == [call(ANY, (POST_ID,))]
+    assert db.vectors == []
 
 
-def test_should_ignore_message_when_it_is_s3_test_event(model, conn):
+def test_should_ignore_message_when_it_is_s3_test_event(model, db):
     # given
     event = sqs_event(json.dumps({"Service": "Amazon S3", "Event": "s3:TestEvent", "Bucket": "b"}))
 
@@ -142,23 +125,27 @@ def test_should_ignore_message_when_it_is_s3_test_event(model, conn):
 
     # then
     assert result == NO_FAILURES
-    assert conn.execute.call_args_list == []
+    assert model.encode.call_args_list == []
 
 
-def test_should_report_only_failed_record_when_db_write_fails_for_one_message(model, conn):
+def test_should_report_only_failed_record_when_db_write_fails_for_one_message(model, db, monkeypatch):
     # given
-    rv = conn.execute.return_value
-    conn.execute.side_effect = [rv, None, rv, rv, RuntimeError("db down")]
-    event = sqs_event(s3_body(POST_KEY), s3_body(POST_KEY))
+    writes = iter([None, RuntimeError("db down")])
+
+    def write(conn, post_id, vector):
+        if (outcome := next(writes)) is not None:
+            raise outcome
+
+    monkeypatch.setattr(app, "upsert_embedding", write)
 
     # when
-    result = app.lambda_handler(event, None)
+    result = app.lambda_handler(sqs_event(s3_body(POST_KEY), s3_body(POST_KEY)), None)
 
     # then
     assert result == failures("m1")
 
 
-def test_should_report_every_record_as_failed_when_messages_are_malformed(model, conn):
+def test_should_report_every_record_as_failed_when_messages_are_malformed(model, db):
     # given
     event = sqs_event("{not json", s3_body("posts/not-a-uuid"), s3_body(f"other/{POST_ID}"))
 
@@ -167,19 +154,33 @@ def test_should_report_every_record_as_failed_when_messages_are_malformed(model,
 
     # then
     assert result == failures("m0", "m1", "m2")
-    assert conn.execute.call_args_list == []
+    assert model.encode.call_args_list == []
 
 
-def test_should_not_retry_when_post_was_hard_deleted_before_upsert(model, conn):
+def test_should_not_retry_and_derive_no_kinds_when_post_was_hard_deleted_before_upsert(model, db, monkeypatch):
     # given
-    conn.execute.side_effect = [conn.execute.return_value, errors.ForeignKeyViolation("post gone")]
-    event = sqs_event(s3_body(POST_KEY))
+    def gone(conn, post_id, vector):
+        raise errors.ForeignKeyViolation("post gone")
+
+    monkeypatch.setattr(app, "upsert_embedding", gone)
 
     # when
-    result = app.lambda_handler(event, None)
+    result = app.lambda_handler(sqs_event(s3_body(POST_KEY)), None)
 
     # then
     assert result == NO_FAILURES
+    assert db.kinds == []
+
+
+def test_should_not_retry_when_post_was_hard_deleted_before_its_kinds_were_stored(model, db, monkeypatch):
+    # given
+    def gone(conn, rows):
+        raise errors.ForeignKeyViolation("post gone")
+
+    monkeypatch.setattr(app, "upsert_post_kinds", gone)
+
+    # when, then
+    assert app.lambda_handler(sqs_event(s3_body(POST_KEY)), None) == NO_FAILURES
 
 
 def test_should_return_post_ids_when_s3_event_contains_post_keys():
@@ -236,7 +237,7 @@ def test_should_embed_only_interests_returned_when_invoked_with_embed_interests(
     result = app.lambda_handler({"action": "embed-interests"}, None)
 
     assert result == {"interests": 1, "kinds": 0}
-    assert model.encode.call_args_list == [call("Jazz: koncerty", normalize_embeddings=True)]
+    assert model.encode.call_args_list == [call(["Jazz: koncerty"], normalize_embeddings=True)]
     assert conn.execute.call_args_list[1] == call(ANY, ("jazz", EMBEDDING, MODEL, "Jazz: koncerty"))
 
 
@@ -254,6 +255,7 @@ def test_should_embed_changed_kinds_as_their_texts_mean(model, monkeypatch):
     conn = MagicMock()
     texts = ["Koncert w klubie", "Recital"]
     conn.execute.return_value.fetchall.side_effect = [[], [("concerts", texts)]]
+    model.encode.side_effect = None
     model.encode.return_value = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
     monkeypatch.setattr(app, "_get_connection", lambda: conn)
 
@@ -304,16 +306,13 @@ def time_left(*seconds: float) -> MagicMock:
     return context
 
 
-def test_should_embed_posts_without_a_current_vector_and_their_kinds_until_none_are_left(model, conn):
+def test_should_embed_posts_without_a_current_vector_and_their_kinds_until_none_are_left(model, db, monkeypatch):
     # given
-    other = "22222222-2222-2222-2222-222222222222"
-    conn.execute.return_value.fetchall.side_effect = [
-        [(UUID(POST_ID), *POST_ROW), (UUID(other), "Stand-up", None, None, None)],
-        KIND_ROWS,
-        [],
-    ]
-    conn.execute.return_value.fetchone.return_value = (0,)
-    model.encode.return_value = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    other = UUID("22222222-2222-2222-2222-222222222222")
+    batches = iter([[*db.posts, (other, PostContent(title="Stand-up"))], []])
+    monkeypatch.setattr(app, "find_posts", lambda conn, where, params, limit=None: next(batches))
+    model.encode.side_effect = lambda texts, **_: np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    db.conn.execute.return_value.fetchone.return_value = (0,)
 
     # when
     result = app.lambda_handler({"action": "embed-posts"}, time_left(120, 110, 100))
@@ -323,20 +322,13 @@ def test_should_embed_posts_without_a_current_vector_and_their_kinds_until_none_
     assert model.encode.call_args_list == [
         call(["Jazz night Live jazz Klub Żak, Gdańsk", "Stand-up"], normalize_embeddings=True),
     ]
-    assert conn.execute.call_args_list[1:3] == [
-        call(ANY, (POST_ID, [1.0, 0.0, 0.0], MODEL)),
-        call(ANY, (other, [0.0, 0.0, 1.0], MODEL)),
-    ]
-    assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
-        call(ANY, [(POST_ID, ["concerts"], MODEL), (other, ["stage"], MODEL)]),
-    ]
+    assert db.vectors == [(UUID(POST_ID), [1.0, 0.0, 0.0]), (other, [0.0, 0.0, 1.0])]
+    assert db.kinds == [(UUID(POST_ID), ["concerts"]), (other, ["stage"])]
 
 
-def test_should_stop_before_the_timeout_and_say_how_many_posts_are_left(model, conn):
+def test_should_stop_before_the_timeout_and_say_how_many_posts_are_left(model, db):
     # given
-    conn.execute.return_value.fetchall.side_effect = [[(UUID(POST_ID), *POST_ROW)], KIND_ROWS]
-    conn.execute.return_value.fetchone.return_value = (40,)
-    model.encode.return_value = np.array([EMBEDDING], dtype=np.float32)
+    db.conn.execute.return_value.fetchone.return_value = (40,)
 
     # when
     result = app.lambda_handler({"action": "embed-posts"}, time_left(120, app.EMBED_POSTS_RESERVE_SECONDS))
@@ -344,4 +336,3 @@ def test_should_stop_before_the_timeout_and_say_how_many_posts_are_left(model, c
     # then
     assert result == {"posts": 1, "left": 40}
     assert len(model.encode.call_args_list) == 1
-

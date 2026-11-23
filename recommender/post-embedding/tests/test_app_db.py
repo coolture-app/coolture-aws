@@ -39,3 +39,19 @@ def test_a_post_is_picked_when_it_has_no_current_vector_and_only_then(conn):
 
     assert {edited, other_model, no_vector} <= stale
     assert not ({embedded_after_edit, never_edited} & stale)
+
+
+def test_find_posts_gives_the_live_posts_newest_first_up_to_the_limit(conn):
+    live = conn.execute(
+        f"SELECT p.id FROM posts p WHERE {app.NOT_DELETED} ORDER BY p.created_at DESC, p.id").fetchall()
+    gone = live[0][0]
+    conn.execute("UPDATE posts SET status = 'DELETED', deleted_at = now() WHERE id = %s", (gone,))
+
+    everything = app.find_posts(conn, "true", ())
+    newest_three = app.find_posts(conn, "true", (), 3)
+    one = app.find_posts(conn, "p.id = %s", (str(live[1][0]),))
+
+    assert [post_id for post_id, _ in everything] == [post_id for (post_id,) in live[1:]]
+    assert newest_three == everything[:3]
+    assert [post_id for post_id, _ in one] == [live[1][0]]
+    assert app.find_posts(conn, "p.id = %s", (str(gone),)) == []
