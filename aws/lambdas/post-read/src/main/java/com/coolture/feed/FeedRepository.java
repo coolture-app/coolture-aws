@@ -26,8 +26,8 @@ import java.util.UUID;
 public class FeedRepository {
 
     /**
-     * What the feed may show, narrowed by the person's filters. Ended events only when the filters ask for past events, and the fallback never shows them.
-     * Bind with bindRules.
+     * What the feed may show, narrowed by the person's filters. Ended events only when the filters ask for past events,
+     * and the fallback never shows them. Bind with bindRules.
      */
     private static String feedRules(boolean showsEnded) {
         return "p.deleted_at IS NULL\n"
@@ -63,7 +63,7 @@ public class FeedRepository {
                p.starts_at,
                p.ends_at,
                p.open_ended,
-        """ + "       " + PostSql.ENGAGEMENT + " AS engagement,\n" + """
+               %s AS engagement,
                1 - (c.centred <=> ?::vector) AS similarity,
                (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
                 FROM marks m) AS near_mark,
@@ -80,7 +80,7 @@ public class FeedRepository {
                                                        AND ?::timestamptz - make_interval(secs => ?)
                                  ORDER BY finished_at DESC LIMIT 1)
         WHERE
-        """;
+        """.formatted(PostSql.ENGAGEMENT);
 
     /**
      * The sums UserVector blends, each from one model's vectors. Stances count up to asOf, so every page of a session
@@ -172,15 +172,15 @@ public class FeedRepository {
 
     /** Empty for a guest, with no query. */
     public UserVector.Parts findVectorParts(UUID viewer, Instant asOf) throws SQLException {
+        if (viewer == null) {
+            return new UserVector.Parts(List.of(), null, null, List.of(), null, null);
+        }
         List<UserVector.Stance> stances = new ArrayList<>();
         List<UserVector.Category> categories = new ArrayList<>();
         double[] interests = null;
         double[] kinds = null;
         double[] interestAverage = null;
         double[] postAverage = null;
-        if (viewer == null) {
-            return new UserVector.Parts(stances, null, null, categories, null, null);
-        }
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(VECTOR_PARTS)) {
