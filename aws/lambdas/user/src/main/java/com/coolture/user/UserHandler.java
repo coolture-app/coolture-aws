@@ -4,6 +4,7 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.coolture.common.dto.UserProfileDto;
 import com.coolture.common.json.JsonUtils;
 import com.coolture.common.pagination.CursorPage;
@@ -116,8 +117,18 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             return ApiResponse.badRequest("Request body is required");
         }
         UserProfileUpdateRequest request = JsonUtils.fromJsonAndValidate(event.getBody(), UserProfileUpdateRequest.class);
+        if (request.bio() == null && sentBioAsNull(event.getBody())) {
+            // A record can't tell null from a field left out. A blank bio is what clears it.
+            request = new UserProfileUpdateRequest(
+                    request.username(), request.firstName(), request.lastName(), "", request.shareStances());
+        }
         UserProfileDto updated = service.update(userId, callerId, request);
         return ApiResponse.ok(updated);
+    }
+
+    private static boolean sentBioAsNull(String body) {
+        JsonNode tree = JsonUtils.readTree(body);
+        return tree != null && tree.isObject() && tree.has("bio") && tree.get("bio").isNull();
     }
 
     private APIGatewayV2HTTPResponse setProfileImage(APIGatewayV2HTTPEvent event) throws Exception {

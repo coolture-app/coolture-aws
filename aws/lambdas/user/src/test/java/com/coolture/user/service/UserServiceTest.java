@@ -247,6 +247,18 @@ class UserServiceTest {
     }
 
     @Test
+    void update_trimsTheBio_andPassesABlankOneOnToClearIt() throws SQLException {
+        var updated = new UserEntity(USER_ID, "testuser", "Jan", "Kowalski", null, Instant.now());
+        when(repository.updateUser(any(), any(), any(), any(), any(), any())).thenReturn(updated);
+
+        service.update(USER_ID, USER_ID, new UserProfileUpdateRequest(null, null, null, " Teatr ", null));
+        service.update(USER_ID, USER_ID, new UserProfileUpdateRequest(null, null, null, "   ", null));
+
+        verify(repository).updateUser(USER_ID, null, null, null, "Teatr", null);
+        verify(repository).updateUser(USER_ID, null, null, null, "", null);
+    }
+
+    @Test
     void update_aTakenUsername_isAConflict() throws SQLException {
         when(repository.updateUser(USER_ID, "taken", null, null, null, null))
             .thenThrow(new SQLException("duplicate key", "23505"));

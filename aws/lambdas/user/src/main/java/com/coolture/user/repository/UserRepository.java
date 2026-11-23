@@ -214,7 +214,7 @@ public class UserRepository {
             params.add(lastName);
         }
         if (bio != null) {
-            setClauses.add("bio = ?");
+            setClauses.add("bio = NULLIF(?, '')");
             params.add(bio);
         }
         if (shareStances != null) {

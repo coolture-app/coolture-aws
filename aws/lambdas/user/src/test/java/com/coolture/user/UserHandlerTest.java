@@ -295,6 +295,35 @@ class UserHandlerTest {
     }
 
     @Test
+    void update_clearsTheBio_whenItIsSentAsNull() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("PATCH", "/users/" + USER_ID, "{\"bio\":null}", Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
+            when(service.update(eq(USER_ID), eq(USER_ID), any(UserProfileUpdateRequest.class))).thenReturn(profile(USER_ID, "jan"));
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            verify(service).update(eq(USER_ID), eq(USER_ID), argThat(request -> "".equals(request.bio())));
+        }
+    }
+
+    @Test
+    void update_leavesTheBioAlone_whenItIsLeftOut() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("PATCH", "/users/" + USER_ID, "{\"firstName\":\"Jan\"}", Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
+            when(service.update(eq(USER_ID), eq(USER_ID), any(UserProfileUpdateRequest.class))).thenReturn(profile(USER_ID, "jan"));
+
+            handler.handleRequest(event, lambdaContext);
+
+            verify(service).update(eq(USER_ID), eq(USER_ID), argThat(request -> request.bio() == null));
+        }
+    }
+
+    @Test
     void update_returns403_whenUpdatingAnotherUsersProfile() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("PATCH", "/users/" + USER_ID, "{\"username\":\"hacked\"}", Map.of("userId", USER_ID.toString()));
 

@@ -122,7 +122,7 @@ public class UserService {
                     username,
                     request.firstName() != null ? request.firstName().trim() : null,
                     request.lastName() != null ? request.lastName().trim() : null,
-                    request.bio(),
+                    request.bio() != null ? request.bio().trim() : null,
                     request.shareStances()
             );
         } catch (SQLException e) {

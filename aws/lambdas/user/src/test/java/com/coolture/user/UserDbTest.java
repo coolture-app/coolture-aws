@@ -160,6 +160,15 @@ class UserDbTest {
     }
 
     @Test
+    void aBlankBio_clearsIt_andNoBioLeavesIt() throws SQLException {
+        users.update(ANNA, ANNA, new UserProfileUpdateRequest(null, "Anna", null, null, null));
+        assertEquals("bio", users.getByIdForCaller(ANNA, ANNA).bio());
+
+        users.update(ANNA, ANNA, new UserProfileUpdateRequest(null, null, null, "", null));
+        assertNull(users.getByIdForCaller(ANNA, ANNA).bio());
+    }
+
+    @Test
     void theBlocker_getsASlimProfile_andWhoeverWasBlocked_aNotFound() throws SQLException {
         users.block(ANNA, JAN);
 
