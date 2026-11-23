@@ -30,27 +30,32 @@ public class ApiResponse {
     }
 
     public static APIGatewayV2HTTPResponse badRequest(String message) {
-        return build(400, Map.of("error", message));
+        return error(400, message, "Bad request");
     }
 
     public static APIGatewayV2HTTPResponse unauthorized(String message) {
-        return build(401, Map.of("error", message));
+        return error(401, message, "Unauthorized");
     }
 
     public static APIGatewayV2HTTPResponse forbidden(String message) {
-        return build(403, Map.of("error", message));
+        return error(403, message, "Forbidden");
     }
 
     public static APIGatewayV2HTTPResponse notFound(String message) {
-        return build(404, Map.of("error", message));
+        return error(404, message, "Not found");
     }
 
     public static APIGatewayV2HTTPResponse conflict(String message) {
-        return build(409, Map.of("error", message));
+        return error(409, message, "Conflict");
     }
 
     public static APIGatewayV2HTTPResponse error(String message) {
-        return build(500, Map.of("error", message));
+        return error(500, message, "Internal server error");
+    }
+
+    /** An exception's getMessage() can be null, and Map.of rejects that. */
+    private static APIGatewayV2HTTPResponse error(int status, String message, String fallback) {
+        return build(status, Map.of("error", message != null ? message : fallback));
     }
 
     public static APIGatewayV2HTTPResponse build(int statusCode, Object body) {

@@ -74,6 +74,17 @@ class ApiResponseTest {
     }
 
     @Test
+    void aNullMessage_getsTheStatusesOwnText_insteadOfThrowing() {
+        assertEquals("{\"error\":\"Bad request\"}", ApiResponse.badRequest(null).getBody());
+        assertEquals("{\"error\":\"Unauthorized\"}", ApiResponse.unauthorized(null).getBody());
+        assertEquals("{\"error\":\"Forbidden\"}", ApiResponse.forbidden(null).getBody());
+        assertEquals("{\"error\":\"Not found\"}", ApiResponse.notFound(null).getBody());
+        assertEquals("{\"error\":\"Conflict\"}", ApiResponse.conflict(null).getBody());
+        assertEquals("{\"error\":\"Internal server error\"}", ApiResponse.error(null).getBody());
+        assertEquals(404, ApiResponse.notFound(null).getStatusCode());
+    }
+
+    @Test
     void build_withRawString_keepsStringAsBody() {
         APIGatewayV2HTTPResponse response = ApiResponse.build(200, "raw-text");
         assertEquals(200, response.getStatusCode());
