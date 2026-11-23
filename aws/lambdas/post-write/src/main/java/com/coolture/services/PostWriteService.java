@@ -10,8 +10,9 @@ import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.ParticipationRequest;
 import com.coolture.dto.ReactionRequest;
 import com.coolture.dto.UpdatePostRequest;
-import com.coolture.common.messaging.EmbeddingRequestPublisher;
+import com.coolture.messaging.PostEmbeddingPublisher;
 import com.coolture.repository.PostWriteRepository;
+import com.coolture.repository.StanceWriteRepository;
 import com.coolture.common.validation.PostLimits;
 
 import java.sql.SQLException;
@@ -22,23 +23,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Stream;
 
 public class PostWriteService {
 
     private final PostWriteRepository repository;
-    private final EmbeddingRequestPublisher embeddingPublisher;
+    private final StanceWriteRepository stances;
+    private final PostEmbeddingPublisher embeddingPublisher;
 
     public PostWriteService() {
-        this(new PostWriteRepository());
+        this(new PostWriteRepository(), new StanceWriteRepository(), new PostEmbeddingPublisher());
     }
 
-    PostWriteService(PostWriteRepository repository) {
-        this(repository, new EmbeddingRequestPublisher());
-    }
-
-    PostWriteService(PostWriteRepository repository, EmbeddingRequestPublisher embeddingPublisher) {
+    PostWriteService(PostWriteRepository repository, StanceWriteRepository stances,
+                     PostEmbeddingPublisher embeddingPublisher) {
         this.repository = repository;
+        this.stances = stances;
         this.embeddingPublisher = embeddingPublisher;
     }
 
@@ -46,12 +45,11 @@ public class PostWriteService {
         validateTypeLocationInvariant(req.type(), req.location());
         validateDateRange(req.startsAt(), req.endsAt());
         validateEnd(req.openEnded(), req.endsAt());
-        validateMedia(req.mediaIds(), req.coverMediaId());
+        validateMedia(req.mediaIds());
 
         requireEventPhotos(repository.validateMediaOwnership(authorId, req.mediaIds()));
-        PostDetailDto created = repository.createPost(authorId,
-            req.coverMediaId() == null ? req : req.withMediaIds(coverFirst(req.mediaIds(), req.coverMediaId())));
-        embeddingPublisher.requestPost(created.id());
+        PostDetailDto created = repository.createPost(authorId, req);
+        embeddingPublisher.publish(created.id());
         return created;
     }
 
@@ -59,7 +57,8 @@ public class PostWriteService {
      * Merge-patch: a field left out of the request keeps its value, and one in removed (sent as null) loses it. Only
      * endsAt, eventUrl and links can be removed; a null in any other field keeps it.
      */
-    public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req, Set<String> removed) throws SQLException {
+    public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req, Set<String> removed)
+            throws SQLException {
         PostWriteRepository.ExistingPost existing = repository.findById(postId)
             .orElseThrow(() -> new IllegalArgumentException("Post not found: " + postId));
 
@@ -95,22 +94,19 @@ public class PostWriteService {
         validateDateRange(newStartsAt, newEndsAt);
         refuseStartMovedToPast(existing.startsAt(), req.startsAt(), Instant.now());
 
-        UpdatePostRequest toSave = req;
         if (req.mediaIds() != null) {
-            validateMedia(req.mediaIds(), req.coverMediaId());
+            validateMedia(req.mediaIds());
             requireEventPhotos(repository.validateMediaOwnership(callerId, req.mediaIds()));
-            if (req.coverMediaId() != null) {
-                toSave = req.withMediaIds(coverFirst(req.mediaIds(), req.coverMediaId()));
-            }
         }
 
         PostWriteRepository.Fields fields = new PostWriteRepository.Fields(
             req.title() != null ? req.title() : existing.title(),
             req.description() != null ? req.description() : existing.description(),
-            newEventUrl, newLinks, newType, newStartsAt, newEndsAt, openEnded);
-        PostDetailDto updated = repository.updatePost(postId, callerId, existing, toSave, fields);
-        // Every edit, so which fields make up the embedded text stays only in the worker's PostContent.
-        embeddingPublisher.requestPost(updated.id());
+            newEventUrl, newLinks, newType, newStartsAt, newEndsAt, openEnded, newLocation, req.mediaIds(),
+            req.coverMediaId());
+        PostDetailDto updated = repository.updatePost(postId, existing.eventLocationId(), fields);
+        // Asked on every edit, so the worker alone decides which fields are embedded.
+        embeddingPublisher.publish(updated.id());
         return updated;
     }
 
@@ -139,7 +135,7 @@ public class PostWriteService {
         if (req == null || req.type() == null) {
             throw new IllegalArgumentException("Reaction type is required");
         }
-        repository.upsertReaction(postId, userId, req.type());
+        stances.upsertReaction(postId, userId, req.type());
     }
 
     public void deleteReaction(UUID postId, UUID userId) throws SQLException {
@@ -149,7 +145,7 @@ public class PostWriteService {
         if (userId == null) {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
         }
-        repository.deleteReaction(postId, userId);
+        stances.deleteReaction(postId, userId);
     }
 
     public void upsertParticipation(UUID postId, UUID userId, ParticipationRequest req) throws SQLException {
@@ -162,7 +158,7 @@ public class PostWriteService {
         if (req == null || req.type() == null) {
             throw new IllegalArgumentException("Participation type is required");
         }
-        repository.upsertParticipation(postId, userId, req.type());
+        stances.upsertParticipation(postId, userId, req.type());
     }
 
     public void deleteParticipation(UUID postId, UUID userId) throws SQLException {
@@ -172,7 +168,7 @@ public class PostWriteService {
         if (userId == null) {
             throw new SecurityException("User not authenticated: missing 'sub' claim");
         }
-        repository.deleteParticipation(postId, userId);
+        stances.deleteParticipation(postId, userId);
     }
 
     private void validateTypeLocationInvariant(PostType type, EventLocationDto location) {
@@ -218,13 +214,7 @@ public class PostWriteService {
         });
     }
 
-    /** A post's first photo is its cover, so a named cover moves there and the others keep their order. */
-    private static List<UUID> coverFirst(List<UUID> mediaIds, UUID coverMediaId) {
-        if (mediaIds == null || mediaIds.isEmpty()) return mediaIds;
-        return Stream.concat(Stream.of(coverMediaId), mediaIds.stream().filter(id -> !id.equals(coverMediaId))).toList();
-    }
-
-    private void validateMedia(List<UUID> mediaIds, UUID coverMediaId) {
+    private static void validateMedia(List<UUID> mediaIds) {
         if (mediaIds == null || mediaIds.isEmpty()) return;
 
         if (mediaIds.size() > PostLimits.MAX_PHOTOS) {
@@ -233,10 +223,6 @@ public class PostWriteService {
 
         if (new HashSet<>(mediaIds).size() != mediaIds.size()) {
             throw new IllegalArgumentException("mediaIds must be unique");
-        }
-
-        if (coverMediaId != null && !mediaIds.contains(coverMediaId)) {
-            throw new IllegalArgumentException("coverMediaId must be present in mediaIds");
         }
     }
 }

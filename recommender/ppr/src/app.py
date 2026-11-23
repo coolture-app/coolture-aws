@@ -29,7 +29,7 @@ JOIN posts p ON p.id = pe.post_id
 WHERE pe.model = %(model)s AND p.created_at <= %(as_of)s
 """
 
-# Ended events stay while their stances count, to connect people and places.
+# Ended events stay while their stances count: a friend's mark on one reaches upcoming events at its venue.
 EVENTS = """
 SELECT p.id,
        vector_send(pe.embedding) AS vector,
@@ -68,7 +68,7 @@ DELETE FROM rec_ppr_scores WHERE run_number IN (SELECT run_number FROM old)
 
 
 def _connect() -> psycopg.Connection:
-    # A copy of post-embedding's _connect; change both.
+    # Copied, with _db_credentials, from post-embedding's _connect; change both.
     return psycopg.connect(
         host=settings.db_host,
         port=settings.db_port,

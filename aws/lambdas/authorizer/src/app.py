@@ -14,7 +14,8 @@ ORIGIN_SECRET = os.environ.get("ORIGIN_VERIFY_SECRET", "")
 REQUIRE_TOKEN = os.environ.get("AUTH_MODE", "optional") == "required"
 CONTEXT_CLAIMS = ("email", "given_name", "family_name", "preferred_username")
 
-_jwks_client = jwt.PyJWKClient(f"{ISSUER}/.well-known/jwks.json", cache_keys=True) if ISSUER else None
+# The function's timeout is 5 s, and the client's default is 30 s.
+_jwks_client = jwt.PyJWKClient(f"{ISSUER}/.well-known/jwks.json", cache_keys=True, timeout=3) if ISSUER else None
 
 ANONYMOUS = {"isAuthorized": True, "context": {}}
 DENIED = {"isAuthorized": False}
@@ -68,8 +69,8 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         if token is None:
             return DENIED if REQUIRE_TOKEN else ANONYMOUS
         if _jwks_client is None:
-            logger.warning("COGNITO_ISSUER not configured (sam local?), treating request as anonymous")
-            return ANONYMOUS
+            logger.error("COGNITO_ISSUER is not configured, so no token can be checked")
+            return DENIED
 
         claims = verify(token)
     except jwt.PyJWTError as e:
@@ -80,8 +81,8 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         "isAuthorized": True,
         "context": {
             "sub": claims["sub"],
-            "username": claims.get("username") or claims.get("cognito:username", ""),
-            "groups": ",".join(claims.get("cognito:groups", [])),
-            **{claim: str(claims.get(claim, "")) for claim in CONTEXT_CLAIMS},
+            "username": claims.get("username") or claims.get("cognito:username") or "",
+            "groups": ",".join(claims.get("cognito:groups") or []),
+            **{claim: str(claims.get(claim) or "") for claim in CONTEXT_CLAIMS},
         },
     }

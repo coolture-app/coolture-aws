@@ -13,6 +13,9 @@ import com.coolture.repository.DuplicateEventException;
 import com.coolture.services.PostWriteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
 import java.time.Instant;
@@ -75,8 +78,7 @@ class PostWriteHandlerTest {
                 "title": "Cool Event",
                 "description": "A very cool event",
                 "type": "ONLINE",
-                "visibility": "PUBLIC",
-                "startsAt": "2027-09-01T12:00:00Z"
+                "startsAt": "2030-09-01T12:00:00Z"
             }
         """;
 
@@ -131,77 +133,26 @@ class PostWriteHandlerTest {
         }
     }
 
-    @Test
-    void upsertReaction_whenValidRequest_returns204() throws Exception {
+    @ParameterizedTest
+    @CsvSource(value = {"PUT|reaction|{\"type\":\"LIKE\"}", "DELETE|reaction|", "PUT|participation|{\"type\":\"INTERESTED\"}",
+        "DELETE|participation|"}, delimiter = '|')
+    void likesAndStances_return204_andReachTheirOwnCall(String method, String route, String body) throws Exception {
         UUID userId = UUID.randomUUID();
         UUID postId = UUID.randomUUID();
-        String body = "{\"type\":\"LIKE\"}";
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "PUT", "/posts/" + postId + "/reaction", body, Map.of("postId", postId.toString())
+            method, "/posts/" + postId + "/" + route, body, Map.of("postId", postId.toString())
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
 
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).upsertReaction(eq(postId), eq(userId), any());
-        }
-    }
-
-    @Test
-    void deleteReaction_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "DELETE", "/posts/" + postId + "/reaction", null, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).deleteReaction(eq(postId), eq(userId));
-        }
-    }
-
-    @Test
-    void upsertParticipation_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        String body = "{\"type\":\"INTERESTED\"}";
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "PUT", "/posts/" + postId + "/participation", body, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).upsertParticipation(eq(postId), eq(userId), any());
-        }
-    }
-
-    @Test
-    void deleteParticipation_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "DELETE", "/posts/" + postId + "/participation", null, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).deleteParticipation(eq(postId), eq(userId));
+            assertEquals(204, handler.handleRequest(event, lambdaContext).getStatusCode());
+            switch (method + " " + route) {
+                case "PUT reaction" -> verify(service).upsertReaction(eq(postId), eq(userId), any());
+                case "DELETE reaction" -> verify(service).deleteReaction(postId, userId);
+                case "PUT participation" -> verify(service).upsertParticipation(eq(postId), eq(userId), any());
+                default -> verify(service).deleteParticipation(postId, userId);
+            }
         }
     }
 
@@ -243,11 +194,42 @@ class PostWriteHandlerTest {
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-            when(service.updatePost(eq(postId), eq(userId), any(), any())).thenReturn(null);
 
             handler.handleRequest(event, lambdaContext);
 
             verify(service).updatePost(eq(postId), eq(userId), any(), eq(Set.of("endsAt", "eventUrl", "links")));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"title\":\"   \"}", "{\"description\":\"\"}", "{\"description\":\" \\n \"}"})
+    void updatePost_whenATitleOrDescriptionIsBlank_returns400(String body) throws Exception {
+        UUID postId = UUID.randomUUID();
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+            "PATCH", "/posts/" + postId, body, Map.of("id", postId.toString())
+        );
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(UUID.randomUUID());
+
+            assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+            verify(service, never()).updatePost(any(), any(), any(), any());
+        }
+    }
+
+    @Test
+    void updatePost_whenADescriptionHasSeveralLines_isAccepted() throws Exception {
+        UUID postId = UUID.randomUUID();
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+            "PATCH", "/posts/" + postId, "{\"description\":\"One\\nTwo\"}", Map.of("id", postId.toString())
+        );
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(UUID.randomUUID());
+
+            handler.handleRequest(event, lambdaContext);
+
+            verify(service).updatePost(any(), any(), any(), any());
         }
     }
 

@@ -70,3 +70,50 @@ HTTP 200
 [Asserts]
 jsonpath "$[0].startsAt" exists
 jsonpath "$[0].description" not exists
+
+# Kinds of event. The embedding worker derives them after a post is saved (locally: make embed-posts), so these use
+# the seeded posts. A post matches any kind asked for; kids=true keeps only posts for children.
+GET {{api}}/posts?kinds=concerts&limit=1
+X-Anonymous: true
+HTTP 200
+[Captures]
+concert: jsonpath "$.items[0].id"
+
+GET {{api}}/posts/{{concert}}
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.kinds" contains "concerts"
+
+GET {{api}}/posts?kinds=no_such_kind
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$.items" count == 0
+
+GET {{api}}/posts?kinds=Concerts
+X-Anonymous: true
+HTTP 400
+
+GET {{api}}/posts/map?leftUpper.latitude=55&leftUpper.longitude=18&rightBottom.latitude=54&rightBottom.longitude=19.2&kinds=concerts,stage&includePast=true
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$" count > 0
+jsonpath "$[0].kind" exists
+
+# A filtered pin names the kind it was found by, even where that kind is the post's second: every pin says concerts.
+GET {{api}}/posts/map?leftUpper.latitude=55&leftUpper.longitude=18&rightBottom.latitude=54&rightBottom.longitude=19.2&kinds=concerts&includePast=true
+X-Anonymous: true
+HTTP 200
+[Captures]
+concert_pins: jsonpath "$" count
+[Asserts]
+jsonpath "$" count > 0
+jsonpath "$[0].kinds" contains "concerts"
+
+GET {{api}}/posts/map?leftUpper.latitude=55&leftUpper.longitude=18&rightBottom.latitude=54&rightBottom.longitude=19.2&kinds=concerts&includePast=true
+X-Anonymous: true
+HTTP 200
+[Asserts]
+jsonpath "$[?(@.kind == 'concerts')]" count == {{concert_pins}}

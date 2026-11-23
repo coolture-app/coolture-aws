@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from collections.abc import Callable
@@ -7,7 +8,9 @@ import requests
 
 from trojmiasto import Event
 
-# Our Photon: the container make up starts once make geo-index has built its index, the same index the app uses on AWS.
+log = logging.getLogger(__name__)
+
+# Our Photon, started by `make up`.
 DEFAULT_URL = 'http://localhost:2322'
 # Pomerania, as west, south, east, north. A name matched outside it is another place with the same name.
 REGION = '16.5,53.3,20.0,55.0'
@@ -19,7 +22,8 @@ HOUSE_NUMBER = re.compile(r'\d+[a-zA-Z]?')
 TRAILING_NUMBER = re.compile(r'^(?P<street>.*[^\d\s])\s+(?P<number>\d\S*)$')
 WRONG_SHAPE = (KeyError, IndexError, AttributeError, TypeError, ValueError)
 # The site sometimes puts a hall in the street field ("w Sali Haxo"), which a search would place on some other street.
-NOT_A_STREET = re.compile(r'^(w|we|sala|sali)\b', re.IGNORECASE)
+# The negative lookahead keeps "W. Stwosza", a street named for Wit Stwosz.
+NOT_A_STREET = re.compile(r'^(w|we|sala|sali)\b(?!\.)', re.IGNORECASE)
 # Words that say what kind of street it is, which Photon writes out or leaves out ("pl." for "Plac").
 STREET_KINDS = {'ul', 'ulica', 'al', 'aleja', 'aleje', 'pl', 'plac', 'os', 'osiedle', 'rondo', 'skwer', 'bulwar'}
 
@@ -56,20 +60,20 @@ class Geocoder:
         if trailing and not building_number:
             street, building_number = trailing['street'], trailing['number']
         if is_street(street):
-            query = {'street': street, 'city': city}
+            structured = {'street': street, 'city': city}
             number = HOUSE_NUMBER.match(building_number or '')
             if number:
-                query['housenumber'] = number.group()
+                structured['housenumber'] = number.group()
             # The structured search can answer with another street of a similar name ("pl. Kaszubski" gave Trasa
             # Kaszubska), where the free text finds the right one, so each answer must name the street asked for.
-            queries.append(('structured', query, street))
+            queries.append(('structured', structured, street))
             address = f'{street} {number.group()}' if number else street
             queries.append(('api', {'q': f'{address}, {city}', 'exclude': EXCLUDED}, street))
         if event.venue:
             queries.append(('api', {'q': f'{event.venue}, {city}', 'exclude': EXCLUDED}, None))
 
-        for path, query, street in queries:
-            place = self._search(path, query, exact=True, street=street)
+        for path, params, asked_street in queries:
+            place = self._search(path, params, exact=True, street=asked_street)
             if place is not None:
                 return place
         return self._search('api', {'q': city, 'layer': 'city'}, exact=False)
@@ -88,6 +92,10 @@ class Geocoder:
         try:
             response = self._session.get(f'{self._base_url}/{path}', timeout=20,
                                          params={**params, 'limit': 1, 'lang': 'default'})
+            if response.status_code == 400:
+                # Photon answers 400 to some inputs. Another event's run would stop at this one every time.
+                log.warning('Photon refused path=%s params=%s', path, params)
+                return None
             response.raise_for_status()
             features = response.json()['features']
             if features == []:
@@ -113,10 +121,14 @@ def is_street(street: str | None) -> bool:
 def same_street(asked: str, properties: dict) -> bool:
     """Whether Photon's answer is on the street asked for: every word of letters in the asked name begins a word of the
     answer's street, or of its name when the answer is the street itself, so "gen. Hallera" finds "Generała Józefa
-    Hallera". Numbers are left out, since some streets arrive with their house number ("Rakoczego 11/U3")."""
+    Hallera". A number is left out, since some streets arrive with their house number ("Rakoczego 11/U3"), unless it
+    starts the name ("3 Maja"), where it must be the same number."""
     found = _words(properties.get('street') or properties.get('name') or '')
-    wanted = [w for w in _words(asked) if w not in STREET_KINDS and len(w) > 1 and w.isalpha()]
-    return bool(wanted) and all(any(f.startswith(w) for f in found) for w in wanted)
+    words = [w for w in _words(asked) if w not in STREET_KINDS]
+    wanted = [w for w in words if len(w) > 1 and w.isalpha()]
+    if len(words) > 1 and words[0].isdigit() and words[1].isalpha():
+        wanted.insert(0, words[0])
+    return bool(wanted) and all(any(f == w if w.isdigit() else f.startswith(w) for f in found) for w in wanted)
 
 
 def _words(text: str) -> list[str]:

@@ -7,8 +7,7 @@ info:
     /users/{userId} that changes or reads private data works only on the caller's own id and answers 403 for anyone
     else's. A block works both ways: when either of two users blocked the other, neither finds the other in search,
     followers or following, and each gets 404 for the other's interests, followers and following. Whoever was blocked
-    also gets 404 for the blocker's profile, as if the account didn't exist. Change this file first, in its own pull request or commit, then the code; ContractTest checks the handler's
-    responses against it.
+    also gets 404 for the blocker's profile, as if the account didn't exist.
 servers:
   - url: http://localhost:3000
     description: Local stack. On AWS, the same paths are behind /api.
@@ -118,7 +117,7 @@ paths:
       tags: [Profiles]
       operationId: updateUser
       summary: Changes the caller's own profile
-      description: A field that is left out or null stays as it is, so a field can't be cleared here.
+      description: A field that is left out stays as it is. Only the bio can be cleared, by sending null or a blank one.
       requestBody:
         required: true
         content:
@@ -226,6 +225,7 @@ paths:
     get:
       tags: [Interests]
       operationId: getInterestCatalog
+      security: [{}, {bearerAuth: []}]
       summary: Onboarding's choices, kinds of event then interests by category, with how many to pick
       description: >
         Only offered interests are listed, and only they can be picked. A category with no offered interest is left
@@ -236,7 +236,6 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/InterestCatalog'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
   /users/{userId}/interests:
     parameters:
       - $ref: '#/components/parameters/UserId'
@@ -536,7 +535,7 @@ components:
     UserSummary:
       type: object
       additionalProperties: false
-      required: [id, username, followersCount, followingCount, followsYou]
+      required: [id, username, followersCount, followingCount, isFollowing, followsYou]
       properties:
         id: {type: string, format: uuid}
         username: {type: string}
@@ -546,6 +545,7 @@ components:
         createdAt: {type: string, format: date-time}
         followersCount: {type: integer}
         followingCount: {type: integer}
+        isFollowing: {type: boolean, description: "Whether you follow this user, so a list needs no second request for who you follow. False for yourself and for a guest."}
         followsYou: {type: boolean, description: Whether this user follows you. False for a guest.}
     UserPage:
       type: object

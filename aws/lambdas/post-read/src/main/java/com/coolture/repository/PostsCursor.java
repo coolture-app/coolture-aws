@@ -47,7 +47,10 @@ public record PostsCursor(PostSort sort, UUID id, Instant createdAt, Upcoming.Po
         return cursor;
     }
 
-    /** Binds the parameters of the sort's keyset condition. NEAREST needs the request's position, STANCE_NEWEST the viewer. */
+    /**
+     * Binds the parameters of the sort's keyset condition. NEAREST needs the request's position, STANCE_NEWEST the
+     * viewer.
+     */
     void bindKeyset(ParamBinder binder, Double latitude, Double longitude, UUID viewer) throws SQLException {
         switch (sort) {
             case RECENT -> binder.bindTimestamp(createdAt);

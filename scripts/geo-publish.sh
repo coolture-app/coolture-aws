@@ -9,8 +9,13 @@ export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-eu-north-1}"
 export MSYS_NO_PATHCONV=1
 stack="coolture-geocoder-$ENVIRONMENT"
 
+# The AWS CLI on Windows ends its text output with \r.
+aws_text() {
+    aws "$@" --output text | tr -d '\r'
+}
+
 output() {
-    aws cloudformation describe-stacks --stack-name "$stack" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+    aws_text cloudformation describe-stacks --stack-name "$stack" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue"
 }
 
 if ! docker volume inspect coolture-geocoder-index > /dev/null 2>&1; then

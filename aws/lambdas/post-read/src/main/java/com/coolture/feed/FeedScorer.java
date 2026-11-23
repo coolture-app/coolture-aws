@@ -6,7 +6,7 @@ import java.util.SplittableRandom;
 import java.util.UUID;
 
 /**
- * Turns the facts about a post into a number. No I/O, so it can be tested alone and moved later.
+ * Turns the facts about a post into a number. No I/O.
  * Uses StrictMath, because a cursor keeps the exact score and the next page may run on another Lambda instance.
  */
 public final class FeedScorer {
@@ -23,9 +23,9 @@ public final class FeedScorer {
     public record Facts(UUID id, Instant startsAt, Instant endsAt, int engagement, Double similarity, Double meters,
                         double nearMark, boolean standing, Double ppr) {}
 
-    /** The parts before weighting, kept so that explanations can be added later, and the weighted total. */
-    public record Score(double affinity, double notForMe, double proximity, double time, double popularity, double jitter,
-                        double ppr, double total) {}
+    /** The parts before weighting, and the weighted total. */
+    public record Score(double affinity, double notForMe, double proximity, double time, double popularity,
+                        double jitter, double ppr, double total) {}
 
     private final FeedConfig config;
 
@@ -43,7 +43,8 @@ public final class FeedScorer {
         if (facts.standing()) {
             time = StrictMath.min(time, FeedConfig.STANDING_TIME_CAP);
         }
-        double popularity = StrictMath.min(StrictMath.log(1.0 + StrictMath.max(facts.engagement(), 0)) / POPULARITY_SCALE, 1.0);
+        double popularity = StrictMath.min(
+            StrictMath.log(1.0 + StrictMath.max(facts.engagement(), 0)) / POPULARITY_SCALE, 1.0);
         double jitter = jitter(facts.id(), seed);
         // The PageRank job writes only the posts it lifts above NEUTRAL (recommender/ppr), so no row means NEUTRAL.
         double ppr = facts.ppr() == null ? FeedConfig.NEUTRAL : facts.ppr();

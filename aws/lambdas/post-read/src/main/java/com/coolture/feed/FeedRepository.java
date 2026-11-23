@@ -1,10 +1,10 @@
 package com.coolture.feed;
 
+import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.EventTime;
-import com.coolture.common.db.Friends;
-import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostSelect;
 import com.coolture.common.db.ResultSetMappers;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.PostCardDto;
@@ -27,13 +27,12 @@ import java.util.UUID;
 public class FeedRepository {
 
     /**
-     * What the feed may show, narrowed by the person's filters. The ranked feed and its fallback both use exactly this.
-     * Ended events only when the filters ask for past events; the fallback, being the upcoming order, never shows them.
-     * Bind with bindRules.
+     * What the feed may show, narrowed by the person's filters. Ended events only when the filters ask for past events,
+     * and the fallback never shows them. Bind with bindRules.
      */
     private static String feedRules(boolean showsEnded) {
         return "p.deleted_at IS NULL\n"
-            + (showsEnded ? "" : "  AND " + PostSql.NOT_ENDED + "\n")
+            + (showsEnded ? "" : "  AND " + EventTime.NOT_ENDED + "\n")
             + "  AND p.created_at <= ?::timestamptz\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + PostSql.NOT_MINE + "\n"
@@ -42,12 +41,13 @@ public class FeedRepository {
 
     /**
      * Each post loses the post average once (centred), and is compared with the viewer's vector and with each of the
-     * viewer's "Nie dla mnie" marks, centred the same way. Marks count up to asOf, fade as stances do, and only the newest
-     * NOT_FOR_ME_MARKS. MATERIALIZED, because an inlined CTE would run again for every candidate, and OFFSET 0, because a
-     * flattened lateral would read and centre the post's vector again for every mark (100 marks took 6 s at 2,000 posts).
-     * The PageRank score comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf, so a run landing
-     * mid-session doesn't move its pages, and less than PPR_RUN_MAX_AGE_HOURS before now too, since a cursor's asOf
-     * comes from the client.
+     * viewer's "Nie dla mnie" marks, centred the same way. Marks count up to asOf, fade as stances do, and only the
+     * newest NOT_FOR_ME_MARKS. MATERIALIZED, because an inlined CTE would run again for every candidate, and OFFSET 0,
+     * because a flattened lateral would read and centre the post's vector again for every mark. The PageRank score
+     * comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf, so a run landing mid-session doesn't move
+     * its pages, and less than PPR_RUN_MAX_AGE_HOURS before now too, since a cursor's asOf comes from the client.
+     * A zero centred vector gives NaN from pgvector, which Postgres sorts above every number, so the clamp would turn
+     * it into the full penalty. Those pairs are left out of near_mark.
      */
     private static final String FEATURES = """
         WITH marks AS MATERIALIZED (
@@ -65,12 +65,14 @@ public class FeedRepository {
                p.starts_at,
                p.ends_at,
                p.open_ended,
-        """ + "       " + PostSql.ENGAGEMENT + " AS engagement,\n" + """
+               %s AS engagement,
                1 - (c.centred <=> ?::vector) AS similarity,
-               (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
-                FROM marks m) AS near_mark,
+               (SELECT max(m.fade * LEAST(GREATEST((1 - x.d - ?) / (1 - ?), 0), 1))
+                FROM marks m, LATERAL (SELECT c.centred <=> m.centred AS d) x
+                WHERE x.d <> 'NaN'::float8) AS near_mark,
                ST_Distance(el.coordinates,
-                           ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters,
+                           ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography)
+                   AS meters,
                pr.score::float8 AS ppr
         FROM posts p
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
@@ -82,16 +84,14 @@ public class FeedRepository {
                                                        AND ?::timestamptz - make_interval(secs => ?)
                                  ORDER BY finished_at DESC LIMIT 1)
         WHERE
-        """;
+        """.formatted(PostSql.ENGAGEMENT);
 
     /**
      * The sums UserVector blends, each from one model's vectors. Stances count up to asOf, so every page of a session
-     * gets the same vector. Each fades with its age in whole days by asOf, half every STANCE_HALF_LIFE_DAYS: summed per
-     * day first, then each day's sum weighed once, so a stance type comes back as one row; past STANCE_MAX_AGE_DAYS
-     * they'd weigh next to nothing and are left out. Interests have no time and count as they are. Each row is a part: a stance, with the sum of its fading
-     * weights as the amount, the picked interests, the picked kinds, one category picked from with all of its interests, or the average of
-     * every interest or every post. The post average counts posts created up to asOf, ended and deleted ones too, so
-     * nothing done during a session moves it.
+     * gets the same vector; their fade is UserVector's. Each row is a part: a stance type with the sum of its fading
+     * weights, the picked interests, the picked kinds, one category picked from with all of its interests, or the
+     * average of every interest or every post. The post average counts posts created up to asOf, ended and deleted ones
+     * too, so nothing done during a session moves it.
      */
     private static final String VECTOR_PARTS = """
         WITH stances AS (
@@ -115,7 +115,8 @@ public class FeedRepository {
             JOIN interest_embeddings ie ON ie.interest_key = i.key AND ie.model = ?
             WHERE ui.user_id = ?::uuid
         )
-        SELECT type AS part, sum(embedding * array_fill(fade::real, ARRAY[vector_dims(embedding)])::vector)::real[] AS total,
+        SELECT type AS part,
+               sum(embedding * array_fill(fade::real, ARRAY[vector_dims(embedding)])::vector)::real[] AS total,
                sum(stances * fade) AS amount
         FROM daily
         GROUP BY type
@@ -134,7 +135,8 @@ public class FeedRepository {
         JOIN interest_embeddings ie ON ie.interest_key = i.key AND ie.model = ?
         GROUP BY chosen.category_key
         UNION ALL
-        SELECT 'INTEREST_AVERAGE', avg(embedding)::real[], count(*) FROM interest_embeddings WHERE model = ? HAVING count(*) > 0
+        SELECT 'INTEREST_AVERAGE', avg(embedding)::real[], count(*)
+        FROM interest_embeddings WHERE model = ? HAVING count(*) > 0
         UNION ALL
         SELECT 'POST_AVERAGE', avg(pe.embedding)::real[], count(*)
         FROM post_embeddings pe
@@ -176,15 +178,15 @@ public class FeedRepository {
 
     /** Empty for a guest, with no query. */
     public UserVector.Parts findVectorParts(UUID viewer, Instant asOf) throws SQLException {
+        if (viewer == null) {
+            return new UserVector.Parts(List.of(), null, null, List.of(), null, null);
+        }
         List<UserVector.Stance> stances = new ArrayList<>();
         List<UserVector.Category> categories = new ArrayList<>();
         double[] interests = null;
         double[] kinds = null;
         double[] interestAverage = null;
         double[] postAverage = null;
-        if (viewer == null) {
-            return new UserVector.Parts(stances, null, null, categories, null, null);
-        }
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(VECTOR_PARTS)) {
@@ -238,11 +240,13 @@ public class FeedRepository {
     }
 
     /**
-     * One row per candidate. Has its own timeout, so slow ranking falls back to the upcoming order instead of holding up
-     * the page. The position is the session's, for proximity; a radius in the filters uses the filters' own position.
+     * One row per candidate. Has its own timeout, so slow ranking falls back to the upcoming order instead of holding
+     * up the page. The position is the session's, for proximity; a radius in the filters uses the filters' own
+     * position.
      */
     public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
-                                                 Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
+                                                 Double latitude, Double longitude, PostFeedFilters filters)
+                                                         throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(FEATURES + feedRules(filters.showsAllPastEvents()))) {
 
@@ -296,16 +300,16 @@ public class FeedRepository {
         }
     }
 
-    /** No marks, or none to compare with, push nothing down. pgvector gives NaN for a zero vector. */
+    /** No marks, or none to compare with, push nothing down. */
     private static double nearMark(Double value) {
-        return value == null || value.isNaN() ? 0 : value;
+        return value == null ? 0 : value;
     }
 
     /** The fallback order, Nadchodzące's (Upcoming), from the given position. */
-    public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
-        Upcoming.Query query = new Upcoming.Query(PostSql.CARD_SELECT + "WHERE " + feedRules(false), b -> {
-            b.bindNullableUUID(viewer)
-             .bindNullableUUID(viewer);
+    public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit)
+            throws SQLException {
+        Upcoming.Query query = new Upcoming.Query(PostSelect.CARD + "WHERE " + feedRules(false), b -> {
+            PostSelect.bindViewer(b, viewer);
             bindRules(b, viewer, at.asOf(), filters);
         });
         try (Connection conn = DatabaseConfig.getConnection()) {
@@ -315,37 +319,27 @@ public class FeedRepository {
 
     /** In no particular order. A post deleted since it was ranked just isn't returned. */
     public List<PostCardDto> findCards(UUID viewer, List<UUID> ids) throws SQLException {
-        String sql = PostSql.CARD_SELECT + "WHERE p.id = ANY(?::uuid[])";
+        String sql = PostSelect.CARD + "WHERE p.id = ANY(?::uuid[]) AND p.deleted_at IS NULL AND " + PostSql.NOT_BLOCKED;
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            new ParamBinder(stmt, conn)
-                .bindNullableUUID(viewer)
-                .bindNullableUUID(viewer)
-                .bindUUIDArray(ids.toArray(new UUID[0]));
+            ParamBinder b = new ParamBinder(stmt, conn);
+            PostSelect.bindViewer(b, viewer);
+            b.bindUUIDArray(ids.toArray(new UUID[0]));
+            Blocks.bindViewer(b, viewer);
 
-            return readCards(stmt, viewer);
-        }
-    }
-
-    private static void bindRules(ParamBinder b, UUID viewer, Instant asOf, PostFeedFilters filters) throws SQLException {
-        b.bindTimestamp(asOf);
-        // Not blocked
-        b.bindNullableUUID(viewer)
-         .bindNullableUUID(viewer);
-        PostSql.bindNotMine(b, viewer);
-        PostFilterSql.bind(b, filters, viewer);
-    }
-
-    private static List<PostCardDto> readCards(PreparedStatement stmt, UUID viewer) throws SQLException {
-        List<PostCardDto> cards = new ArrayList<>();
-        try (ResultSet rs = stmt.executeQuery()) {
-            while (rs.next()) {
-                cards.add(ResultSetMappers.mapPostCard(rs));
+            try (ResultSet rs = stmt.executeQuery()) {
+                return PostSql.withPhotosAndFriends(conn, viewer, ResultSetMappers.mapPostCards(rs));
             }
         }
-        Connection conn = stmt.getConnection();
-        return Friends.withFriendStances(conn, viewer, MediaQueries.withPhotos(conn, cards));
+    }
+
+    private static void bindRules(ParamBinder b, UUID viewer, Instant asOf, PostFeedFilters filters)
+            throws SQLException {
+        b.bindTimestamp(asOf);
+        Blocks.bindViewer(b, viewer);
+        PostSql.bindNotMine(b, viewer);
+        PostFilterSql.bind(b, filters, viewer);
     }
 }

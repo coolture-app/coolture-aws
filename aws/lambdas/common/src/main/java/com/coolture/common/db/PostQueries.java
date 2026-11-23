@@ -22,7 +22,9 @@ public final class PostQueries {
         }
     }
 
-    /** Not deleted, and its author and the viewer aren't a blocked pair. A blocked pair sees what a deleted post shows. */
+    /**
+     * Not deleted, and its author and the viewer aren't a blocked pair. A blocked pair sees what a deleted post shows.
+     */
     public static boolean isPostVisible(Connection conn, UUID postId, UUID viewer) throws SQLException {
         String sql = "SELECT 1 FROM posts p WHERE " + LIVE + " AND " + Blocks.notWithViewer("p.author_id");
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -40,7 +42,8 @@ public final class PostQueries {
     }
 
     public static boolean hasEnded(Connection conn, UUID postId) throws SQLException {
-        try (PreparedStatement stmt = conn.prepareStatement("SELECT " + EventTime.ENDED + " FROM posts p WHERE p.id = ?")) {
+        String sql = "SELECT " + EventTime.ENDED + " FROM posts p WHERE p.id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             new ParamBinder(stmt, conn).bindUUID(postId);
             try (ResultSet rs = stmt.executeQuery()) {
                 return rs.next() && rs.getBoolean(1);

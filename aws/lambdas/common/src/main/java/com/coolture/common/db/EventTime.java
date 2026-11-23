@@ -11,10 +11,15 @@ import java.time.Instant;
  */
 public final class EventTime {
 
-    /** An event with no end time has ended this long after it starts. A change needs a migration that replaces event_end. */
+    /**
+     * An event with no end time has ended this long after it starts. A change needs a migration that replaces
+     * event_end.
+     */
     public static final int DEFAULT_EVENT_HOURS = 3;
 
-    /** A run longer than this is a standing event, like a post with no end date: the feed doesn't treat it as tonight's. */
+    /**
+     * A run longer than this is a standing event, like a post with no end date: the feed doesn't treat it as tonight's.
+     */
     public static final int STANDING_AFTER_DAYS = 30;
 
     /**
@@ -31,7 +36,8 @@ public final class EventTime {
 
     /** The post runs at some moment between from and to, either optional. Bind with {@link #bindOverlap}. */
     public static final String OVERLAPS =
-        "(?::timestamptz IS NULL OR " + END + " >= ?::timestamptz) AND (?::timestamptz IS NULL OR p.starts_at <= ?::timestamptz)";
+        "(?::timestamptz IS NULL OR " + END + " >= ?::timestamptz)"
+            + " AND (?::timestamptz IS NULL OR p.starts_at <= ?::timestamptz)";
 
     private EventTime() {}
 
@@ -48,16 +54,8 @@ public final class EventTime {
         return endsAt != null ? endsAt : startsAt.plus(Duration.ofHours(DEFAULT_EVENT_HOURS));
     }
 
-    public static boolean hasEnded(Instant startsAt, Instant endsAt, boolean openEnded, Instant now) {
-        Instant end = end(startsAt, endsAt, openEnded);
-        return end != null && end.isBefore(now);
-    }
-
-    public static boolean isRunning(Instant startsAt, Instant endsAt, boolean openEnded, Instant at) {
-        return !startsAt.isAfter(at) && !hasEnded(startsAt, endsAt, openEnded, at);
-    }
-
     public static boolean isStanding(Instant startsAt, Instant endsAt, boolean openEnded) {
-        return openEnded || endsAt != null && Duration.between(startsAt, endsAt).compareTo(Duration.ofDays(STANDING_AFTER_DAYS)) > 0;
+        return openEnded
+            || endsAt != null && Duration.between(startsAt, endsAt).compareTo(Duration.ofDays(STANDING_AFTER_DAYS)) > 0;
     }
 }

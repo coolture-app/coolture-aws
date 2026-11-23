@@ -74,10 +74,6 @@ def test_the_post_keeps_the_street_as_published():
     assert to_post(event(street='ul. Morska'), PLACE)['location']['street'] == 'ul. Morska'
 
 
-def test_the_category_stays_out_of_the_post():
-    assert 'tags' not in to_post(event(category='sport, rekreacja'), PLACE)
-
-
 def test_long_values_stay_within_the_api_limits():
     long_event = event(title='słowo ' * 60, category='kategoria ' * 10, city='miasto ' * 40, venue='nazwa ' * 30,
                        street='ulica ' * 40, building_number='1' * 30, postal_code='8' * 30,

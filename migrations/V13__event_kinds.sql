@@ -1,6 +1,6 @@
--- Kinds of event: formats such as concerts or workshops, beside the V9 interests (topics). Users pick kinds in
+-- Kinds of event: formats such as concerts or workshops, beside the interests (topics). Users pick kinds in
 -- onboarding, the post-embedding worker derives each post's kinds, and the feed filters by them.
--- V9's interests keep their texts and vectors: the survey's answers were given on them. Medytacja's group is the
+-- The interests keep their texts and vectors: the survey's answers were given on them. Medytacja's group is the
 -- one change, below.
 
 CREATE TABLE event_kinds (
@@ -42,7 +42,7 @@ UPDATE interests SET offered = false WHERE key IN ('true_crime', 'series', 'crim
 UPDATE interests SET offered = false WHERE key IN ('concerts', 'cinema', 'parties', 'wellness');
 
 -- The Sport group shares its kind's name. Medytacja joins it beside Joga and Pilates: with Wellness hidden it was the
--- only topic Styl życia offered. Not only a label: a pick adds 0.25 of its group's mean, so the move changes the taste
+-- only topic Styl życia offered. Not only a label: a pick adds a share of its group's mean, so the move changes the taste
 -- of anyone holding a topic in either group.
 UPDATE interest_categories SET label_pl = 'Aktywność i sport', label_en = 'Activity and sport' WHERE key = 'sports';
 UPDATE interests SET category_key = 'sports', position = 3 WHERE key = 'meditation';

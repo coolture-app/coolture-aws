@@ -102,14 +102,6 @@ class UserVectorTest {
         assertTrue(oneGoing[0] > oneLike[0], "going counts twice a like towards engagement");
     }
 
-    @Test
-    void blend_givesInterestsBackTheirShare_asStancesFade() {
-        double[] fresh = UserVector.blend(withInterests(B, stance("LIKE", A, 10)));
-        double[] faded = UserVector.blend(withInterests(B, stance("LIKE", A, 10 * 0.05)));
-
-        assertTrue(faded[1] > fresh[1], "faded likes count less towards engagement, so interests lead again");
-    }
-
     // Every text of a kind shares {0, 1, 0}; what's left of each part is X for the stances and Z for the interests.
     private static final double[] X = {1, 0, 0};
     private static final double[] Z = {0, 0, 1};

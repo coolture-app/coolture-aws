@@ -9,6 +9,7 @@ import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.CursorPayload;
 import com.coolture.common.storage.S3StorageService;
 import com.coolture.user.dto.HomeDto;
+import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserInterestsDto;
@@ -18,7 +19,6 @@ import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.repository.UserRepository.AvatarRecord;
 import com.coolture.user.repository.UserRepository.FollowRow;
-import com.coolture.user.repository.UserRepository.HomeRecord;
 import com.coolture.user.repository.UserRepository.ListedUser;
 import com.coolture.user.repository.UserRepository.NameCursor;
 import com.coolture.user.repository.UserRepository.UserEntity;
@@ -31,7 +31,7 @@ import java.util.regex.Pattern;
 public class UserService {
 
     private static final int MAX_USERNAME_LENGTH = 32;
-    /** What a person may choose. Accounts made from an email can hold less, such as two letters, until they change it. */
+    /** What a person may choose. Accounts made from an email can hold less, such as two letters, until changed. */
     private static final Pattern USERNAME = Pattern.compile("[a-z0-9._]{3,32}");
     private static final String UNIQUE_VIOLATION = "23505";
 
@@ -43,19 +43,15 @@ public class UserService {
         this(new UserRepository(), new InterestRepository(), new S3StorageService());
     }
 
-    public UserService(UserRepository userRepository, InterestRepository interestRepository, S3StorageService s3StorageService) {
+    public UserService(UserRepository userRepository, InterestRepository interestRepository,
+                       S3StorageService s3StorageService) {
         this.userRepository = userRepository;
         this.interestRepository = interestRepository;
         this.s3StorageService = s3StorageService;
     }
 
     public CursorPage<UserListItemDto> search(UUID callerId, String q, String cursor, int limit) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
-        if (limit < 1 || limit > 100) {
-            throw new IllegalArgumentException("Limit must be between 1 and 100");
-        }
+        requireLimit(limit);
 
         Optional<CursorPayload> payload = CursorCodec.decode(cursor);
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
@@ -63,10 +59,11 @@ public class UserService {
 
         List<ListedUser> users = userRepository.search(callerId, q, cursorCreatedAt, cursorId, limit + 1);
 
-        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(users.stream().map(u -> u.user().id()).toList());
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(
+                users.stream().map(u -> u.user().id()).toList());
         List<UserListItemDto> dtos = new ArrayList<>();
         for (ListedUser listed : users) {
-            dtos.add(toListItem(listed.user(), listed.followsYou(), avatarMap));
+            dtos.add(toListItem(listed.user(), listed.isFollowing(), listed.followsYou(), avatarMap));
         }
 
         return CursorPage.of(dtos, limit, dto -> dto.summary().id(), dto -> dto.summary().createdAt());
@@ -93,7 +90,8 @@ public class UserService {
     private UserProfileDto profileFor(UserEntity user, UUID callerId, String asked) throws SQLException {
         if (callerId != null && !callerId.equals(user.id())) {
             if (userRepository.isBlocked(callerId, user.id())) {
-                return new UserProfileDto(user.id(), user.username(), user.firstName(), user.lastName(), avatarOf(user.id()),
+                return new UserProfileDto(user.id(), user.username(), user.firstName(), user.lastName(),
+                    avatarOf(user.id()),
                     null, null, null, null, false, true, false, null, null, null);
             }
             if (userRepository.isBlocked(user.id(), callerId)) {
@@ -103,7 +101,7 @@ public class UserService {
         return toProfileDto(user, callerId);
     }
 
-    /** Someone's followers, following and interests are as hidden across a block as their profile. */
+    /** A block hides followers and following both ways, as it hides the profile from whoever was blocked. */
     private void requireNoBlock(UUID targetUserId, UUID callerId) throws SQLException {
         if (userRepository.isBlockedEitherDirection(callerId, targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
@@ -124,7 +122,7 @@ public class UserService {
                     username,
                     request.firstName() != null ? request.firstName().trim() : null,
                     request.lastName() != null ? request.lastName().trim() : null,
-                    request.bio(),
+                    request.bio() != null ? request.bio().trim() : null,
                     request.shareStances()
             );
         } catch (SQLException e) {
@@ -155,24 +153,12 @@ public class UserService {
         userRepository.deactivateProfileImages(targetId, Instant.now());
     }
 
-    public UserProfileDto getMe(UUID callerId, String username, String firstName, String lastName) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
-        String uname = toUsername(username, callerId);
-        String fName = firstName != null ? firstName : "";
-        String lName = lastName != null ? lastName : "";
-        userRepository.createUserIfAbsent(callerId, uname, fName, lName);
-        return getByIdForCaller(callerId, callerId);
-    }
-
-    public boolean sharesStances(UUID callerId) throws SQLException {
-        return userRepository.sharesStances(callerId);
-    }
-
-    public Optional<HomeDto> getHome(UUID callerId) throws SQLException {
-        return userRepository.findHome(callerId)
-                .map(home -> new HomeDto(home.name(), new GeoPointDto(home.latitude(), home.longitude())));
+    public MeDto getMe(UUID callerId, String username, String firstName, String lastName) throws SQLException {
+        UserEntity user = userRepository.createUserIfAbsent(callerId, toUsername(username, callerId),
+                firstName != null ? firstName : "", lastName != null ? lastName : "");
+        UserProfileDto profile = toProfileDto(user, callerId);
+        return new MeDto(profile, !profile.kinds().isEmpty(), userRepository.sharesStances(callerId),
+                userRepository.findHome(callerId).orElse(null));
     }
 
     /**
@@ -181,12 +167,13 @@ public class UserService {
      */
     public HomeDto setHome(UUID targetId, UUID callerId, HomeDto request) throws SQLException {
         requireSelf(targetId, callerId, "You can only set your own home");
-        HomeRecord home = new HomeRecord(request.name().trim(),
-                roundToKilometre(request.coordinates().latitude()), roundToKilometre(request.coordinates().longitude()));
+        HomeDto home = new HomeDto(request.name().trim(), new GeoPointDto(
+                roundToKilometre(request.coordinates().latitude()),
+                roundToKilometre(request.coordinates().longitude())));
         if (!userRepository.setHome(targetId, home)) {
             throw new IllegalArgumentException("User " + targetId + " not found");
         }
-        return new HomeDto(home.name(), new GeoPointDto(home.latitude(), home.longitude()));
+        return home;
     }
 
     public void clearHome(UUID targetId, UUID callerId) throws SQLException {
@@ -195,34 +182,35 @@ public class UserService {
     }
 
     private static void requireSelf(UUID targetId, UUID callerId, String refusal) {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (!targetId.equals(callerId)) {
             throw new SecurityException(refusal);
         }
     }
 
-    /** 2 decimals, about 1.1 km, as the feed rounds a browser position. */
+    private static void requireLimit(int limit) {
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("Limit must be between 1 and 100");
+        }
+    }
+
     private static double roundToKilometre(double coordinate) {
         return Math.round(coordinate * 100) / 100.0;
     }
 
-    public CursorPage<UserListItemDto> getFollowers(UUID targetUserId, UUID callerId, String q, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getFollowers(UUID targetUserId, UUID callerId, String q, String cursor,
+                                                    int limit) throws SQLException {
         NameCursor after = checkFollowList(targetUserId, callerId, cursor, limit);
         return toFollowPage(userRepository.findFollowers(targetUserId, callerId, q, after, limit + 1), limit);
     }
 
-    public CursorPage<UserListItemDto> getFollowing(UUID targetUserId, UUID callerId, String q, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getFollowing(UUID targetUserId, UUID callerId, String q, String cursor,
+                                                    int limit) throws SQLException {
         NameCursor after = checkFollowList(targetUserId, callerId, cursor, limit);
         return toFollowPage(userRepository.findFollowing(targetUserId, callerId, q, after, limit + 1), limit);
     }
 
-    /** Throws for a bad limit or cursor, a missing user and a block; returns where the page starts. */
     private NameCursor checkFollowList(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
-        if (limit < 1 || limit > 100) {
-            throw new IllegalArgumentException("Limit must be between 1 and 100");
-        }
+        requireLimit(limit);
         NameCursor after = CursorCodec.decode(cursor, NameCursor.class).orElse(null);
         if (after != null && (after.name() == null || after.id() == null)) {
             throw new IllegalArgumentException("Invalid cursor");
@@ -237,36 +225,31 @@ public class UserService {
     private CursorPage<UserListItemDto> toFollowPage(List<FollowRow> rows, int limit) throws SQLException {
         CursorPage<FollowRow> page = CursorPage.of(rows, limit,
             row -> CursorCodec.encode(new NameCursor(row.sortName(), row.user().id())));
-        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(page.items().stream().map(r -> r.user().id()).toList());
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(
+                page.items().stream().map(r -> r.user().id()).toList());
         List<UserListItemDto> dtos = new ArrayList<>();
         for (FollowRow row : page.items()) {
-            dtos.add(toListItem(row.user(), row.followsYou(), avatarMap));
+            dtos.add(toListItem(row.user(), row.isFollowing(), row.followsYou(), avatarMap));
         }
         return new CursorPage<>(dtos, page.page());
     }
 
-    public CursorPage<UserListItemDto> getBlocking(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
+    public CursorPage<UserListItemDto> getBlocking(UUID targetUserId, UUID callerId, String cursor, int limit)
+            throws SQLException {
         if (!callerId.equals(targetUserId)) {
             throw new SecurityException("You can only view your own block list");
         }
-        if (limit < 1 || limit > 100) {
-            throw new IllegalArgumentException("Limit must be between 1 and 100");
-        }
+        requireLimit(limit);
         Optional<CursorPayload> payload = CursorCodec.decode(cursor);
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
 
-        List<UserRepository.UserRelationRow> rows = userRepository.findBlocking(targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
+        List<UserRepository.UserRelationRow> rows = userRepository.findBlocking(
+                targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
         return toRelationPage(rows, limit);
     }
 
     public void follow(UUID callerId, UUID targetUserId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (callerId.equals(targetUserId)) {
             throw new IllegalStateException("Cannot FOLLOW yourself");
         }
@@ -283,9 +266,6 @@ public class UserService {
     }
 
     public void unfollow(UUID callerId, UUID targetUserId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (!userRepository.existsById(targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
         }
@@ -296,9 +276,6 @@ public class UserService {
     }
 
     public void block(UUID callerId, UUID targetUserId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (callerId.equals(targetUserId)) {
             throw new IllegalStateException("Cannot BLOCK yourself");
         }
@@ -315,9 +292,6 @@ public class UserService {
     }
 
     public void unblock(UUID callerId, UUID targetUserId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (!userRepository.existsById(targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
         }
@@ -327,20 +301,24 @@ public class UserService {
         }
     }
 
-    private CursorPage<UserListItemDto> toRelationPage(List<UserRepository.UserRelationRow> rows, int limit) throws SQLException {
-        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(rows.stream().map(r -> r.user().id()).toList());
+    private CursorPage<UserListItemDto> toRelationPage(List<UserRepository.UserRelationRow> rows, int limit)
+            throws SQLException {
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(
+                rows.stream().map(r -> r.user().id()).toList());
 
         Map<UUID, Instant> relationCreatedAtMap = new HashMap<>();
         List<UserListItemDto> dtos = new ArrayList<>();
         for (UserRepository.UserRelationRow row : rows) {
             relationCreatedAtMap.put(row.user().id(), row.relationCreatedAt());
-            dtos.add(toListItem(row.user(), row.followsYou(), avatarMap));
+            dtos.add(toListItem(row.user(), row.isFollowing(), row.followsYou(), avatarMap));
         }
 
-        return CursorPage.of(dtos, limit, dto -> dto.summary().id(), dto -> relationCreatedAtMap.get(dto.summary().id()));
+        return CursorPage.of(dtos, limit, dto -> dto.summary().id(),
+                dto -> relationCreatedAtMap.get(dto.summary().id()));
     }
 
-    private UserListItemDto toListItem(UserEntity user, boolean followsYou, Map<UUID, AvatarRecord> avatarMap) throws SQLException {
+    private UserListItemDto toListItem(UserEntity user, boolean isFollowing, boolean followsYou,
+                                       Map<UUID, AvatarRecord> avatarMap) throws SQLException {
         MediaResourceDto avatar = null;
         AvatarRecord record = avatarMap.get(user.id());
         if (record != null) {
@@ -367,7 +345,7 @@ public class UserService {
                 userRepository.countFollowers(user.id()),
                 userRepository.countFollowing(user.id())
         );
-        return new UserListItemDto(summary, followsYou);
+        return new UserListItemDto(summary, isFollowing, followsYou);
     }
 
     private MediaResourceDto avatarOf(UUID userId) throws SQLException {
@@ -396,7 +374,8 @@ public class UserService {
 
         boolean isFollowing = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(callerId, user.id());
         boolean isBlocked = callerId != null && !callerId.equals(user.id()) && userRepository.isBlocked(callerId, user.id());
-        boolean followsYou = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(user.id(), callerId);
+        boolean followsYou = callerId != null && !callerId.equals(user.id())
+                && userRepository.isFollowing(user.id(), callerId);
 
         UserInterestsDto picks = interestRepository.findPicks(user.id());
 
@@ -426,7 +405,7 @@ public class UserService {
             normalized = normalized.substring(0, MAX_USERNAME_LENGTH);
         }
         if (normalized.replace("_", "").isEmpty()) {
-            return "user_" + callerId.toString().replace("-", "").substring(0, 12);
+            return UserRepository.fallbackUsername(callerId);
         }
         return normalized;
     }

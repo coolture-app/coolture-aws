@@ -2,9 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Coolture geocoder - Photon for the post form's place search, reached only through CloudFront at /geo
 
-# Before the first deploy, the networking stack needs an internet gateway attached to the VPC: CloudFront VPC origins
-# require one, though nothing routes through it. After it: make geo-publish uploads Photon and the index. The instance
-# installs Java from Amazon Linux's package mirror, an S3 bucket, so it needs the S3 gateway endpoint to allow it.
+# The instance installs Java from Amazon Linux's package mirror, an S3 bucket, so the S3 gateway endpoint must allow it.
+# The first deploy's steps, including the internet gateway the networking stack needs, are in README.md.
 
 Parameters:
   Environment:
@@ -21,8 +20,10 @@ Parameters:
     Type: String
     Default: t4g.micro
   ImageId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Type: AWS::EC2::Image::Id
+    Description: >-
+      deploy.sh passes the running instance's AMI. A newer one replaces the instance, and its new private DNS name is
+      refused as an export the frontend stack imports.
 
 Resources:
   IndexBucket:
@@ -140,8 +141,8 @@ Resources:
           Ebs: {VolumeType: gp3, VolumeSize: 10, Encrypted: true}
       Tags:
         - {Key: Name, Value: !Sub 'coolture-${Environment}-geocoder'}
-      # Runs once, at the first boot. The service fetches Photon and the index on every start, so a new index needs only
-      # a reboot (make geo-publish does it), and the instance keeps its ARN, which the VPC origin points at.
+      # Runs once, at the first boot. The service fetches Photon and the index on every start, so a new index needs a
+      # reboot, not a new instance: the VPC origin points at the instance's ARN.
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
@@ -176,7 +177,7 @@ Resources:
           User=photon
           Environment=HOME=/var/lib/photon BUCKET=${IndexBucket} AWS_REGION=${AWS::Region} DATA=/var/lib/photon PHOTON_JAR=/opt/photon/photon.jar
           ExecStartPre=/opt/photon/fetch.sh
-          ExecStart=/bin/sh /opt/photon/photon.sh serve
+          ExecStart=/bin/bash /opt/photon/photon.sh serve
           TimeoutStartSec=15min
           # Until make geo-publish has uploaded an index, every start fails; it retries each minute.
           Restart=always

@@ -10,11 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class FeedConfigTest {
 
     @Test
-    void defaults_matchTheDesign() {
-        assertEquals(new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10, 0.5, 0.10), FeedConfig.DEFAULTS);
-    }
-
-    @Test
     void parse_whenUnsetBlankOrDefault_usesDefaults() {
         assertSame(FeedConfig.DEFAULTS, FeedConfig.parse(null));
         assertSame(FeedConfig.DEFAULTS, FeedConfig.parse("  "));

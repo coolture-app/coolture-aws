@@ -1,6 +1,7 @@
 -- Local development seed data
 -- This file is ONLY applied by the local `migrate` compose service and NEVER deployed to AWS.
--- It runs on every `make up`, so each statement leaves existing rows alone.
+-- It runs on every `make up`: every insert skips existing rows, and the demo follows and Jan's home come back if
+-- removed in the app.
 
 INSERT INTO users (id, username, first_name, last_name, bio) VALUES
     ('00000000-0000-0000-0000-000000000001', 'local_dev', 'Local', 'Developer', 'Default local development user')

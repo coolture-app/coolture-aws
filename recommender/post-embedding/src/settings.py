@@ -17,9 +17,5 @@ class Settings(BaseSettings):
     embedding_model: str = "sdadas/mmlw-roberta-base"
     embedding_model_dir: str = "/opt/model"
 
-    kinds_second_margin: float = 0.0085
-    kids_kind: str = "kids"
-    kids_min_lead: float = -0.0019
-
 
 settings = Settings()

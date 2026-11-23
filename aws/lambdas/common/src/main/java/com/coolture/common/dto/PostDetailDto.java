@@ -23,7 +23,6 @@ public record PostDetailDto(
     List<PostLinkDto> links,
     Instant startsAt,
     Instant endsAt,
-    /** No end date: endsAt is null and the event never ends (EventTime). */
     boolean openEnded,
     int positiveReactionCount,
     int participantCount,

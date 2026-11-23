@@ -2,9 +2,11 @@ package com.coolture.common.db;
 
 import com.coolture.common.dto.CommentSummaryDto;
 import com.coolture.common.dto.EventLocationDto;
+import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.UserSummaryDto;
@@ -89,29 +91,6 @@ public final class ResultSetMappers {
             mapInstant(rs, "user_created_at"),
             0,
             0
-        );
-    }
-
-    /**
-     * Maps cover media from ResultSet if present.
-     * Expects cover columns: cover_id, cover_purpose, cover_mime_type, cover_size_bytes, cover_status, cover_created_at, cover_deleted_at,
-     * cover_width, cover_height
-     */
-    public static MediaResourceDto mapCoverMedia(ResultSet rs) throws SQLException {
-        UUID coverId = (UUID) rs.getObject("cover_id");
-        if (coverId == null) return null;
-
-        return new MediaResourceDto(
-            coverId,
-            mapEnum(rs, "cover_purpose", MediaPurpose.class),
-            rs.getString("cover_mime_type"),
-            rs.getObject("cover_size_bytes") != null ? rs.getLong("cover_size_bytes") : null,
-            mapEnum(rs, "cover_status", MediaStatus.class),
-            MediaUrls.presign(rs.getString("cover_object_key")),
-            mapInstant(rs, "cover_created_at"),
-            mapInstant(rs, "cover_deleted_at"),
-            mapInteger(rs, "cover_width"),
-            mapInteger(rs, "cover_height")
         );
     }
 
@@ -239,9 +218,16 @@ public final class ResultSetMappers {
         );
     }
 
-    /**
-     * Maps a full PostCardDto directly from a single ResultSet row.
-     */
+    /** Every row left, as cards. */
+    public static List<PostCardDto> mapPostCards(ResultSet rs) throws SQLException {
+        List<PostCardDto> cards = new java.util.ArrayList<>();
+        while (rs.next()) {
+            cards.add(mapPostCard(rs));
+        }
+        return cards;
+    }
+
+    /** A card with no photos yet: PostCardDto.withPhotos adds them and the cover. */
     public static PostCardDto mapPostCard(ResultSet rs) throws SQLException {
         return new PostCardDto(
             (UUID) rs.getObject("id"),
@@ -264,11 +250,44 @@ public final class ResultSetMappers {
             mapInstant(rs, "created_at"),
             mapInstant(rs, "last_modified_at"),
             mapInstant(rs, "deleted_at"),
-            mapCoverMedia(rs),
+            null,
             mapMyReaction(rs),
             mapMyParticipation(rs),
             null,
             null
+        );
+    }
+
+    /** The cover is the first photo. */
+    public static PostDetailDto mapPostDetail(ResultSet rs, List<PostMediaDto> photos, FriendStancesDto friendStances)
+            throws SQLException {
+        return new PostDetailDto(
+            (UUID) rs.getObject("id"),
+            mapUserSummary(rs),
+            mapEventLocation(rs),
+            rs.getString("title"),
+            rs.getString("description"),
+            rs.getString("event_url"),
+            mapLinks(rs),
+            mapInstant(rs, "starts_at"),
+            mapInstant(rs, "ends_at"),
+            rs.getBoolean("open_ended"),
+            rs.getInt("positive_reaction_count"),
+            rs.getInt("participant_count"),
+            rs.getInt("interested_count"),
+            rs.getInt("going_count"),
+            rs.getInt("comments_count"),
+            mapEnum(rs, "type", PostType.class),
+            mapEnum(rs, "status", PostStatus.class),
+            mapStringList(rs, "kinds"),
+            mapInstant(rs, "created_at"),
+            mapInstant(rs, "last_modified_at"),
+            mapInstant(rs, "deleted_at"),
+            photos.isEmpty() ? null : photos.get(0).media(),
+            photos,
+            mapMyReaction(rs),
+            mapMyParticipation(rs),
+            friendStances
         );
     }
 }

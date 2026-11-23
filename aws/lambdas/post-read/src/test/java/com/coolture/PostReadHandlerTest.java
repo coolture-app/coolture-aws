@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
@@ -76,7 +77,10 @@ class PostReadHandlerTest {
         Map<String, String> query = Map.of(
             "q", "jazz",
             "limit", "10",
-            "cursor", "abc123"
+            "cursor", "abc123",
+            "includePast", "true",
+            "kinds", "concerts, stage",
+            "kids", "true"
         );
 
         APIGatewayV2HTTPEvent event =
@@ -100,9 +104,7 @@ class PostReadHandlerTest {
 
             when(postReadService.getFeed(
                 eq(callerId),
-                filtersCaptor.capture(),
-                eq("abc123"),
-                eq(10)
+                filtersCaptor.capture()
             )).thenReturn(emptyPage);
 
             APIGatewayV2HTTPResponse response =
@@ -113,7 +115,12 @@ class PostReadHandlerTest {
 
         PostFeedFilters filters = filtersCaptor.getValue();
 
+        assertEquals("abc123", filters.cursor());
+        assertEquals(10, filters.limit());
         assertEquals("jazz", filters.q());
+        org.junit.jupiter.api.Assertions.assertTrue(filters.includePast());
+        assertEquals(List.of("concerts", "stage"), filters.kinds());
+        org.junit.jupiter.api.Assertions.assertTrue(filters.kids());
     }
 
     @Test
@@ -139,7 +146,7 @@ class PostReadHandlerTest {
                 .getById(postId, null);
 
             verify(postReadService, never())
-                .getFeed(any(), any(), any(), anyInt());
+                .getFeed(any(), any());
         }
     }
 
@@ -178,12 +185,7 @@ class PostReadHandlerTest {
                 .when(() -> SecurityContext.getUserIdOptional(event))
                 .thenReturn(Optional.empty());
 
-            when(postReadService.getFeed(
-                any(),
-                any(),
-                any(),
-                anyInt()
-            )).thenThrow(new RuntimeException(internalDetail));
+            when(postReadService.getFeed(any(), any())).thenThrow(new RuntimeException(internalDetail));
 
             APIGatewayV2HTTPResponse response =
                 handler.handleRequest(event, lambdaContext);
@@ -212,9 +214,7 @@ class PostReadHandlerTest {
 
             when(postReadService.getFeed(
                 isNull(),
-                any(),
-                isNull(),
-                anyInt()
+                argThat(f -> f.cursor() == null)
             )).thenThrow(
                 new SecurityException(
                     "Authentication is required to filter by reaction type"
@@ -246,12 +246,7 @@ class PostReadHandlerTest {
                 .when(() -> SecurityContext.getUserIdOptional(event))
                 .thenReturn(Optional.empty());
 
-            when(postReadService.getFeed(
-                any(),
-                any(),
-                any(),
-                anyInt()
-            )).thenThrow(new IllegalArgumentException(message));
+            when(postReadService.getFeed(any(), any())).thenThrow(new IllegalArgumentException(message));
 
             APIGatewayV2HTTPResponse response =
                 handler.handleRequest(event, lambdaContext);
@@ -269,12 +264,17 @@ class PostReadHandlerTest {
         "kids, maybe",
         "latitude, 54.35",
         "longitude, 18.65",
+        "radiusKm, -1",
+        "radiusKm, 0",
+        "radiusKm, NaN",
+        "radiusKm, Infinity",
+        "radiusKm, abc",
     })
     void getFeed_whenAParameterIsInvalidOrHalfALocation_thenReturns400(String name, String value) throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of(name, value));
 
         assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
-        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
+        verify(postReadService, never()).getFeed(any(), any());
     }
 
     @ParameterizedTest
@@ -290,30 +290,7 @@ class PostReadHandlerTest {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("latitude", latitude, "longitude", longitude));
 
         assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
-        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
-    }
-
-    @Test
-    void getFeed_whenIncludePastIsSet_thenPassesItToService() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("includePast", "true"));
-        ArgumentCaptor<PostFeedFilters> filters = ArgumentCaptor.forClass(PostFeedFilters.class);
-        when(postReadService.getFeed(any(), filters.capture(), any(), anyInt()))
-            .thenReturn(CursorPage.of(List.<PostCardDto>of(), 20, PostCardDto::id, PostCardDto::createdAt));
-
-        assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
-        org.junit.jupiter.api.Assertions.assertTrue(filters.getValue().includePast());
-    }
-
-    @Test
-    void getFeed_whenKindsAreSet_thenPassesEachKindAndTheKidsSwitch() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("kinds", "concerts, stage", "kids", "true"));
-        ArgumentCaptor<PostFeedFilters> filters = ArgumentCaptor.forClass(PostFeedFilters.class);
-        when(postReadService.getFeed(any(), filters.capture(), any(), anyInt()))
-            .thenReturn(CursorPage.of(List.<PostCardDto>of(), 20, PostCardDto::id, PostCardDto::createdAt));
-
-        assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
-        assertEquals(List.of("concerts", "stage"), filters.getValue().kinds());
-        org.junit.jupiter.api.Assertions.assertTrue(filters.getValue().kids());
+        verify(postReadService, never()).getFeed(any(), any());
     }
 
     @Test
@@ -321,7 +298,8 @@ class PostReadHandlerTest {
         UUID callerId = UUID.randomUUID();
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed",
             Map.of("limit", "10", "cursor", "abc", "latitude", "54.35", "longitude", "18.65"));
-        when(feedService.getFeed(eq(callerId), eq("abc"), eq(10), eq(54.35), eq(18.65), any()))
+        when(feedService.getFeed(eq(callerId), argThat(f -> "abc".equals(f.cursor()) && f.limit() == 10
+                && f.latitude() == 54.35 && f.longitude() == 18.65)))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(), new PaginationMeta(10, false, null)));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
@@ -332,13 +310,13 @@ class PostReadHandlerTest {
             assertEquals(200, response.getStatusCode());
             org.junit.jupiter.api.Assertions.assertTrue(response.getBody().contains("\"mode\":\"RANKED\""));
         }
-        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
+        verify(postReadService, never()).getFeed(any(), any());
     }
 
     @Test
     void getHomeFeed_whenNoIdentity_thenCallsFeedServiceAsGuest() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed");
-        when(feedService.getFeed(isNull(), isNull(), eq(20), isNull(), isNull(), any()))
+        when(feedService.getFeed(isNull(), argThat(f -> f.cursor() == null && f.limit() == 20 && f.latitude() == null)))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(), new PaginationMeta(20, false, null)));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
@@ -401,24 +379,6 @@ class PostReadHandlerTest {
     }
 
     @Test
-    void handleRequest_whenPostById_returns200WithDetail() throws Exception {
-        UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/" + postId, null, Map.of("id", postId.toString()));
-
-        var detail = mock(com.coolture.common.dto.PostDetailDto.class);
-        when(postReadService.getById(eq(postId), any())).thenReturn(detail);
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(200, response.getStatusCode());
-            verify(postReadService).getById(eq(postId), any());
-        }
-    }
-
-    @Test
     void handleRequest_whenPostFriends_callsGetFriendsWithTheCaller_andNotTheDetail() throws Exception {
         UUID postId = UUID.randomUUID();
         UUID caller = UUID.randomUUID();
@@ -443,6 +403,28 @@ class PostReadHandlerTest {
         when(postReadService.getFriends(eq(postId), any())).thenThrow(new IllegalArgumentException("Post not found: " + postId));
 
         assertEquals(404, handler.handleRequest(event, lambdaContext).getStatusCode());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "leftUpper.latitude, 91",
+        "leftUpper.longitude, NaN",
+        "rightBottom.latitude, -91",
+        "rightBottom.longitude, 181",
+        "rightBottom.longitude, abc",
+    })
+    void handleRequest_whenAMapBoundIsInvalid_returns400(String name, String value) throws Exception {
+        Map<String, String> query = new java.util.HashMap<>(Map.of(
+            "leftUpper.latitude", "54.5",
+            "leftUpper.longitude", "18.0",
+            "rightBottom.latitude", "54.0",
+            "rightBottom.longitude", "19.0"
+        ));
+        query.put(name, value);
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts/map", query);
+
+        assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+        verify(postReadService, never()).getMapMarks(any(), any(), any(), anyBoolean());
     }
 
     @Test

@@ -17,8 +17,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Friends are mutual follows. Following needs no approval, so one-way follows reveal nothing. A block deletes the follows
- * both ways, so it ends a friendship too.
+ * Friends are mutual follows. Following needs no approval, so one-way follows reveal nothing. A block deletes the
+ * follows both ways, so it ends a friendship too.
  */
 public final class Friends {
 
@@ -29,7 +29,8 @@ public final class Friends {
 
     /** Whether the user in {@code userColumn} is the viewer's friend and shares stances. Binds the viewer twice. */
     public static String sharingFriend(String userColumn) {
-        return "(EXISTS (SELECT 1 FROM user_relations fa WHERE fa.source_user_id = ?::uuid AND fa.target_user_id = " + userColumn
+        return "(EXISTS (SELECT 1 FROM user_relations fa"
+            + " WHERE fa.source_user_id = ?::uuid AND fa.target_user_id = " + userColumn
             + " AND fa.type = 'FOLLOW')"
             + " AND EXISTS (SELECT 1 FROM user_relations fb WHERE fb.source_user_id = " + userColumn
             + " AND fb.target_user_id = ?::uuid AND fb.type = 'FOLLOW')"
@@ -37,7 +38,8 @@ public final class Friends {
     }
 
     /** Each post's friend stances, with one query for the whole list. Empty for a guest. */
-    public static Map<UUID, FriendStancesDto> forPosts(Connection conn, UUID viewer, Collection<UUID> postIds) throws SQLException {
+    public static Map<UUID, FriendStancesDto> forPosts(Connection conn, UUID viewer, Collection<UUID> postIds)
+            throws SQLException {
         if (viewer == null || postIds.isEmpty()) {
             return Map.of();
         }
@@ -73,7 +75,8 @@ public final class Friends {
     }
 
     /** The newest {@code perStance} friends of each post and stance, newest first, each with the stance's total. */
-    private static void stances(Connection conn, UUID viewer, Collection<UUID> postIds, int perStance, StanceRow row) throws SQLException {
+    private static void stances(Connection conn, UUID viewer, Collection<UUID> postIds, int perStance, StanceRow row)
+            throws SQLException {
         String sql = """
             SELECT post_id, type, total, user_id, username, first_name, last_name, avatar_key
             FROM (
@@ -117,12 +120,16 @@ public final class Friends {
         }
     }
 
-    public static List<PostCardDto> withFriendStances(Connection conn, UUID viewer, List<PostCardDto> cards) throws SQLException {
+    public static List<PostCardDto> withFriendStances(Connection conn, UUID viewer, List<PostCardDto> cards)
+            throws SQLException {
         Map<UUID, FriendStancesDto> byPost = forPosts(conn, viewer, cards.stream().map(PostCardDto::id).toList());
-        return byPost.isEmpty() ? cards : cards.stream().map(card -> card.withFriendStances(byPost.get(card.id()))).toList();
+        return byPost.isEmpty()
+            ? cards
+            : cards.stream().map(card -> card.withFriendStances(byPost.get(card.id()))).toList();
     }
 
-    private static FriendStancesDto.Group group(Map<String, List<FriendStancesDto.Friend>> byType, Map<String, Integer> totals, String type) {
+    private static FriendStancesDto.Group group(
+            Map<String, List<FriendStancesDto.Friend>> byType, Map<String, Integer> totals, String type) {
         List<FriendStancesDto.Friend> list = byType.get(type);
         return list == null ? null : new FriendStancesDto.Group(totals.get(type), list);
     }

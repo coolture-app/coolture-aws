@@ -40,8 +40,8 @@ public record EventLocationDto(
     }
 
     /**
-     * A frontend from before 2-letter codes sends `POL` until a deploy finishes, and so does a scraper snapshot saved
-     * before them. An unknown 3-letter code stays as it is, and validation rejects it.
+     * An old frontend sends `POL` while a deploy runs, and old scraper snapshots carry it for good. An unknown
+     * 3-letter code stays as it is, and validation rejects it.
      */
     private static String alpha2(String code) {
         if (code == null || code.isBlank()) return null;

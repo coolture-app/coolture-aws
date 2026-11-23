@@ -1,3 +1,4 @@
+import copy
 import html
 import json
 import logging
@@ -18,8 +19,7 @@ from images import Image
 log = logging.getLogger(__name__)
 
 SITE_URL = 'https://www.trojmiasto.pl'
-# One listing per day: the 30-day listing (dni,30dni.html) stops at page 19, 400 events, while the days held 534 on
-# 2026-11-22. A busy Saturday is about 100.
+# One listing per day: the site's 30-day listing is cut off part-way and loses events.
 DAY_LISTING_URL = SITE_URL + '/imprezy/dzien,{day}'
 LISTING_DAYS = 30
 LISTING_PAGE_PARAMETER = 'strona'
@@ -50,16 +50,17 @@ PHOTO_ID = re.compile(r'/(\d+)(?:__\w+)?\.\w+$')
 OTHER_CONTENT = ['events-list', 'event__item', 'articles', 'SpectacleItem']
 TRICITY = ('Gdańsk', 'Gdynia', 'Sopot')
 
-# Paragraphs and their lines, as a post shows them.
 PARAGRAPH_TAGS = 'p, div, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote'
 LINE_EDGES = {'br', 'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'blockquote'}
 HEADING_MAX = 60
 SENTENCE_ENDS = ('.', '!', '?', '…', ':', ';')
 LIST_ITEM = re.compile(r'^([•·*\-–—>]|\d)')
 CUT_LINK = '\x00'
-# A link's label, such as "KUP BILET" or "Posłuchaj UMI", means nothing without the link. Links holding a name or an address stay.
-LINK_LABEL = re.compile(r'^(kup|kupuj|posłuchaj|zobacz|obejrzyj|przeczytaj|zapisz|wypełnij|sprawdź|zarezerwuj|rezerwuj|kliknij)\b',
-                        re.IGNORECASE)
+# A link's label, such as "KUP BILET" or "Posłuchaj UMI", means nothing without the link. Links holding a name or an
+# address stay.
+LINK_LABEL = re.compile(
+    r'^(kup|kupuj|posłuchaj|zobacz|obejrzyj|przeczytaj|zapisz|wypełnij|sprawdź|zarezerwuj|rezerwuj|kliknij)\b',
+    re.IGNORECASE)
 REPEATED_FACT = re.compile(r'^(kiedy|gdzie|termin|miejsce|data|godzina)\s*:', re.IGNORECASE)
 FACT = re.compile(r'^[^\W\d][\w ]{1,24}:\s*\S')
 # The site's own markup, left in some texts, such as [lead].
@@ -281,7 +282,8 @@ def _paragraphs(text: str) -> list[list[str]]:
 
 
 def _without_repeated_facts(paragraphs: list[list[str]]) -> list[list[str]]:
-    # "Kiedy: …" and "Gdzie: …" at the start repeat the post's own start and address. "Bilety: …" and "Dla kogo: …" stay.
+    # "Kiedy: …" and "Gdzie: …" at the start repeat the post's own start and address. "Bilety: …" and "Dla kogo: …"
+    # stay.
     kept: list[list[str]] = []
     at_start = True
     for lines in paragraphs:
@@ -319,7 +321,8 @@ def _page_text(body) -> str:
 def _description(page: BeautifulSoup, block: dict) -> str:
     # The block's text stops at the first quotation mark, so it's longer only when the page has lost its text.
     body = page.select_one('.text-contents')
-    text = _page_text(body) if body else ''
+    # A copy, since _page_text cuts links out of the tree and _image_urls reads the same page after it.
+    text = _page_text(copy.copy(body)) if body else ''
     return max(text, clean_description(_text(block, 'description')), key=len)
 
 
@@ -375,10 +378,11 @@ def parse_event_page(page_html: str) -> EventPage | None:
 def _ends_at(end: datetime | None, start: datetime) -> datetime | None:
     if end is None:
         return None
-    end = end if end.tzinfo else end.replace(tzinfo=WARSAW)
+    # The page's offset is fixed (+01:00 all year), so its clock is read as Warsaw's, which has the day's real length.
+    end = end.replace(tzinfo=WARSAW)
     # A multi-day event gives only its last day, as midnight, so it runs until that day ends.
-    if end.timetz().replace(tzinfo=None) == time(0, 0):
-        end = end + timedelta(days=1) - timedelta(minutes=1)
+    if end.time() == time(0, 0):
+        end = end.replace(hour=23, minute=59)
     return end if end > start else None
 
 
@@ -391,10 +395,10 @@ def _written_end(text: str, start: datetime) -> datetime | None:
     year = int(match.group(3)) if match.group(3) else start.year
     try:
         end = datetime.combine(date(year, month, day), time(23, 59), tzinfo=WARSAW)
+        if end <= start and not match.group(3):
+            end = end.replace(year=year + 1)
     except ValueError:
         return None
-    if end <= start and not match.group(3):
-        end = end.replace(year=year + 1)
     return end if end > start else None
 
 
@@ -459,9 +463,8 @@ class Site:
         return response
 
     def listing_items(self) -> Iterator[ListingItem]:
-        """Each day's listing from today, each until a page adds nothing to that day, because the site repeats its last
-        page past the end. An event listed on several days comes once, with its first day, and a later day's page
-        holding only those still leads to its next page."""
+        """Each day's listing from today, page by page until a page adds nothing new to that day. An event listed on
+        several days comes once, with its first day."""
         yielded: set[str] = set()
         first = self._today()
         for offset in range(self._days):

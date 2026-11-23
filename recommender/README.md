@@ -18,15 +18,15 @@ All commands below run from the repository root.
 ## Embeddings
 
 ```
-post-write (create, or a change to title or description)
+post-write (create or edit)
    └─► PutObject s3://coolture-<env>-embedding-requests-<account>/posts/<postId>   (empty object)
           └─ S3 notification ─► SQS coolture-<env>-post-embedding ─► PostEmbeddingFunction ─► post_embeddings
                                    └─ after 3 failed receives ─► ...-post-embedding-dlq (14 days)
 ```
 
-- **Why S3 in the middle:** VPC Lambdas have no internet. Reaching SQS would need a paid interface endpoint (~$9 a month)
-  or NAT, while the S3 gateway endpoint and S3 → SQS notifications are free.
-- The queue, DLQ and requests bucket are in `aws/backend.yaml`, and the publisher is in `common`. `post-write` publishes
+- **Why S3 in the middle:** VPC Lambdas have no internet. Reaching SQS would need a paid interface endpoint or
+  NAT, while the S3 gateway endpoint and S3 → SQS notifications are free.
+- The queue, DLQ and requests bucket are in `aws/backend.yaml`, and `post-write` publishes
   after the database commit. A failed publish is only logged.
 - Notifications usually arrive within seconds, sometimes a minute or more. The worker reads the post from the database
   when it runs, so duplicated or late events still embed the latest text. Deleted posts and `s3:TestEvent` are skipped.
@@ -35,13 +35,13 @@ post-write (create, or a change to title or description)
   `embedding_text` or model changed, and every kind of event the same way (a kind's vector is the normalised mean of its
   `embedding_texts`, in `event_kind_embeddings`). `{"action":"derive-kinds"}` re-derives every post's kinds from the
   stored post vectors, so a changed kind text takes both.
-- `{"action":"embed-posts"}` embeds every post that isn't deleted and has no vector of the current model, newest first,
-  and derives its kinds. It stops in time to answer before the function's timeout, with
+- `{"action":"embed-posts"}` embeds every post that isn't deleted and has no vector of the current model or one older than its
+  last edit, newest first, and derives its kinds. It stops in time to answer before the function's timeout, with
   `{"posts": <embedded>, "left": <still without one>}`. `scripts/deploy.sh` sends `embed-interests`, `derive-kinds`
   and `embed-posts` after deploying this stack, and `embed-posts` again while posts are left.
 - **Kinds of event.** After storing a post's vector the worker writes its kinds to `rec_post_kinds`, best first: the
   closest kind, plus the second within a margin, with Dla dzieci kept or added only when close enough to the best other
-  kind (`post-embedding/src/kinds.py`; constants in `settings.py`). Until every kind has a vector, posts get none.
+  kind (`post-embedding/src/kinds.py`, with its constants). Until every kind has a vector, posts get none.
 - Building `PostEmbeddingFunction` needs Docker: it's a container image with CPU-only torch and the model baked in.
 
 **Locally** there are no S3 notifications or SQS triggers, and `post-write` skips the publish. `make seed` embeds
@@ -73,14 +73,14 @@ vector.
 3. Measure `AFFINITY_LOW` and `AFFINITY_HIGH` in `FeedConfig` again. They cover the cosines this model gives between
    the viewer's vector and posts once the average post and the average interest are taken out (`UserVector`), so they
    belong to the model. So does `NOT_FOR_ME_FROM`, the p95 cosine between two posts with the average post taken out,
-   and the kinds' margin and Dla dzieci's threshold in `post-embedding/src/settings.py`.
+   and the kinds' margin and Dla dzieci's threshold at the top of `post-embedding/src/kinds.py`.
 
 A new model name is what marks a vector as old. A new revision, or a change to how text is encoded, isn't visible that
 way: locally, clear `interest_embeddings` and `event_kind_embeddings` and run `make embed-interests`, then
 `make embed-posts ALL=1`. There's no equivalent on AWS yet.
 
-Locally: `make build-embeddings embed-interests embed-posts`. On AWS, `make deploy-embeddings` does both. When the
-deploy can't invoke the worker, it warns, and someone allowed to invoke it sends the actions by hand, `embed-posts`
+Locally: `make build-embeddings embed-interests embed-posts`. On AWS, `make deploy-embeddings` deploys the stack and sends
+the actions. When the deploy can't invoke the worker, it warns, and someone allowed to invoke it sends the actions by hand, `embed-posts`
 again while `left` is above 0 (replace `dev` for another environment):
 
 ```bash
@@ -92,19 +92,12 @@ done
 
 ## Interests and user vectors
 
-`GET /dicts/interests` returns the kinds of event (`event_kinds`, V13), then the interests from V9 (`interest_categories`
-group `interests`) that are offered. `GET` and `PUT /users/{userId}/interests` read and replace the caller's kinds and
-interests together: at least 1 kind, and interests that are offered. `/auth/me`'s `onboarded`
-says whether the user has a kind, and the frontend blocks the page with onboarding until they have one. V9's interests,
-their texts, groups and vectors stay as the survey's respondents picked them; kinds are never rows of `interests`.
+The interests and kinds a user picks are in [`users-api.yaml`](../aws/lambdas/user/contracts/users-api.yaml). Kinds of
+event are never rows of `interests`, and the interests stay as the survey's respondents picked them.
 
-The feed builds the viewer's vector on every page, in `post-read` (`FeedRepository.findVectorParts`, then `UserVector`):
-the posts they liked, are interested in or going to, up to the session's `asOf`, blended with their picks, each pick with
-a share of its category's average, and each picked kind's vector at the weight of a pick. Interests give way as the viewer engages more, down to a floor. The stances lose the
-average post and the interests the average interest before they're blended, and each post loses the average post before
-it's compared, so what every text shares doesn't decide the order (`UserVector` says why). Nothing is stored, so
-a reaction or a new pick counts from the next session, and every page of a session ranks with the same vector. The
-weights and the decay are in `FeedConfig`.
+The feed builds the viewer's vector on every page, in `post-read` (`FeedRepository.findVectorParts`, then `UserVector`,
+which says how and why). Nothing is stored, so a reaction or a new pick counts from the next session, and every page of a
+session ranks with the same vector. The weights and the decay are in `FeedConfig`.
 
 ## Personalised PageRank
 

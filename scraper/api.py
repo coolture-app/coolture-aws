@@ -27,7 +27,7 @@ UPLOAD_TRIES = 2
 RETRY_PAUSE_S = 5
 # PostLimits.MAX_PHOTOS: POST /posts refuses more.
 MAX_PHOTOS = 8
-# The local API names a new X-User-Id user after it. The API would turn a hyphen into this underscore.
+# Given in the form the API stores, which turns a hyphen into an underscore.
 LOCAL_USER_NAME = 'coolture_bot'
 # A 200 can still hold the wrong thing, such as CloudFront's HTML when the URL lacks /api. Not JSON is a ValueError too.
 WRONG_SHAPE = (KeyError, TypeError, AttributeError, ValueError)
@@ -118,7 +118,8 @@ class CooltureApi:
 
     def existing_event_urls(self) -> set[str]:
         listed = self._listed_urls(self._me())
-        # A database with none of our posts is a new one, for example after make reset-db, so the old list doesn't apply.
+        # A database with none of our posts is a new one, for example after make reset-db, so the old list doesn't
+        # apply.
         remembered = self._ledger.read() if listed else set()
         self._ledger.replace(listed | remembered)
         return listed | remembered
@@ -157,10 +158,11 @@ class CooltureApi:
             self._delete_media(media_ids)
             raise
         try:
-            response = self._session.post(f'{self._base_url}/posts', json={**post, 'mediaIds': media_ids} if media_ids else post,
-                                          timeout=TIMEOUT_S)
+            body = {**post, 'mediaIds': media_ids} if media_ids else post
+            response = self._session.post(f'{self._base_url}/posts', json=body, timeout=TIMEOUT_S)
         except requests.Timeout as error:
-            # The post may have been saved, like after a 5xx, and the next run's list settles it. Its images stay with it.
+            # The post may have been saved, like after a 5xx, and the next run's list settles it. Its images stay with
+            # it.
             return Outcome(f'timed out: {error}')
         time.sleep(WRITE_PAUSE_S)
         if 400 <= response.status_code < 500:

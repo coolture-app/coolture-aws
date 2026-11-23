@@ -32,35 +32,11 @@ public record PostFeedFilters(
     /** Only posts for children (PostKinds.KIDS), whatever their other kinds. */
     boolean kids,
     /**
-     * Whose stances participationTypes reads: the viewer when null. Someone else's only when they're the viewer's friend
-     * and share their stances, as on cards.
+     * Whose stances participationTypes reads: the viewer when null. Someone else's only when they're the viewer's
+     * friend and share their stances, as on cards.
      */
     UUID participantId
 ) {
-
-    public PostFeedFilters(
-        String q, UUID authorId, PostStatus status, Boolean followed, PostType type,
-        Instant from, Instant to, Double latitude, Double longitude, Double radiusKm,
-        List<String> participationTypes, String reactionType, String cursor, int limit, String sortBy, boolean includePast
-    ) {
-        this(q, authorId, status, followed, type, from, to, latitude, longitude, radiusKm,
-            participationTypes, reactionType, cursor, limit, sortBy, includePast, null, false, null);
-    }
-
-    public PostFeedFilters(
-        String q, UUID authorId, PostStatus status, Boolean followed, PostType type,
-        Instant from, Instant to, Double latitude, Double longitude, Double radiusKm,
-        List<String> participationTypes, String reactionType, String cursor, int limit, String sortBy
-    ) {
-        this(q, authorId, status, followed, type, from, to, latitude, longitude, radiusKm,
-            participationTypes, reactionType, cursor, limit, sortBy, false);
-    }
-
-    /** No filter at all, as the plain home feed. */
-    public static PostFeedFilters none() {
-        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, null, false, null, false, null);
-    }
 
     /** A chosen date is explicit, so it shows ended events too. */
     public boolean showsAllPastEvents() {

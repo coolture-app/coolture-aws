@@ -399,7 +399,7 @@ HTTP *
 status < 300
 
 # The start can't move to the past, but an edit may send an unchanged start back, as the edit form always does. (Once
-# an event has ended, Interesuje mnie and Biorę udział are refused too; PostWriteDbTest shows it, since a post can't be
+# an event has ended, Interesuje mnie and Biorę udział are refused too; the database tests cover it, since a post can't be
 # created in the past.)
 POST {{api}}/posts
 X-User-Id: {{anna}}
@@ -425,50 +425,3 @@ DELETE {{api}}/posts/{{dated}}
 X-User-Id: {{anna}}
 X-User-Name: anna_demo
 HTTP 204
-
-# Kinds of event. The embedding worker derives them after a post is saved (locally: make embed-posts), so these use
-# the seeded posts. A post matches any kind asked for; kids=true keeps only posts for children.
-GET {{api}}/posts?kinds=concerts&limit=1
-X-Anonymous: true
-HTTP 200
-[Captures]
-concert: jsonpath "$.items[0].id"
-
-GET {{api}}/posts/{{concert}}
-X-Anonymous: true
-HTTP 200
-[Asserts]
-jsonpath "$.kinds" contains "concerts"
-
-GET {{api}}/posts?kinds=no_such_kind
-X-Anonymous: true
-HTTP 200
-[Asserts]
-jsonpath "$.items" count == 0
-
-GET {{api}}/posts?kinds=Concerts
-X-Anonymous: true
-HTTP 400
-
-GET {{api}}/posts/map?leftUpper.latitude=55&leftUpper.longitude=18&rightBottom.latitude=54&rightBottom.longitude=19.2&kinds=concerts,stage&includePast=true
-X-Anonymous: true
-HTTP 200
-[Asserts]
-jsonpath "$" count > 0
-jsonpath "$[0].kind" exists
-
-# A filtered pin names the kind it was found by, even where that kind is the post's second: every pin says concerts.
-GET {{api}}/posts/map?leftUpper.latitude=55&leftUpper.longitude=18&rightBottom.latitude=54&rightBottom.longitude=19.2&kinds=concerts&includePast=true
-X-Anonymous: true
-HTTP 200
-[Captures]
-concert_pins: jsonpath "$" count
-[Asserts]
-jsonpath "$" count > 0
-jsonpath "$[0].kinds" contains "concerts"
-
-GET {{api}}/posts/map?leftUpper.latitude=55&leftUpper.longitude=18&rightBottom.latitude=54&rightBottom.longitude=19.2&kinds=concerts&includePast=true
-X-Anonymous: true
-HTTP 200
-[Asserts]
-jsonpath "$[?(@.kind == 'concerts')]" count == {{concert_pins}}

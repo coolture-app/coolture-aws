@@ -29,24 +29,20 @@ class FeedCursorTest {
     }
 
     @Test
-    void ranked_roundTrips() {
+    void ranked_roundTrips_withAndWithoutALocation() {
         FeedCursor cursor = FeedCursor.ranked(AS_OF, -8127361234L, 0.73419, ID, 54.35, 18.65);
 
         FeedCursor decoded = FeedCursor.decode(cursor.encode()).orElseThrow();
 
         assertEquals(cursor, decoded);
         assertTrue(decoded.ranked());
+
+        FeedCursor withoutLocation = FeedCursor.ranked(AS_OF, 1L, 0.5, ID, null, null);
+        assertEquals(withoutLocation, FeedCursor.decode(withoutLocation.encode()).orElseThrow());
     }
 
     @Test
-    void ranked_withoutLocation_roundTrips() {
-        FeedCursor cursor = FeedCursor.ranked(AS_OF, 1L, 0.5, ID, null, null);
-
-        assertEquals(cursor, FeedCursor.decode(cursor.encode()).orElseThrow());
-    }
-
-    @Test
-    void upcoming_roundTrips() {
+    void upcoming_roundTrips_withAndWithoutAnEnd() {
         Upcoming.Position at = new Upcoming.Position(AS_OF, Instant.parse("2026-11-05T19:00:00.654321Z"), ID,
             Instant.parse("2026-11-06T22:00:00Z"), UUID.randomUUID(), 7);
         FeedCursor cursor = FeedCursor.upcoming(at);
@@ -56,13 +52,9 @@ class FeedCursorTest {
         assertEquals(cursor, decoded);
         assertEquals(at, decoded.position());
         assertFalse(decoded.ranked());
-    }
 
-    @Test
-    void upcoming_keepsARunningPostWithNoEndDate_andAStreamThatGaveNothingYet() {
-        Upcoming.Position at = new Upcoming.Position(AS_OF, null, null, null, ID, 5);
-
-        assertEquals(at, FeedCursor.decode(FeedCursor.upcoming(at).encode()).orElseThrow().position());
+        Upcoming.Position bare = new Upcoming.Position(AS_OF, null, null, null, ID, 5);
+        assertEquals(bare, FeedCursor.decode(FeedCursor.upcoming(bare).encode()).orElseThrow().position());
     }
 
     @Test

@@ -1,11 +1,14 @@
 package com.coolture.common.pagination;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -39,19 +42,14 @@ class CursorCodecTest {
         assertTrue(CursorCodec.decode("   ").isEmpty());
     }
 
-    @Test
-    void decode_whenInvalidBase64_throws() {
-        assertThrows(IllegalArgumentException.class, () -> CursorCodec.decode("!not-valid-base64!"));
+    static Stream<String> unreadableCursors() {
+        return Stream.of("!not-valid-base64!", encoded("{not-json}"), encoded("null"));
     }
 
-    @Test
-    void decode_whenCorruptedJson_throws() {
-        assertThrows(IllegalArgumentException.class, () -> CursorCodec.decode(encoded("{not-json}")));
-    }
-
-    @Test
-    void decode_whenJsonIsNull_throws() {
-        assertThrows(IllegalArgumentException.class, () -> CursorCodec.decode(encoded("null")));
+    @ParameterizedTest
+    @MethodSource("unreadableCursors")
+    void decode_whenTheCursorIsNotAPayload_throws(String cursor) {
+        assertThrows(IllegalArgumentException.class, () -> CursorCodec.decode(cursor));
     }
 
     @Test

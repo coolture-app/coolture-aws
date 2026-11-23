@@ -14,6 +14,7 @@ Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + t
   FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack),
   SCRAPER_SCHEDULE=true|false and SCRAPER_END_DATE=2027-06-30T00:00:00Z (both keep their deployed values when unset),
   PPR_SCHEDULE=true|false (PageRank's schedule; keeps its deployed value when unset),
+  GEOCODER_IMAGE_ID=ami-... (the geocoder's AMI; keeps the running instance's when unset, and a new one replaces the instance),
   FEED_WEIGHTS=default|ppr=0|... (the feed's weights, FeedConfig; keeps its deployed value when unset)
 EOF
 }
@@ -78,6 +79,19 @@ cloudfront_prefix_list() {
         --query 'PrefixLists[0].PrefixListId' --output text
 }
 
+# The running instance's AMI, or the latest on the first deploy. GEOCODER_IMAGE_ID takes a newer one on purpose.
+geocoder_image() {
+    local instance
+    [[ -n "${GEOCODER_IMAGE_ID:-}" ]] && { echo "$GEOCODER_IMAGE_ID"; return 0; }
+    instance="$(stack_output "coolture-geocoder-$ENVIRONMENT" InstanceId 2> /dev/null | tr -d '\r')" || instance=""
+    if [[ -n "$instance" && "$instance" != None ]]; then
+        aws ec2 describe-instances --instance-ids "$instance" --query 'Reservations[0].Instances[0].ImageId' --output text | tr -d '\r'
+    else
+        aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 \
+            --query Parameter.Value --output text | tr -d '\r'
+    fi
+}
+
 geocoder_stack() {
     local name="coolture-geocoder-$ENVIRONMENT" origin
     [[ "${NO_GEOCODER:-}" == 1 ]] && return 0
@@ -117,7 +131,7 @@ overrides_for() {
             echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT PprScheduleEnabled=${enabled:-false}"
             ;;
         geocoder)
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK CloudFrontPrefixListId=$(cloudfront_prefix_list)"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK CloudFrontPrefixListId=$(cloudfront_prefix_list) ImageId=$(geocoder_image)"
             ;;
         scraper)
             local auth="coolture-auth-$ENVIRONMENT" enabled end_date
@@ -256,7 +270,7 @@ invoke_worker() {
 embed_posts() {
     local embedded left
     while :; do
-        invoke_worker embed-posts "posts without a vector of the current model are neutral in the feed and have no kinds"
+        invoke_worker embed-posts "posts without a current vector are neutral in the feed and have no kinds"
         embedded="$(sed -n 's/.*"posts": *\([0-9]*\).*/\1/p' <<< "$WORKER_REPLY")"
         left="$(sed -n 's/.*"left": *\([0-9]*\).*/\1/p' <<< "$WORKER_REPLY")"
         [[ "${left:-0}" -gt 0 ]] || return 0

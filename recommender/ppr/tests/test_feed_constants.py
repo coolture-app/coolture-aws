@@ -26,3 +26,16 @@ def test_runs_are_deleted_when_the_feed_stops_reading_them():
 
 def test_rows_are_written_only_above_what_the_feed_reads_for_none():
     assert ppr.NEUTRAL == float(java(r"double NEUTRAL = ([\d.]+);"))
+
+
+def test_model_name_is_the_same_everywhere():
+    # On a mismatch the feed finds no vectors of its model and ranks with affinity neutral for everyone.
+    recommender = Path(__file__).resolve().parents[2]
+    sources = {
+        "post-embedding/Dockerfile": r"^ARG EMBEDDING_MODEL=(\S+)",
+        "post-embedding/src/settings.py": r'^\s*embedding_model: str = "(.+)"',
+        "ppr/src/app.py": r'^EMBEDDING_MODEL = "(.+)"',
+    }
+    names = {path: re.search(rx, (recommender / path).read_text(encoding="utf-8"), re.M).group(1) for path, rx in sources.items()}
+    names["FeedConfig.java"] = java(r'EMBEDDING_MODEL = "(.+)";')
+    assert len(set(names.values())) == 1, names

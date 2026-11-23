@@ -61,15 +61,6 @@ class MediaServiceTest {
         verify(repository).markDeleted(eq(next), any());
     }
 
-    @Test
-    void deleteAbandoned_withNothingToDelete_touchesNoStorage() throws Exception {
-        when(repository.findAbandoned(any(), anyInt())).thenReturn(List.of());
-
-        assertEquals(0, service.deleteAbandoned(Instant.now()));
-
-        verifyNoInteractions(s3Storage);
-    }
-
     private static final UUID CALLER_ID = UUID.randomUUID();
     private static final UUID MEDIA_ID = UUID.randomUUID();
 

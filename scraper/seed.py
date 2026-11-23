@@ -24,6 +24,7 @@ import requests
 
 from api import TIMEOUT_S, ApiError, CooltureApi, Outcome
 from images import Image, solid_png
+from posts import iso
 from scrape import DEFAULT_API_URL, http_session, utc_now
 from snapshot import DEFAULT_DIR, Entry, is_complete, load_images, read, sample
 from trojmiasto import WARSAW
@@ -31,8 +32,8 @@ from trojmiasto import WARSAW
 log = logging.getLogger('seed')
 
 REPO_DIR = Path(__file__).resolve().parent.parent
-BOT_ID = '00000000-0000-0000-0000-00000000b07a'
-# A local write takes about 1.3 s. Four at a time took about 40% of the time of one at a time, and more gave nothing.
+BOT = 'coolture_bot'
+# Four at a time was fastest; more gave nothing.
 WORKERS = 4
 # Every category and day at a fraction of the whole snapshot's load time; `--size all` loads all of it.
 SEED_SIZE = 200
@@ -41,19 +42,17 @@ START_MARGIN = timedelta(hours=2)
 API_WAIT_S = 15 * 60
 API_POLL_S = 3
 
-# The demo users of db/local-dev-seed.sql.
-DEMO_USERS = {
-    '00000000-0000-0000-0000-000000000002': 'anna_demo',
-    '00000000-0000-0000-0000-000000000003': 'jan_demo',
-    '00000000-0000-0000-0000-000000000004': 'ola_demo',
-}
+# The bot and the demo users are made by db/local-dev-seed.sql, which holds their ids, so they're named here and their
+# ids are read from the database.
+DEMO_USERS = ('anna_demo', 'jan_demo', 'ola_demo')
+USER_IDS_SQL = "SELECT username || ',' || id FROM users WHERE username = ANY('{{{names}}}'::varchar[])"
 # Places in a user's ranking of posts by closeness to their interests. Reacted posts leave their feed, so the
 # closest few are left for it to show, and the likes come from just below them.
 LIKE_RANKS = (3, 6, 9, 12, 15)
 INTERESTED_RANKS = (4, 10)
 NOT_FOR_ME_FROM_THE_END = 2
 # The API stamps a reaction with the time it's made. The feed lets older stances fade, so the demo users get a past,
-# 2 to 6 weeks back, and what someone likes in the app leads their taste, as it would for a real user.
+# some weeks back, and what someone likes in the app leads their taste, as it would for a real user.
 HISTORY_DAYS = (14, 42)
 # The friends line's cases are props for cards, whoever the friends are, and every friend is a persona. Fresh, a case's
 # stances led its friends' own feeds; dated as far back as reactions go, they fade there like old reactions and still
@@ -79,19 +78,8 @@ DATED_SQL = """
 UPDATE post_{table}s SET created_at = now() - make_interval(days => {days})
 WHERE user_id = '{user_id}' AND post_id = '{post_id}';
 """
-# The demo users' friends in db/local-dev-seed.sql. Bartek doesn't share his stances and Iza isn't followed back.
-FRIENDS = {
-    'kasia_demo': '00000000-0000-0000-0000-000000000005',
-    'piotr_demo': '00000000-0000-0000-0000-000000000006',
-    'ewa_demo': '00000000-0000-0000-0000-000000000007',
-    'tomek_demo': '00000000-0000-0000-0000-000000000008',
-    'zofia_demo': '00000000-0000-0000-0000-000000000009',
-    'marek_demo': '00000000-0000-0000-0000-000000000010',
-    'magda_demo': '00000000-0000-0000-0000-000000000011',
-    'bartek_demo': '00000000-0000-0000-0000-000000000012',
-    'iza_demo': '00000000-0000-0000-0000-000000000013',
-}
 # One shape of a card's friends line per post: (what it shows, going, interested). A card names the newest two of each.
+# Every name is a friend in db/local-dev-seed.sql, which also holds who follows whom and who shares stances.
 FRIEND_CASES = (
     ('going 1', ('kasia_demo',), ()),
     ('interested 1', (), ('piotr_demo',)),
@@ -102,10 +90,11 @@ FRIEND_CASES = (
      ('kasia_demo', 'piotr_demo', 'ewa_demo', 'tomek_demo')),
     ('no line: a friend who keeps stances to himself, and a one-way follower', ('bartek_demo',), ('iza_demo',)),
 )
+FRIENDS = sorted({name for _, going, interested in FRIEND_CASES for name in (*going, *interested)})
 # Some faces are photos and some initials. Plain colours, so nobody's picture is needed.
 AVATARS = {'kasia_demo': (214, 96, 77), 'tomek_demo': (61, 120, 170), 'magda_demo': (88, 150, 92)}
 AVATAR_SIZES = (512, 128)
-# The soonest posts the Upcoming sort shows that nobody outside FRIENDS took a stance on, so a viewer's own stance, or
+# The soonest posts the Upcoming sort shows that nobody but these friends took a stance on, so a viewer's own stance, or
 # a stance of Anna or Jan, who are friends too, can't change a case.
 FRIEND_POSTS_SQL = """
 SELECT p.id
@@ -118,7 +107,8 @@ ORDER BY p.starts_at, p.id
 LIMIT {count}
 """
 FRIEND_STANCES_SQL = """
-SELECT pp.post_id || ',' || pp.user_id FROM post_participations pp WHERE pp.user_id = ANY('{{{friends}}}'::uuid[])
+SELECT pp.post_id || ',' || pp.user_id FROM post_participations pp JOIN posts p ON p.id = pp.post_id
+WHERE pp.user_id = ANY('{{{friends}}}'::uuid[]) AND p.deleted_at IS NULL
 """
 STANCES_SQL = """
 SELECT 'reaction,' || r.post_id FROM post_reactions r JOIN posts p ON p.id = r.post_id
@@ -129,7 +119,8 @@ WHERE r.user_id = '{user_id}' AND p.deleted_at IS NULL
 """
 # The API refuses a deleted post, and a deleted post has no counts left to keep.
 ON_DELETED_SQL = """
-DELETE FROM post_reactions WHERE user_id = '{user_id}' AND post_id IN (SELECT id FROM posts WHERE deleted_at IS NOT NULL);
+DELETE FROM post_reactions WHERE user_id = '{user_id}'
+  AND post_id IN (SELECT id FROM posts WHERE deleted_at IS NOT NULL);
 DELETE FROM post_participations WHERE user_id = '{user_id}'
   AND post_id IN (SELECT id FROM posts WHERE deleted_at IS NOT NULL);
 """
@@ -157,16 +148,26 @@ def shift_days(starts: list[datetime], now: datetime, margin: timedelta = START_
     return days
 
 
-def _parse(moment: str) -> datetime:
-    return datetime.fromisoformat(moment.replace('Z', '+00:00'))
-
-
-def _iso(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
-
-
 def shifted(post: dict, days: int) -> dict:
-    return {**post, **{key: _iso(moved(_parse(post[key]), days)) for key in ('startsAt', 'endsAt') if key in post}}
+    return {**post, **{key: iso(moved(datetime.fromisoformat(post[key]), days))
+                       for key in ('startsAt', 'endsAt') if key in post}}
+
+
+def psql(sql: str) -> list[str]:
+    command = ['docker', 'compose', 'exec', '-T', 'postgres',
+               'psql', '-U', 'coolture_admin', '-d', 'coolture', '-At', '-v', 'ON_ERROR_STOP=1', '-c', sql]
+    result = subprocess.run(command, cwd=REPO_DIR, capture_output=True, text=True, encoding='utf-8')
+    if result.returncode:
+        raise SeedError(f'Database query failed: {result.stderr.strip() or result.stdout.strip()}')
+    return result.stdout.split()
+
+
+def user_ids(query: Callable[[str], list[str]], usernames: list[str]) -> dict[str, str]:
+    found = dict(row.split(',') for row in query(USER_IDS_SQL.format(names=','.join(usernames))))
+    missing = [name for name in usernames if name not in found]
+    if missing:
+        raise SeedError(f"No account for {', '.join(missing)}. `make up` makes them from db/local-dev-seed.sql.")
+    return found
 
 
 def wait_for_api(base_url: str, timeout_s: float = API_WAIT_S, sleep: Callable[[float], None] = time.sleep,
@@ -184,26 +185,31 @@ def wait_for_api(base_url: str, timeout_s: float = API_WAIT_S, sleep: Callable[[
             raise SeedError(f'The API at {base_url} did not answer in {timeout_s / 60:.0f} minutes. '
                             'Is `make local` (or `make dev`) running?')
         if not told:
-            log.info('Waiting for the API at %s. Start it with `make local` or `make dev` in another terminal.', base_url)
+            log.info('Waiting for the API at %s. Start it with `make local` or `make dev` in another terminal.',
+                     base_url)
             told = True
         sleep(API_POLL_S)
 
 
 def seed_events(directory: Path, base_url: str, workers: int = WORKERS, clock: Callable[[], datetime] = utc_now,
-                api_factory: Callable[[], CooltureApi] | None = None, size: int | None = SEED_SIZE) -> Counter:
+                api_factory: Callable[[], CooltureApi] | None = None, size: int | None = SEED_SIZE,
+                query: Callable[[str], list[str]] = psql) -> Counter:
     """Loads `size` of the snapshot's events (snapshot.sample), or all of them when size is None."""
     snapshot = read(directory)
     if not snapshot:
         raise SeedError(f'No snapshot in {directory}. Make one with `make scrape-snapshot`.')
     if not is_complete(directory):
         log.warning('The snapshot in %s is unfinished; run `make scrape-snapshot` to complete it.', directory)
-    new_api = api_factory or (lambda: CooltureApi(http_session(), http_session(), base_url, user_id=BOT_ID))
+    if api_factory is None:
+        bot_id = user_ids(query, [BOT])[BOT]
+        api_factory = lambda: CooltureApi(http_session(), http_session(), base_url, user_id=bot_id)
+    new_api = api_factory
 
     entries = snapshot if size is None else sample(snapshot, size)
     existing = new_api().existing_event_urls()
     todo = [entry for entry in entries if entry.post['eventUrl'] not in existing]
     # From the whole snapshot, so every size moves the dates alike and a later, bigger load fits the first.
-    days = shift_days([_parse(entry.post['startsAt']) for entry in snapshot], clock())
+    days = shift_days([datetime.fromisoformat(entry.post['startsAt']) for entry in snapshot], clock())
     log.info('Snapshot: %d events, %d already loaded, %d to load, dates moved %d days forward',
              len(entries), len(entries) - len(todo), len(todo), days)
 
@@ -227,15 +233,6 @@ def seed_events(directory: Path, base_url: str, workers: int = WORKERS, clock: C
     return stats
 
 
-def psql(sql: str) -> list[str]:
-    command = ['docker', 'compose', 'exec', '-T', 'postgres',
-               'psql', '-U', 'coolture_admin', '-d', 'coolture', '-At', '-v', 'ON_ERROR_STOP=1', '-c', sql]
-    result = subprocess.run(command, cwd=REPO_DIR, capture_output=True, text=True, encoding='utf-8')
-    if result.returncode:
-        raise SeedError(f'Database query failed: {result.stderr.strip() or result.stdout.strip()}')
-    return result.stdout.split()
-
-
 def picks(ranking: list[str]) -> list[tuple[str, str, str]]:
     """(post id, path, type) for each reaction of one user, from posts ranked closest to their interests first."""
     chosen = [(ranking[rank], 'reaction', 'LIKE') for rank in LIKE_RANKS if rank < len(ranking)]
@@ -251,14 +248,27 @@ def history(count: int) -> list[int]:
     return [first + round((last - first) * i / max(count - 1, 1)) for i in range(count)]
 
 
+def _sent(response: requests.Response, request: str, username: str) -> requests.Response:
+    if not response.ok:
+        raise SeedError(f'{request} as {username} returned {response.status_code}: {response.text[:300]}')
+    return response
+
+
+def _as_user(session_factory: Callable[[], requests.Session], user_id: str, username: str) -> requests.Session:
+    session = session_factory()
+    session.headers.update({'X-User-Id': user_id, 'X-User-Name': username})
+    return session
+
+
 def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
                    session_factory: Callable[[], requests.Session] = http_session, reset: bool = False) -> Counter:
     """With reset, first takes back every reaction and stance of the demo users, so their picks lead again after they
     change, at the cost of what was done as them in the app."""
     stats: Counter = Counter()
-    for user_id, username in DEMO_USERS.items():
-        session = session_factory()
-        session.headers.update({'X-User-Id': user_id, 'X-User-Name': username})
+    ids = user_ids(query, [BOT, *DEMO_USERS])
+    for username in DEMO_USERS:
+        user_id = ids[username]
+        session = _as_user(session_factory, user_id, username)
         if reset:
             for row in query(STANCES_SQL.format(user_id=user_id)):
                 path, post_id = row.split(',')
@@ -270,16 +280,14 @@ def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
             # Their reactions were seeded before, or made in the app, so they're left as they are.
             stats['users_skipped'] += 1
             continue
-        ranking = query(RANKING_SQL.format(user_id=user_id, bot_id=BOT_ID))
+        ranking = query(RANKING_SQL.format(user_id=user_id, bot_id=ids[BOT]))
         if not ranking:
             raise SeedError(f'No ranked posts for {username}. Load events and embed them first: '
                             '`make seed-events embed-interests embed-posts`.')
         chosen = picks(ranking)
         for post_id, path, kind in chosen:
-            response = session.put(f'{base_url}/posts/{post_id}/{path}', json={'type': kind}, timeout=TIMEOUT_S)
-            if not response.ok:
-                raise SeedError(f'PUT /posts/{post_id}/{path} as {username} returned {response.status_code}: '
-                                f'{response.text[:300]}')
+            _sent(session.put(f'{base_url}/posts/{post_id}/{path}', json={'type': kind}, timeout=TIMEOUT_S),
+                  f'PUT /posts/{post_id}/{path}', username)
             stats[kind.lower()] += 1
         query(''.join(DATED_SQL.format(table=path, days=days, user_id=user_id, post_id=post_id)
                       for (post_id, path, _), days in zip(chosen, history(len(chosen)))))
@@ -296,10 +304,6 @@ def friend_stances(post_ids: list[str]) -> list[tuple[str, str, str]]:
             for name in names]
 
 
-def _sent(response: requests.Response, request: str, username: str) -> requests.Response:
-    if not response.ok:
-        raise SeedError(f'{request} as {username} returned {response.status_code}: {response.text[:300]}')
-    return response
 
 
 def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
@@ -307,8 +311,9 @@ def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
                  api_factory: Callable[[str], CooltureApi] | None = None) -> Counter:
     """Gives the friends their stances on the soonest posts, a case of the friends line per post, and takes back any
     other stance of theirs, so a later run puts each case back as it was."""
-    friends = ','.join(FRIENDS.values())
-    post_ids = query(FRIEND_POSTS_SQL.format(bot_id=BOT_ID, friends=friends, count=len(FRIEND_CASES)))
+    ids = user_ids(query, [BOT, *FRIENDS])
+    friends = ','.join(ids[name] for name in FRIENDS)
+    post_ids = query(FRIEND_POSTS_SQL.format(bot_id=ids[BOT], friends=friends, count=len(FRIEND_CASES)))
     if len(post_ids) < len(FRIEND_CASES):
         raise SeedError(f'Only {len(post_ids)} upcoming posts without stances. Load events first: `make seed-events`.')
     planned = friend_stances(post_ids)
@@ -317,13 +322,12 @@ def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
 
     def session(username: str) -> requests.Session:
         if username not in sessions:
-            sessions[username] = session_factory()
-            sessions[username].headers.update({'X-User-Id': FRIENDS[username], 'X-User-Name': username})
+            sessions[username] = _as_user(session_factory, ids[username], username)
         return sessions[username]
 
     stats: Counter = Counter()
-    keep = {(post_id, FRIENDS[name]) for post_id, name, _ in planned}
-    names = {user_id: name for name, user_id in FRIENDS.items()}
+    keep = {(post_id, ids[name]) for post_id, name, _ in planned}
+    names = {ids[name]: name for name in FRIENDS}
     for row in query(FRIEND_STANCES_SQL.format(friends=friends)):
         post_id, user_id = row.split(',')
         if (post_id, user_id) not in keep:
@@ -334,17 +338,18 @@ def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
         _sent(session(name).put(f'{base_url}/posts/{post_id}/participation', json={'type': kind}, timeout=TIMEOUT_S),
               f'PUT /posts/{post_id}/participation', name)
         stats[kind.lower()] += 1
-    query(''.join(DATED_SQL.format(table='participation', days=FRIEND_DAYS, user_id=FRIENDS[name], post_id=post_id)
+    query(''.join(DATED_SQL.format(table='participation', days=FRIEND_DAYS, user_id=ids[name], post_id=post_id)
                   for post_id, name, _ in planned))
 
     new_api = api_factory or (lambda user_id: CooltureApi(http_session(), http_session(), base_url, user_id=user_id))
     for name, colour in AVATARS.items():
-        profile = _sent(session(name).get(f'{base_url}/users/{FRIENDS[name]}', timeout=TIMEOUT_S),
-                        f'GET /users/{FRIENDS[name]}', name).json()
+        profile = _sent(session(name).get(f'{base_url}/users/{ids[name]}', timeout=TIMEOUT_S),
+                        f'GET /users/{ids[name]}', name).json()
         if profile.get('avatar'):
             continue
-        full, thumbnail = (Image.read(solid_png(size, colour), 'image/png', f'{name}-{size}.png') for size in AVATAR_SIZES)
-        new_api(FRIENDS[name]).set_profile_image(FRIENDS[name], full, thumbnail)
+        full, thumbnail = (Image.read(solid_png(size, colour), 'image/png', f'{name}-{size}.png')
+                           for size in AVATAR_SIZES)
+        new_api(ids[name]).set_profile_image(ids[name], full, thumbnail)
         stats['photos'] += 1
 
     for post_id, (shows, _, _) in zip(post_ids, FRIEND_CASES):
@@ -377,8 +382,10 @@ def main() -> int:
         wait_for_api(base_url)
         if args.step == 'events':
             stats = seed_events(args.snapshot, base_url, args.workers, size=args.size)
+        elif args.step == 'reactions':
+            stats = seed_reactions(base_url, reset=args.reset)
         else:
-            stats = seed_reactions(base_url, reset=args.reset) if args.step == 'reactions' else seed_friends(base_url)
+            stats = seed_friends(base_url)
     except (SeedError, ApiError) as error:
         log.error('%s', error)
         return 1

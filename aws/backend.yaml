@@ -406,7 +406,7 @@ Resources:
         SetHome: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/home', Method: PUT}}
         ClearHome: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/home', Method: DELETE}}
         GetMe: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /auth/me, Method: GET}}
-        GetInterestCatalog: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/interests, Method: GET}}
+        GetInterestCatalog: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/interests, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetUserInterests: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/interests', Method: GET}}
         ReplaceUserInterests: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/interests', Method: PUT}}
         GetFollowers: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/followers', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
@@ -602,9 +602,6 @@ Outputs:
     Value: !Ref DbConnectPolicy
     Export:
       Name: !Sub '${AWS::StackName}-DbConnectPolicyArn'
-  DbSecretArn:
-    Condition: IsAWS
-    Value: !Ref DbSecret
   LambdaSecurityGroupId:
     Condition: IsAWS
     Value: !Ref LambdaSecurityGroup

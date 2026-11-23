@@ -8,11 +8,12 @@ public enum PostSort {
     RECENT("(p.created_at, p.id) < (?::timestamptz, ?::uuid)", "p.created_at DESC, p.id DESC"),
     /**
      * Popularity's own count (PostSql.ENGAGEMENT). The cursor holds just the last id, and that post's count is taken
-     * again here, deleted or not, so the comparison is exact. If its count moved since, the next page repeats or skips a
-     * few posts, as the feed accepts.
+     * again here, deleted or not, so the comparison is exact. If its count moved since, the next page repeats or skips
+     * a few posts, as the feed accepts.
      */
     POPULAR(
-        "(" + PostSql.ENGAGEMENT + ", p.id) < ((SELECT " + PostSql.ENGAGEMENT + " FROM posts p WHERE p.id = ?::uuid), ?::uuid)",
+        "(" + PostSql.ENGAGEMENT + ", p.id) < ((SELECT " + PostSql.ENGAGEMENT
+            + " FROM posts p WHERE p.id = ?::uuid), ?::uuid)",
         PostSql.ENGAGEMENT + " DESC, p.id DESC"),
     /** Two streams merged in Java (Upcoming), so no single keyset or order. */
     UPCOMING(null, null),
@@ -68,17 +69,14 @@ public enum PostSort {
         return orderSql;
     }
 
-    /** Whether the order needs the request's position. */
     public boolean needsPosition() {
         return this == NEAREST;
     }
 
-    /** Whether the order shows only ended events. */
     public boolean endedOnly() {
         return this == PAST;
     }
 
-    /** Whether the order needs the viewer's participation filter, as it orders by that stance. */
     public boolean needsStances() {
         return this == STANCE_NEWEST;
     }

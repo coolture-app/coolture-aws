@@ -31,8 +31,12 @@ public class SecurityContext {
         if (devFallbackOverride != null) {
             return devFallbackOverride;
         }
-        String env = System.getenv("ENVIRONMENT");
-        return env == null || env.isBlank() || "local".equalsIgnoreCase(env);
+        return isLocal(System.getenv("ENVIRONMENT"));
+    }
+
+    /** Only the local stack, whose template sets ENVIRONMENT=local, trusts headers. A missing value is not local. */
+    static boolean isLocal(String environment) {
+        return "local".equalsIgnoreCase(environment);
     }
 
     public static UUID getUserId(APIGatewayV2HTTPEvent event) {
@@ -110,7 +114,8 @@ public class SecurityContext {
         if (isDevFallbackEnabled()) {
             Map<String, String> headers = event.getHeaders();
             String userId = getHeaderCaseInsensitive(headers, "x-user-id");
-            if ("true".equalsIgnoreCase(getHeaderCaseInsensitive(headers, "x-anonymous")) || "anonymous".equalsIgnoreCase(userId)) {
+            if ("true".equalsIgnoreCase(getHeaderCaseInsensitive(headers, "x-anonymous"))
+                || "anonymous".equalsIgnoreCase(userId)) {
                 return Optional.empty();
             }
             Optional<String> fromHeader = Optional.ofNullable(devHeaderFor(claimName))

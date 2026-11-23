@@ -6,7 +6,6 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.atlassian.oai.validator.OpenApiInteractionValidator;
 import com.atlassian.oai.validator.model.Request;
-import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import com.coolture.common.dto.EventLocationDto;
@@ -14,7 +13,9 @@ import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostLinkDto;
+import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.UserSummaryDto;
@@ -24,6 +25,7 @@ import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.response.ApiResponse;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.feed.FeedMode;
@@ -54,6 +56,8 @@ class ContractTest {
 
     private static final OpenApiInteractionValidator VALIDATOR = OpenApiInteractionValidator
         .createForSpecificationUrl(Path.of("contracts", "feed-api.yaml").toUri().toString())
+        // Merges PostDetail's allOf, so PostCard's additionalProperties: false allows media and kinds.
+        .withResolveCombinators(true)
         .build();
 
     private final PostReadService posts = mock(PostReadService.class);
@@ -115,7 +119,7 @@ class ContractTest {
 
     @Test
     void feed_firstPageWithMore_matches() throws Exception {
-        when(feed.getFeed(any(), any(), anyInt(), any(), any(), any()))
+        when(feed.getFeed(any(), any()))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(minimalCard(), fullCard()), new PaginationMeta(2, true, "abc")));
 
         assertMatches(responseReport("/feed", ApiGatewayEvents.get("/feed", Map.of("limit", "2", "latitude", "54.35", "longitude", "18.65"))));
@@ -123,7 +127,7 @@ class ContractTest {
 
     @Test
     void feed_laterPageInUpcomingMode_matches() throws Exception {
-        when(feed.getFeed(any(), any(), anyInt(), any(), any(), any()))
+        when(feed.getFeed(any(), any()))
             .thenReturn(new FeedPage(FeedMode.UPCOMING, List.of(), new PaginationMeta(20, false, null)));
 
         assertMatches(responseReport("/feed", ApiGatewayEvents.get("/feed", Map.of("cursor", "abc"))));
@@ -131,7 +135,7 @@ class ContractTest {
 
     @Test
     void posts_firstPageWithMore_matches() throws Exception {
-        when(posts.getFeed(any(), any(), any(), anyInt()))
+        when(posts.getFeed(any(), any()))
             .thenReturn(new CursorPage<>(List.of(minimalCard(), fullCard()), new PaginationMeta(2, true, "abc")));
 
         assertMatches(responseReport("/posts", ApiGatewayEvents.get("/posts", Map.of("limit", "2"))));
@@ -139,7 +143,7 @@ class ContractTest {
 
     @Test
     void posts_lastPageWithCursor_matches() throws Exception {
-        when(posts.getFeed(any(), any(), any(), anyInt()))
+        when(posts.getFeed(any(), any()))
             .thenReturn(new CursorPage<>(List.of(minimalCard()), new PaginationMeta(20, false, null)));
 
         assertMatches(responseReport("/posts", ApiGatewayEvents.get("/posts", Map.of("cursor", "abc", "sortBy", "POPULAR"))));
@@ -176,6 +180,34 @@ class ContractTest {
     }
 
     @Test
+    void postDetail_matches() throws Exception {
+        UUID postId = UUID.randomUUID();
+        String path = "/posts/" + postId;
+        PostCardDto card = fullCard();
+        PostDetailDto minimal = detail(minimalCard(), List.of(), null);
+        when(posts.getById(any(), any()))
+            .thenReturn(detail(card, List.of(new PostMediaDto(card.coverMedia(), 0)), List.of("concert")))
+            .thenReturn(minimal)
+            .thenThrow(new IllegalArgumentException("Post not found: " + postId));
+
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(path, null, Map.of("id", postId.toString()));
+
+        assertMatches(responseReport(path, event));
+        assertMatches(responseReport(path, event));
+        assertEquals(404, handler.handleRequest(event, context).getStatusCode());
+        String body = ApiResponse.ok(minimal).getBody();
+        assertTrue(bodyReport(path, "{\"surprise\":1," + body.substring(1)).hasErrors());
+    }
+
+    private static PostDetailDto detail(PostCardDto card, List<PostMediaDto> media, List<String> kinds) {
+        return new PostDetailDto(card.id(), card.author(), card.location(), card.title(), card.description(),
+            card.eventUrl(), card.links(), card.startsAt(), card.endsAt(), card.openEnded(), card.positiveReactionCount(),
+            card.participantCount(), card.interestedCount(), card.goingCount(), card.commentsCount(), card.type(),
+            card.status(), kinds, card.createdAt(), card.lastModifiedAt(), card.deletedAt(), card.coverMedia(), media,
+            card.myReaction(), card.myParticipation(), card.friendStances());
+    }
+
+    @Test
     void errorResponse_matches() {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("limit", "abc"));
 
@@ -183,36 +215,8 @@ class ContractTest {
         assertMatches(responseReport("/posts", event));
     }
 
-    @Test
-    void theRequestsTheContractDescribes_areAccepted() {
-        assertFalse(VALIDATOR.validateRequest(SimpleRequest.Builder.get("/feed")
-            .withQueryParam("limit", "20").withQueryParam("latitude", "54.35").withQueryParam("longitude", "18.65")
-            .build()).hasErrors());
-        assertFalse(VALIDATOR.validateRequest(SimpleRequest.Builder.get("/posts")
-            .withQueryParam("sortBy", "UPCOMING").withQueryParam("includePast", "true")
-            .build()).hasErrors());
-        assertTrue(VALIDATOR.validateRequest(SimpleRequest.Builder.get("/posts")
-            .withQueryParam("sortBy", "RECOMMENDED")
-            .build()).hasErrors());
-    }
-
     private static ValidationReport bodyReport(String path, String body) {
         return VALIDATOR.validateResponse(path, Request.Method.GET,
             SimpleResponse.Builder.ok().withContentType("application/json").withBody(body).build());
-    }
-
-    @Test
-    void anUndocumentedField_failsTheCheck() {
-        String extraOnPage = "{\"mode\":\"RANKED\",\"items\":[],\"page\":{\"limit\":20,\"hasMore\":false},\"extra\":1}";
-        String extraInPageInfo = "{\"items\":[],\"page\":{\"limit\":20,\"hasMore\":false,\"total\":3}}";
-
-        assertTrue(bodyReport("/feed", extraOnPage).hasErrors());
-        assertTrue(bodyReport("/posts", extraInPageInfo).hasErrors());
-    }
-
-    @Test
-    void aMissingModeOrUnknownMode_failsTheCheck() {
-        assertTrue(bodyReport("/feed", "{\"items\":[],\"page\":{\"limit\":20,\"hasMore\":false}}").hasErrors());
-        assertTrue(bodyReport("/feed", "{\"mode\":\"X\",\"items\":[],\"page\":{\"limit\":20,\"hasMore\":false}}").hasErrors());
     }
 }

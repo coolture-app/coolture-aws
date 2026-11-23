@@ -1,7 +1,7 @@
 """A saved set of scraped events and their photos, so a local stack gets realistic data without scraping the site again.
 
-`scrape.py --snapshot` writes it and `seed.py` loads it. It lives in a gitignored folder, because scraped text and photos
-stay out of the public repository.
+`scrape.py --snapshot` writes it and `seed.py` loads it. It lives in a gitignored folder, because scraped text and
+photos stay out of the public repository.
 """
 import hashlib
 import json
@@ -9,7 +9,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import TypeVar
 from itertools import islice, zip_longest
 from pathlib import Path, PurePosixPath
@@ -19,7 +19,6 @@ from images import Image
 from trojmiasto import WARSAW
 
 DEFAULT_DIR = Path(__file__).parent / 'snapshot'
-DEFAULT_SIZE = 120
 POSTS_FILE = 'posts.jsonl'
 IMAGES_DIR = 'images'
 # Written last, so an interrupted scrape isn't taken for a finished one.
@@ -66,7 +65,7 @@ def allocate(supply: dict[str, int], total: int, power: float = ALLOCATION_POWER
 
 
 def spread_over_dates(items: Iterable[T], day_of: Callable[[T], date | None] = lambda item: item.start_date) -> list[T]:
-    """Orders items so that any first few cover as many days as they can: each day's first event, then each day's second."""
+    """Orders items so that any first few cover as many days as they can: each day's first, then each day's second."""
     by_day: dict[date, list[T]] = defaultdict(list)
     for item in items:
         by_day[day_of(item) or date.max].append(item)
@@ -76,7 +75,6 @@ def spread_over_dates(items: Iterable[T], day_of: Callable[[T], date | None] = l
 
 @dataclass(frozen=True)
 class Entry:
-    scraped_at: datetime
     post: dict
     images: tuple[dict, ...]
     # The site's label, such as "wystawy, spotkania": evaluation data, never sent to the app.
@@ -91,16 +89,13 @@ def read(directory: Path) -> list[Entry]:
     for line in posts.read_text(encoding='utf-8').splitlines():
         if line.strip():
             saved = json.loads(line)
-            # Snapshots saved before the app dropped tags keep the category as the post's tags.
-            category = saved.get('category') or ', '.join(saved['post'].get('tags', [])) or None
-            entries.append(Entry(datetime.fromisoformat(saved['scrapedAt']), saved['post'], tuple(saved['images']),
-                                 category))
+            entries.append(Entry(saved['post'], tuple(saved['images']), saved.get('category')))
     return entries
 
 
 def sample(entries: list[Entry], size: int) -> list[Entry]:
-    """`size` entries chosen as a snapshot is: each category a share by allocate, each spread over the days. The same
-    snapshot and size give the same entries, in the snapshot's order."""
+    """`size` entries: each category a share by allocate, each spread over the days. The same snapshot and size give
+    the same entries, in the snapshot's order."""
     groups: dict[str, list[Entry]] = defaultdict(list)
     for entry in entries:
         groups[top_category(entry.category)].append(entry)
@@ -111,7 +106,7 @@ def sample(entries: list[Entry], size: int) -> list[Entry]:
 
 
 def _local_day(entry: Entry) -> date:
-    return datetime.fromisoformat(entry.post['startsAt'].replace('Z', '+00:00')).astimezone(WARSAW).date()
+    return datetime.fromisoformat(entry.post['startsAt']).astimezone(WARSAW).date()
 
 
 def is_complete(directory: Path) -> bool:
@@ -131,9 +126,8 @@ def _suffix(image: Image) -> str:
 class Snapshot:
     """Takes the place of the API while scraping, and saves each post with its photos instead of sending it."""
 
-    def __init__(self, directory: Path, clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> None:
+    def __init__(self, directory: Path) -> None:
         self.directory = directory
-        self._clock = clock
         (directory / IMAGES_DIR).mkdir(parents=True, exist_ok=True)
         # A run that adds to a snapshot leaves it unfinished until it ends.
         (directory / COMPLETE_FILE).unlink(missing_ok=True)
@@ -150,8 +144,7 @@ class Snapshot:
             (self.directory / IMAGES_DIR / name).write_bytes(image.content)
             saved.append({'file': name, 'fileName': image.file_name, 'mimeType': image.mime_type,
                           'width': image.width, 'height': image.height})
-        line = json.dumps({'scrapedAt': self._clock().isoformat(), 'post': post, 'images': saved, 'category': category},
-                          ensure_ascii=False)
+        line = json.dumps({'post': post, 'images': saved, 'category': category}, ensure_ascii=False)
         # The line comes after its photos, so every line in the file has all of them.
         with (self.directory / POSTS_FILE).open('a', encoding='utf-8', newline='\n') as posts:
             posts.write(line + '\n')

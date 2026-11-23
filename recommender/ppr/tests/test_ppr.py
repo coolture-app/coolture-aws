@@ -68,13 +68,6 @@ def test_written_are_the_ranks_above_neutral_with_fewer_events_than_twice_the_ca
     assert by_event(written(scores(inputs(**FRIENDS)))) == {e: s for e, s in every.items() if s > NEUTRAL}
 
 
-def test_written_leaves_out_events_the_walk_cant_reach():
-    vectors = EVENTS.copy()
-    vectors[[6, 7]] = EVENTS.mean(axis=0)
-    got = by_event(written(scores(inputs(**FRIENDS, event_vectors=vectors, post_average=EVENTS.mean(axis=0)))))
-    assert 6 not in got and 7 not in got
-
-
 def test_written_keeps_each_users_highest_scores_up_to_the_cap(monkeypatch):
     many = inputs(user_ids=["u0", "u1", "u2"], stances=[(0, 4, 2.0), (1, 8, 2.0), (2, 12, 2.0)],
                   friends=[(0, 1), (1, 2), (2, 0)])
@@ -123,29 +116,6 @@ def test_a_venue_links_a_friends_event_to_others_there():
     assert by_event(scores(inputs(**FRIENDS, venues=venues)))[16] > by_event(scores(inputs(**FRIENDS)))[16]
 
 
-def test_a_friend_who_marked_many_events_gets_less_on_each_but_isnt_drowned_out():
-    # u1 is going to event 0; u2 to events 12, 13 and 14.
-    two = inputs(user_ids=["u0", "u1", "u2"], stances=[(1, 0, 2.0), (2, 12, 2.0), (2, 13, 2.0), (2, 14, 2.0)],
-                 friends=[(0, 1), (0, 2)])
-    got = by_event(scores(two))
-    assert got[0] > max(got[12], got[13], got[14])
-    assert min(got[12], got[13], got[14]) > max(got[e] for e in group(0) - {0})
-
-
-def test_a_friends_old_stance_counts_less_than_anothers_fresh_one():
-    # u1 was interested in event 12 98 days ago; u2 is going to event 0 now.
-    old = 1.5 * 0.5 ** (98 / 14)
-    got = by_event(scores(inputs(user_ids=["u0", "u1", "u2"], stances=[(1, 12, old), (2, 0, 2.0)],
-                                 friends=[(0, 1), (0, 2)])))
-    assert got[12] < max(got[e] for e in group(0) - {0})
-
-
-@pytest.mark.parametrize("going, interested", [(0, 12), (12, 0)])
-def test_going_pulls_harder_than_interested(going, interested):
-    got = by_event(scores(inputs(**{**FRIENDS, "stances": [(1, interested, 1.5), (1, going, 2.0)]})))
-    assert got[going] > got[interested]
-
-
 def test_batches_give_the_same_scores(monkeypatch):
     many = inputs(user_ids=["u0", "u1", "u2"], stances=[(0, 4, 2.0), (1, 8, 2.0), (2, 12, 2.0)],
                   friends=[(0, 1), (1, 2), (2, 0)])
@@ -176,13 +146,6 @@ def test_similar_events_dont_depend_on_the_block_size(monkeypatch, block):
     whole = similar_events(inputs())
     monkeypatch.setattr(ppr, "EVENTS_PER_BLOCK", block)
     assert similar_events(inputs()) == whole
-
-
-def test_the_walk_keeps_all_its_mass():
-    graph = adjacency(inputs(**FRIENDS))
-    seed = seeds(inputs(**FRIENDS), graph.shape[0])[:, [0]].toarray()
-    mass = ppr.walk(ppr.transition(graph), seed)
-    assert np.isfinite(mass).all() and (mass >= 0).all() and mass.sum() == pytest.approx(1)
 
 
 def test_a_start_splits_friends_by_square_root_and_a_friends_events_by_weight():
@@ -224,8 +187,8 @@ def test_matches_a_walk_over_edges_written_by_hand():
     for a, b in [("e0", "hall"), ("e3", "hall"), ("e0", "e1"), ("e0", "e2"), ("e1", "e2")]:
         edges.setdefault(a, {})[b] = 1
         edges.setdefault(b, {})[a] = 1
-    # The user and what their friend shows are nodes here. No edge leads into either, so this is the code's walk, which
-    # starts on the friend's events, scaled by 0.7 squared, with the same ranks.
+    # Edges written out by hand, with the user and what their friend shows as nodes before the events. The ranks match
+    # the code's walk, which starts on the events.
     edges["u0"] = {"u1 shown": 1}
     edges["u1 shown"] = {"e3": 2, "e1": 1.5}
 

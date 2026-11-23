@@ -31,5 +31,9 @@ def test_should_keep_dla_dzieci_only_when_close_enough_to_the_best_other_kind(sc
     assert kinds.derive(scores) == expected
 
 
-def test_should_take_the_dot_product_as_the_cosine():
-    assert kinds.cosines([0.6, 0.8], {"concerts": [1.0, 0.0], "stage": [0.0, 1.0]}) == {"concerts": 0.6, "stage": 0.8}
+@pytest.mark.parametrize("scores, expected", [
+    ({"concerts": 0.800, "kids": 0.795, "stage": 0.794}, ["concerts", "stage"]),
+    ({"concerts": 0.800, "kids": 0.802, "stage": 0.794}, ["kids", "concerts", "stage"]),
+], ids=["kids too far below, so it takes no slot", "kids kept, so it takes no slot"])
+def test_should_not_let_dla_dzieci_take_the_second_slot_from_a_format_within_the_margin(scores, expected):
+    assert kinds.derive(scores) == expected

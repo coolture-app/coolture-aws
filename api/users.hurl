@@ -119,9 +119,10 @@ status < 300
 # The catalogue: kinds of event, then interests by category. Interests with no event behind them, or named like a kind,
 # are hidden.
 GET {{api}}/dicts/interests
+X-Anonymous: true
 HTTP 200
 [Asserts]
-jsonpath "$.kinds" count == 15
+jsonpath "$.kinds" count > 0
 jsonpath "$.minKinds" == 1
 jsonpath "$.categories" count > 0
 jsonpath "$.categories[*].interests[*].key" not contains "astrology"

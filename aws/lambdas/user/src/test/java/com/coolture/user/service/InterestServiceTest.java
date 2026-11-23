@@ -8,11 +8,14 @@ import com.coolture.user.repository.InterestRepository.InterestEntity;
 import com.coolture.user.repository.InterestRepository.KindEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -81,18 +84,18 @@ class InterestServiceTest {
         verify(repository).replaceSelection(USER_ID, Set.of("concerts"), Set.of());
     }
 
-    @Test
-    void replaceSelection_rejectsNoKind() throws SQLException {
-        assertThrows(IllegalArgumentException.class,
-                () -> service.replaceSelection(USER_ID, USER_ID, request(List.of(), "jazz")));
-
-        verify(repository, never()).replaceSelection(any(), any(), any());
+    static Stream<UserInterestsDto> refusedSelections() {
+        return Stream.of(
+            request(List.of(), "jazz"),
+            request(List.of("jazz")),
+            request(A_KIND, "jazz", "curling"),
+            request(A_KIND, "jazz", "rock", "opera", "hip_hop", "blues", "folk", "punk"));
     }
 
-    @Test
-    void replaceSelection_rejectsUnknownKind_orAnInterestKeyAsAKind() throws SQLException {
-        assertThrows(IllegalArgumentException.class,
-                () -> service.replaceSelection(USER_ID, USER_ID, request(List.of("jazz"))));
+    @ParameterizedTest
+    @MethodSource("refusedSelections")
+    void replaceSelection_refusesNoKind_anUnknownKey_andTooManyInterests_andStoresNothing(UserInterestsDto selection) throws SQLException {
+        assertThrows(IllegalArgumentException.class, () -> service.replaceSelection(USER_ID, USER_ID, selection));
 
         verify(repository, never()).replaceSelection(any(), any(), any());
     }
@@ -106,26 +109,10 @@ class InterestServiceTest {
     }
 
     @Test
-    void replaceSelection_rejectsTooManyInterests() throws SQLException {
-        assertThrows(IllegalArgumentException.class,
-                () -> service.replaceSelection(USER_ID, USER_ID, request(A_KIND, "jazz", "rock", "opera", "hip_hop", "blues", "folk", "punk")));
-
-        verify(repository, never()).replaceSelection(any(), any(), any());
-    }
-
-    @Test
     void replaceSelection_countsRepeatedKeyOnce() throws SQLException {
         service.replaceSelection(USER_ID, USER_ID, request(List.of("stage", "stage"), "jazz", "jazz", "rock", "opera"));
 
         verify(repository).replaceSelection(USER_ID, Set.of("stage"), Set.of("jazz", "rock", "opera"));
-    }
-
-    @Test
-    void replaceSelection_rejectsUnknownKey() throws SQLException {
-        assertThrows(IllegalArgumentException.class,
-                () -> service.replaceSelection(USER_ID, USER_ID, request(A_KIND, "jazz", "curling")));
-
-        verify(repository, never()).replaceSelection(any(), any(), any());
     }
 
     @Test

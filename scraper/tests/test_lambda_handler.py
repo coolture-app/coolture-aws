@@ -51,17 +51,6 @@ def test_a_ledger_saves_each_change_at_once():
     assert s3.puts == ['a\nc\n', 'a\nb\nc\n']
 
 
-def test_geocoder_requests_are_signed_for_a_lambda_url():
-    request = requests.Request('GET', 'https://abc.lambda-url.eu-north-1.on.aws/structured',
-                               params={'street': 'Morska', 'city': 'Reda'}).prepare()
-
-    SignedForLambdaUrl(Credentials('AKID', 'SECRET'), 'eu-north-1')(request)
-
-    assert request.headers['Authorization'].startswith('AWS4-HMAC-SHA256 Credential=AKID/')
-    assert '/eu-north-1/lambda/aws4_request' in request.headers['Authorization']
-    assert 'X-Amz-Date' in request.headers
-
-
 def test_a_space_is_sent_and_signed_as_percent_20_which_aws_expects():
     request = requests.Request('GET', 'https://abc.lambda-url.eu-north-1.on.aws/api',
                                params={'q': 'Klub Żak, Gdańsk', 'tag': 'a+b'}).prepare()
@@ -129,14 +118,14 @@ class FakeContext:
 def test_a_run_goes_through_the_api_as_the_bot_and_stops_in_time(monkeypatch):
     calls = []
     monkeypatch.setattr(lambda_handler.boto3.session, 'Session', FakeSession)
-    monkeypatch.setattr(lambda_handler, 'run', lambda *args, stop_at: calls.append((args, stop_at)))
+    monkeypatch.setattr(lambda_handler, 'run', lambda *args, stop_at: (calls.append((args, stop_at)), args[3].update(listed=1)))
     for name, value in {'BOT_SECRET': 'bot-secret', 'ORIGIN_VERIFY_SECRET': 'origin-secret', 'USER_POOL_ID': 'pool',
                         'USER_POOL_CLIENT_ID': 'client', 'API_URL': 'https://api.test/dev', 'LEDGER_BUCKET': 'ledger',
                         'GEOCODER_URL': 'https://geo.test/'}.items():
         monkeypatch.setenv(name, value)
     before = lambda_handler.utc_now()
 
-    assert lambda_handler.handler({}, FakeContext()) == {}
+    assert lambda_handler.handler({}, FakeContext()) == {'listed': 1}
 
     after = lambda_handler.utc_now()
     (site, geocoder, api, stats, limit), stop_at = calls[0]
@@ -147,3 +136,16 @@ def test_a_run_goes_through_the_api_as_the_bot_and_stops_in_time(monkeypatch):
     pauses = [site._pause() for _ in range(20)]
     assert all(1.0 <= pause <= 3.0 for pause in pauses) and len(set(pauses)) > 1
     assert before + timedelta(minutes=15) - MARGIN <= stop_at <= after + timedelta(minutes=15) - MARGIN
+
+
+@pytest.mark.parametrize('stats', [{}, {'listed': 3, 'rejected': 1}])
+def test_a_run_that_lists_nothing_or_has_a_rejected_post_fails_the_invocation(monkeypatch, stats):
+    monkeypatch.setattr(lambda_handler.boto3.session, 'Session', FakeSession)
+    monkeypatch.setattr(lambda_handler, 'run', lambda *args, stop_at: args[3].update(stats))
+    for name, value in {'BOT_SECRET': 'bot-secret', 'ORIGIN_VERIFY_SECRET': 'origin-secret', 'USER_POOL_ID': 'pool',
+                        'USER_POOL_CLIENT_ID': 'client', 'API_URL': 'https://api.test/dev', 'LEDGER_BUCKET': 'ledger',
+                        'GEOCODER_URL': 'https://geo.test/'}.items():
+        monkeypatch.setenv(name, value)
+
+    with pytest.raises(RuntimeError, match='The run failed'):
+        lambda_handler.handler({}, FakeContext())

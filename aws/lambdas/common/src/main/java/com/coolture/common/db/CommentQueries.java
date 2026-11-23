@@ -51,7 +51,8 @@ public final class CommentQueries {
         + " WHERE hc.id = ANY(array_append(c.ancestor_ids, c.id)) AND " + Blocks.withViewer("hc.author_id") + ")";
 
     public static boolean isVisible(Connection conn, UUID commentId, UUID viewer) throws SQLException {
-        try (PreparedStatement stmt = conn.prepareStatement("SELECT 1 FROM comments c WHERE c.id = ? AND " + NOT_HIDDEN)) {
+        String sql = "SELECT 1 FROM comments c WHERE c.id = ? AND " + NOT_HIDDEN;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             Blocks.bindViewer(new ParamBinder(stmt, conn).bindUUID(commentId), viewer);
             try (ResultSet rs = stmt.executeQuery()) {
                 return rs.next();

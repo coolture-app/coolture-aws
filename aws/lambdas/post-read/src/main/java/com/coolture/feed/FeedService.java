@@ -39,7 +39,8 @@ public class FeedService {
     private final LongSupplier seeds;
 
     public FeedService() {
-        this(new FeedRepository(), FeedConfig.fromEnvironment(), Clock.systemUTC(), () -> ThreadLocalRandom.current().nextLong());
+        this(new FeedRepository(), FeedConfig.fromEnvironment(), Clock.systemUTC(),
+            () -> ThreadLocalRandom.current().nextLong());
     }
 
     public FeedService(FeedRepository repository, FeedConfig config, Clock clock, LongSupplier seeds) {
@@ -49,19 +50,13 @@ public class FeedService {
         this.seeds = seeds;
     }
 
-    /** The plain feed, with no filters. */
-    public FeedPage getFeed(UUID viewer, String rawCursor, int limit, Double latitude, Double longitude) throws SQLException {
-        return getFeed(viewer, rawCursor, limit, latitude, longitude, PostFeedFilters.none());
-    }
-
     /**
-     * The location is used for proximity only on the first page. Later pages take it from the cursor. The filters are
-     * sent with every page, as with /posts, and narrow which posts are ranked.
+     * The filters' position is used for proximity only on the first page. Later pages take it from the cursor. The
+     * filters are sent with every page, as with /posts, and narrow which posts are ranked.
      */
-    public FeedPage getFeed(UUID viewer, String rawCursor, int limit, Double latitude, Double longitude,
-                            PostFeedFilters filters) throws SQLException {
-        int effectiveLimit = clampLimit(limit);
-        Optional<FeedCursor> cursor = FeedCursor.decode(rawCursor);
+    public FeedPage getFeed(UUID viewer, PostFeedFilters filters) throws SQLException {
+        int effectiveLimit = clampLimit(filters.limit());
+        Optional<FeedCursor> cursor = FeedCursor.decode(filters.cursor());
 
         if (cursor.isPresent() && !cursor.get().ranked()) {
             return upcomingPage(viewer, filters, cursor.get().position(), effectiveLimit);
@@ -69,7 +64,7 @@ public class FeedService {
 
         Session session = cursor.isPresent()
             ? resume(cursor.get())
-            : newSession(viewer, round(latitude), round(longitude));
+            : newSession(viewer, round(filters.latitude()), round(filters.longitude()));
 
         List<Ranked> ranked;
         try {
@@ -109,8 +104,9 @@ public class FeedService {
 
     private List<Ranked> rank(UUID viewer, Session session, PostFeedFilters filters, int count) throws SQLException {
         UserVector.Parts parts = repository.findVectorParts(viewer, session.asOf());
-        List<FeedScorer.Facts> candidates = repository.findCandidates(viewer, UserVector.blend(parts), parts.postAverage(),
-            session.asOf(), session.latitude(), session.longitude(), filters);
+        List<FeedScorer.Facts> candidates = repository.findCandidates(
+            viewer, UserVector.blend(parts), parts.postAverage(), session.asOf(), session.latitude(),
+            session.longitude(), filters);
 
         List<Ranked> ranked = new ArrayList<>(candidates.size());
         for (FeedScorer.Facts facts : candidates) {
@@ -135,7 +131,8 @@ public class FeedService {
         return ids.stream().filter(cards::containsKey).map(cards::get).toList();
     }
 
-    private FeedPage upcomingPage(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
+    private FeedPage upcomingPage(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit)
+            throws SQLException {
         Upcoming.Page page = repository.findUpcoming(viewer, filters, at, limit);
         String next = page.hasMore() ? FeedCursor.upcoming(page.next()).encode() : null;
         return new FeedPage(FeedMode.UPCOMING, page.items(), new PaginationMeta(limit, page.hasMore(), next));

@@ -9,8 +9,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Everything that affects a feed session's order, so nothing is stored on the server. Two kinds, both with the session's
- * asOf (t): R (ranked) has the seed, the last score and id, and the location. U (upcoming) has the Upcoming.Position (u).
+ * Everything that affects a feed session's order, so nothing is stored on the server. Two kinds, both with the
+ * session's asOf (t): R (ranked) has the seed, the last score and id, and the location. U (upcoming) has the
+ * Upcoming.Position (u).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record FeedCursor(int v, String k, Instant t, Long seed, Double s, UUID id, Double lat, Double lon,

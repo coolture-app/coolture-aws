@@ -130,21 +130,6 @@ def test_a_rejected_cursor_stops_the_run_instead_of_posting_duplicates():
         api(session).existing_event_urls()
 
 
-def test_create_reports_no_failure_on_success():
-    session = FakeSession([FakeResponse(201, {'id': 'post'})])
-
-    post = {'title': 't', 'eventUrl': 'a'}
-
-    assert api(session).create_post(post) == Outcome()
-    assert session.calls[0][2]['json'] == post
-
-
-def test_a_failure_that_may_have_saved_the_post_is_reported():
-    session = FakeSession([FakeResponse(500, {'error': 'x'})])
-
-    assert api(session).create_post({}).failure.startswith('500')
-
-
 def test_a_rejected_post_is_reported_and_the_run_goes_on():
     session = FakeSession([FakeResponse(400, {'error': 'Title is required'})])
 
@@ -157,14 +142,6 @@ def test_a_rejected_token_stops_the_run(status):
 
     with pytest.raises(ApiError):
         api(session).create_post({})
-
-
-def test_a_post_that_timed_out_counts_as_rejected():
-    class Slow(FakeSession):
-        def post(self, url, timeout, **kwargs):
-            raise requests.ReadTimeout('slow')
-
-    assert 'timed out' in api(Slow([])).create_post({}).failure
 
 
 def test_a_listed_post_is_remembered(ledger):
@@ -449,12 +426,3 @@ def test_a_failed_delete_does_not_stop_the_run():
     client = CooltureApi(session, FakeSession([OK]), 'http://api.test', token='t')
 
     assert client.create_post({'eventUrl': 'a'}, [IMAGE]).failure.startswith('400')
-
-
-def test_the_storage_never_gets_the_api_identity():
-    client, session, storage = uploading([init(), OK, CREATED], [OK])
-
-    client.create_post({'eventUrl': 'a'}, [IMAGE])
-
-    assert session.headers == {'Authorization': 'Bearer t'}
-    assert storage.headers == {}

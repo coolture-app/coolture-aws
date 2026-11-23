@@ -1,5 +1,6 @@
 package com.coolture.services;
 
+import static com.coolture.feed.FeedRequests.page;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.coolture.repository.Upcoming;
@@ -45,10 +46,10 @@ class PostReadServiceTest {
     void getFeed_whenParticipationFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            List.of("INTERESTED"), null, null, 20, null
+            List.of("INTERESTED"), null, null, 20, null, false, null, false, null
         );
 
-        assertThrows(SecurityException.class, () -> service.getFeed(null, filters, null, 20));
+        assertThrows(SecurityException.class, () -> service.getFeed(null, page(filters, null, 20)));
     }
 
     @Test
@@ -56,20 +57,20 @@ class PostReadServiceTest {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            List.of("INVALID_TYPE"), null, null, 20, null
+            List.of("INVALID_TYPE"), null, null, 20, null, false, null, false, null
         );
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, filters, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, page(filters, null, 20)));
     }
 
     @Test
     void getFeed_whenReactionFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, "LIKE", null, 20, null
+            null, "LIKE", null, 20, null, false, null, false, null
         );
 
-        assertThrows(SecurityException.class, () -> service.getFeed(null, filters, null, 20));
+        assertThrows(SecurityException.class, () -> service.getFeed(null, page(filters, null, 20)));
     }
 
     @Test
@@ -77,10 +78,10 @@ class PostReadServiceTest {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, "SUPER_LIKE", null, 20, null
+            null, "SUPER_LIKE", null, 20, null, false, null, false, null
         );
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, filters, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, page(filters, null, 20)));
     }
 
     @Test
@@ -98,13 +99,13 @@ class PostReadServiceTest {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, null, null, limit, null
+            null, null, null, limit, null, false, null, false, null
         );
 
         when(repository.findFeed(any(), any(), any(), any(), eq(21)))
             .thenReturn(List.of());
 
-        service.getFeed(callerId, filters, null, limit);
+        service.getFeed(callerId, page(filters, null, limit));
 
         verify(repository).findFeed(eq(filters), eq(PostSort.RECENT), eq(callerId), isNull(), eq(21));
     }
@@ -114,13 +115,13 @@ class PostReadServiceTest {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 500, null
+            null, null, null, 500, null, false, null, false, null
         );
 
         when(repository.findFeed(any(), any(), any(), any(), eq(101)))
             .thenReturn(List.of());
 
-        service.getFeed(callerId, filters, null, 500);
+        service.getFeed(callerId, page(filters, null, 500));
 
         verify(repository).findFeed(eq(filters), eq(PostSort.RECENT), eq(callerId), isNull(), eq(101));
     }
@@ -131,7 +132,7 @@ class PostReadServiceTest {
         boolean stances = "STANCE_NEWEST".equals(sortBy);
         return new PostFeedFilters(
             null, null, null, null, null, null, null, nearest ? 54.35 : null, nearest ? 18.65 : null, null,
-            stances ? List.of("NOT_INTERESTED") : null, null, null, 20, sortBy
+            stances ? List.of("NOT_INTERESTED") : null, null, null, 20, sortBy, false, null, false, null
         );
     }
 
@@ -139,10 +140,10 @@ class PostReadServiceTest {
     void getFeed_whenStanceNewestHasNoParticipationTypes_throws() {
         PostFeedFilters noStances = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, "STANCE_NEWEST"
+            null, null, null, 20, "STANCE_NEWEST", false, null, false, null
         );
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), noStances, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(noStances, null, 20)));
     }
 
     @Test
@@ -151,9 +152,9 @@ class PostReadServiceTest {
         PostFeedFilters withReaction = ofParticipant(friend, "RECENT", "LIKE");
         PostFeedFilters newest = ofParticipant(friend, "STANCE_NEWEST", null);
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), withReaction, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(withReaction, null, 20)));
         assertThrows(IllegalArgumentException.class, () -> service.getMapMarks(UUID.randomUUID(), withReaction, null, false));
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), newest, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(newest, null, 20)));
         verifyNoInteractions(repository);
     }
 
@@ -163,7 +164,7 @@ class PostReadServiceTest {
         PostFeedFilters filters = ofParticipant(me, "STANCE_NEWEST", null);
         when(repository.findFeed(any(), any(), any(), any(), anyInt())).thenReturn(List.of());
 
-        service.getFeed(me, filters, null, 20);
+        service.getFeed(me, page(filters, null, 20));
 
         verify(repository).findFeed(eq(filters), eq(PostSort.STANCE_NEWEST), eq(me), isNull(), eq(21));
     }
@@ -173,14 +174,33 @@ class PostReadServiceTest {
             List.of("TAKES_PART"), reaction, null, 20, sortBy, false, null, false, participant);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"interested", "takes_part", "not_interested", "OTHER"})
+    void getFeed_whenAParticipationTypeIsNotInUppercase_throws(String type) {
+        PostFeedFilters filters = new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            List.of(type), null, null, 20, "RECENT", false, null, false, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(filters, null, 20)));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void getFeed_whenAReactionTypeIsNotInUppercase_throws() {
+        PostFeedFilters filters = new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            null, "like", null, 20, "RECENT", false, null, false, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(filters, null, 20)));
+        verifyNoInteractions(repository);
+    }
+
     @Test
     void getFeed_whenNearestHasNoPosition_throws() {
         PostFeedFilters noPosition = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, "NEAREST"
+            null, null, null, 20, "NEAREST", false, null, false, null
         );
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, noPosition, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(noPosition, null, 20)));
     }
 
     private static PostCardDto card(int likes) {
@@ -192,26 +212,26 @@ class PostReadServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"RECOMMENDED", "NONSENSE"})
     void getFeed_whenSortIsUnknown_throws(String sortBy) {
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, sortedBy(sortBy), null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(sortedBy(sortBy), null, 20)));
     }
 
     @Test
     void getFeed_whenCursorIsUnreadable_throws() {
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, sortedBy(null), "garbage", 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(sortedBy(null), "garbage", 20)));
     }
 
     @Test
     void getFeed_whenCursorIsFromAnotherSort_throws() {
         String popularCursor = PostsCursor.after(PostSort.POPULAR, card(3));
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, sortedBy("RECENT"), popularCursor, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(sortedBy("RECENT"), popularCursor, 20)));
     }
 
     @Test
     void getFeed_whenCursorIsTheOldFormat_throws() {
         String old = CursorCodec.encode(new CursorPayload(UUID.randomUUID(), Instant.now()));
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, sortedBy("RECENT"), old, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(sortedBy("RECENT"), old, 20)));
     }
 
     @ParameterizedTest
@@ -222,12 +242,12 @@ class PostReadServiceTest {
         when(repository.findFeed(any(), eq(sort), any(), isNull(), eq(3))).thenReturn(rows);
 
         UUID caller = UUID.randomUUID();
-        CursorPage<PostCardDto> page = service.getFeed(caller, filters, null, 2);
+        CursorPage<PostCardDto> page = service.getFeed(caller, page(filters, null, 2));
 
         assertEquals(rows.subList(0, 2), page.items());
         assertTrue(page.page().hasMore());
 
-        service.getFeed(caller, filters, page.page().nextCursor(), 2);
+        service.getFeed(caller, page(filters, page.page().nextCursor(), 2));
 
         ArgumentCaptor<PostsCursor> cursor = ArgumentCaptor.forClass(PostsCursor.class);
         verify(repository, times(2)).findFeed(any(), eq(sort), any(), cursor.capture(), eq(3));
@@ -243,7 +263,7 @@ class PostReadServiceTest {
         String old = Base64.getUrlEncoder().withoutPadding().encodeToString(
             ("{\"sort\":\"POPULAR\",\"id\":\"" + last + "\",\"likes\":4}").getBytes(StandardCharsets.UTF_8));
 
-        service.getFeed(null, sortedBy("POPULAR"), old, 20);
+        service.getFeed(null, page(sortedBy("POPULAR"), old, 20));
 
         verify(repository).findFeed(any(), eq(PostSort.POPULAR), any(), eq(new PostsCursor(PostSort.POPULAR, last, null, null)), eq(21));
     }
@@ -256,9 +276,9 @@ class PostReadServiceTest {
         when(repository.findUpcoming(any(), any(), any(), eq(2)))
             .thenReturn(new Upcoming.Page(List.of(card(1), card(2)), true, next));
 
-        CursorPage<PostCardDto> page = service.getFeed(null, filters, null, 2);
+        CursorPage<PostCardDto> page = service.getFeed(null, page(filters, null, 2));
         assertTrue(page.page().hasMore());
-        service.getFeed(null, filters, page.page().nextCursor(), 2);
+        service.getFeed(null, page(filters, page.page().nextCursor(), 2));
 
         ArgumentCaptor<Upcoming.Position> at = ArgumentCaptor.forClass(Upcoming.Position.class);
         verify(repository, times(2)).findUpcoming(any(), any(), at.capture(), eq(2));
@@ -272,44 +292,11 @@ class PostReadServiceTest {
         Instant date = Instant.parse("2026-11-02T12:00:00Z");
         assertFalse(sortedBy(null).showsAllPastEvents());
         assertTrue(new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, null, true).showsAllPastEvents());
+            null, null, null, 20, null, true, null, false, null).showsAllPastEvents());
         assertTrue(new PostFeedFilters(null, null, null, null, null, date, null, null, null, null,
-            null, null, null, 20, null).showsAllPastEvents());
+            null, null, null, 20, null, false, null, false, null).showsAllPastEvents());
         assertTrue(new PostFeedFilters(null, null, null, null, null, null, date, null, null, null,
-            null, null, null, 20, null).showsAllPastEvents());
-    }
-
-    @Test
-    void getById_whenFound_returnsDetail() throws SQLException {
-        UUID postId = UUID.randomUUID();
-        UUID callerId = UUID.randomUUID();
-        var detail = mock(com.coolture.common.dto.PostDetailDto.class);
-        when(repository.findById(postId, callerId)).thenReturn(Optional.of(detail));
-
-        var result = service.getById(postId, callerId);
-
-        assertNotNull(result);
-        assertEquals(detail, result);
-        verify(repository).findById(postId, callerId);
-    }
-
-    @Test
-    void getMapMarks_whenValid_callsRepository() throws SQLException {
-        UUID callerId = UUID.randomUUID();
-        PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, null
-        );
-        var bounds = new com.coolture.common.dto.MapBoundsDto(
-            new com.coolture.common.dto.GeoPointDto(54.5, 18.0),
-            new com.coolture.common.dto.GeoPointDto(54.0, 19.0)
-        );
-        when(repository.findPostMarks(filters, bounds, callerId, false)).thenReturn(List.of());
-
-        var result = service.getMapMarks(callerId, filters, bounds, false);
-
-        assertNotNull(result);
-        verify(repository).findPostMarks(filters, bounds, callerId, false);
+            null, null, null, 20, null, false, null, false, null).showsAllPastEvents());
     }
 
 }

@@ -15,7 +15,8 @@ public final class TextSearch {
 
     /** Longest first and folded, since the ending is cut after folding. */
     private static final List<String> ENDINGS = List.of(
-        "owie", "ach", "ami", "ych", "ymi", "ego", "emu", "owi", "om", "em", "ie", "ej", "ow", "u", "y", "i", "a", "e", "o");
+        "owie", "ach", "ami", "ych", "ymi", "ego", "emu", "owi", "om", "em", "ie", "ej", "ow", "u", "y", "i", "a", "e",
+        "o");
 
     /** Each word is one more scan of the folded text, so a pasted paragraph can't make the query arbitrarily slow. */
     static final int MAX_WORDS = 8;

@@ -12,6 +12,7 @@ OTHER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 SUB = "11111111-1111-1111-1111-111111111111"
 ANONYMOUS = {"isAuthorized": True, "context": {}}
 DENIED = {"isAuthorized": False}
+NULL = object()  # a claim sent as JSON null; None leaves the claim out
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +34,7 @@ def token(key=PRIVATE_KEY, **overrides) -> str:
         "exp": now + 3600,
     }
     claims.update(overrides)
-    return jwt.encode({k: v for k, v in claims.items() if v is not None}, key, algorithm="RS256")
+    return jwt.encode({k: None if v is NULL else v for k, v in claims.items() if v is not None}, key, algorithm="RS256")
 
 
 def request(authorization: str | None = None, origin_secret: str | None = None) -> dict:
@@ -129,7 +130,7 @@ def test_should_deny_request_when_authorization_header_is_not_bearer():
     assert result == DENIED
 
 
-def test_should_treat_request_as_anonymous_when_issuer_is_not_configured(monkeypatch):
+def test_should_deny_request_with_a_token_when_issuer_is_not_configured(monkeypatch):
     # given
     monkeypatch.setattr(app, "_jwks_client", None)
     event = request(f"Bearer {token()}")
@@ -138,7 +139,18 @@ def test_should_treat_request_as_anonymous_when_issuer_is_not_configured(monkeyp
     result = app.lambda_handler(event, None)
 
     # then
-    assert result == ANONYMOUS
+    assert result == DENIED
+
+
+def test_should_pass_empty_strings_when_claims_are_null():
+    # given
+    event = request(f"Bearer {token(**{'cognito:groups': NULL, 'email': NULL, 'given_name': NULL})}")
+
+    # when
+    result = app.lambda_handler(event, None)
+
+    # then
+    assert result == authorized(SUB, SUB, "")
 
 
 def test_should_pass_profile_claims_when_id_token_contains_them():

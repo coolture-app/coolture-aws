@@ -60,7 +60,8 @@ public class CommentReadRepository {
 
     /** Empty when the comment is missing or hidden from the viewer. */
     public Optional<CommentHeader> findCommentHeader(UUID commentId, UUID viewer) throws SQLException {
-        String sql = "SELECT c.id, c.post_id, c.status, c.deleted_at FROM comments c WHERE c.id = ? AND " + CommentQueries.NOT_HIDDEN;
+        String sql = "SELECT c.id, c.post_id, c.status, c.deleted_at FROM comments c WHERE c.id = ? AND "
+            + CommentQueries.NOT_HIDDEN;
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             Blocks.bindViewer(new ParamBinder(stmt, conn).bindUUID(commentId), viewer);

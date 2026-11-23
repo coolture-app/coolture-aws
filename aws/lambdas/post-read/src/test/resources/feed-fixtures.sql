@@ -1,4 +1,4 @@
--- One post per feed rule, for PostReadDbTest. Every title says what the post tests. All runs use the users below.
+-- Fixtures for PostReadDbTest, grouped by what each tests. Every title says what the post tests. All runs use the users below.
 INSERT INTO users (id, username) VALUES
   ('a0000000-0000-0000-0000-000000000001', 'me'),
   ('a0000000-0000-0000-0000-000000000002', 'stranger'),
@@ -70,8 +70,7 @@ FROM fx;
 INSERT INTO posts (author_id, title, starts_at, type, created_at)
 VALUES ('a0000000-0000-0000-0000-000000000002', 'created_after_as_of', now() + interval '2 days', 'ONLINE', now() + interval '1 hour');
 
--- ME's stances are made a minute back, so they're before any session a test starts (sessionStart() is 10 seconds
--- back). The like is ME's only vector: after the session's asOf, ME would have none.
+-- ME's stances are made a minute back, so they're before any session a test starts. The like is ME's only vector: after the session's asOf, ME would have none.
 INSERT INTO post_reactions (post_id, user_id, type, created_at)
 SELECT id, 'a0000000-0000-0000-0000-000000000001', 'LIKE', now() - interval '1 minute'
 FROM posts WHERE title = 'liked';

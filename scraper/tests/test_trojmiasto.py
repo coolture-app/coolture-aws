@@ -6,9 +6,10 @@ from pathlib import Path
 import pytest
 import requests
 
+from fakes import listed, read_page
 from images import Image
 from posts import cut_description
-from trojmiasto import WARSAW, EventPage, ListingItem, Site, clean_description, merge, parse_event_page, parse_listing
+from trojmiasto import WARSAW, Site, clean_description, merge, parse_event_page, parse_listing
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 
@@ -355,23 +356,11 @@ def test_a_days_page_of_earlier_days_events_still_leads_to_its_next_page():
     assert urls == ['1', '2', '3', '4']
     assert ('2026-11-29', 2) in session.requested
 
-def listed(**overrides):
-    fields = dict(url='https://www.trojmiasto.pl/imprezy/x-imp1.html', title='Koncert', category='koncerty',
-                  city='Gdańsk', venue=None, start_date=None, hour=time(19, 0))
-    return ListingItem(**{**fields, **overrides})
-
-
-def read_page(**overrides):
-    fields = dict(start_date=date(2026, 11, 5), end=None, online=False, description='Opis wydarzenia.',
-                  venue='Klub', street='Portowa', building_number='9', postal_code='81-350', hour=None)
-    return EventPage(**{**fields, **overrides})
-
-
 def test_merge_takes_the_address_from_the_page_and_the_rest_from_the_listing():
     event = merge(listed(), read_page())
 
-    assert (event.url, event.title, event.category, event.city) \
-        == ('https://www.trojmiasto.pl/imprezy/x-imp1.html', 'Koncert', 'koncerty', 'Gdańsk')
+    assert (event.url, event.title, event.category, event.city) == (
+        'https://site.test/1', 'Wydarzenie 1', 'koncerty', 'Gdańsk')
     assert (event.venue, event.street, event.building_number, event.postal_code) == ('Klub', 'Portowa', '9', '81-350')
     assert event.description == 'Opis wydarzenia.'
     assert event.online is False
@@ -415,6 +404,12 @@ def test_multi_day_event_runs_to_the_end_of_its_last_day():
         == datetime(2026, 11, 8, 22, 59, tzinfo=timezone.utc)
 
 
+def test_multi_day_event_ends_at_the_end_of_its_last_day_when_the_clocks_change_that_day():
+    end = datetime.fromisoformat('2027-03-28T00:00:00+01:00')
+
+    assert merge(listed(), read_page(end=end)).end == datetime(2027, 3, 28, 23, 59, tzinfo=WARSAW)
+
+
 def test_end_before_the_start_is_dropped():
     end = datetime.fromisoformat('2026-11-05T10:00:00+01:00')
 
@@ -439,7 +434,7 @@ def test_end_of_the_page_wins_over_the_end_hour_of_the_listing():
 
 
 def test_empty_description_is_built_from_the_facts():
-    assert merge(listed(), read_page(description='')).description == 'Koncerty: Koncert, Klub, Gdańsk.'
+    assert merge(listed(title='Koncert'), read_page(description='')).description == 'Koncerty: Koncert, Klub, Gdańsk.'
 
 
 def test_page_failure_gives_no_event():
@@ -527,14 +522,6 @@ def test_a_long_description_is_cut_at_the_end_of_a_line():
     assert not cut.endswith('…')
 
 
-def test_polish_letters_survive_the_cleaning_and_the_cut():
-    # Ł is the bytes C5 81, and a reader in Windows' cp1250 shows them as "Ĺ\udc81": the text itself is fine.
-    description = cut_description(fixture('concert.html').description)
-
-    assert 'Łączy' in description
-    assert not [char for char in description if 0xD800 <= ord(char) <= 0xDFFF]
-
-
 def test_a_link_holding_a_name_or_an_address_stays():
     body = '<div class="text-contents">Napisz na <a href="mailto:a@b.pl">a@b.pl</a> albo zobacz <a href="/x">Klub Mewa</a>.</div>'
 
@@ -589,6 +576,16 @@ def test_a_gallery_with_no_cover_still_gives_its_photos():
             'data-href="/zdj/c/n/10/1/1920x0/7.webp" href="#"><img src="/zdj/c/n/10/1/0x500/7__kr.webp"/></a></div></div>')
 
     assert parse_event_page(event_page(body)).image_urls == ('https://www.trojmiasto.pl/zdj/c/n/10/1/1920x0/7.webp',)
+
+
+def test_a_gallery_link_labelled_like_a_ticket_link_still_gives_its_photo():
+    body = ('<div class="text-contents">Opis.<div class="tinyGallery"><a class="tinyGallery__item" '
+            'data-href="/zdj/c/n/10/1/1920x0/7.webp" href="#">Zobacz zdjęcia</a></div></div>')
+
+    page = parse_event_page(event_page(body))
+
+    assert page.image_urls == ('https://www.trojmiasto.pl/zdj/c/n/10/1/1920x0/7.webp',)
+    assert 'Zobacz' not in page.description
 
 
 def test_merged_event_keeps_the_images():
@@ -646,6 +643,12 @@ def test_a_written_end_without_a_year_is_the_next_such_day():
     page = read_page(description='Ekspozycja potrwa do 10 stycznia.')
 
     assert merge(listed(), page).end == datetime(2027, 1, 10, 23, 59, tzinfo=WARSAW)
+
+
+def test_a_written_end_on_a_day_the_next_year_lacks_gives_none():
+    page = read_page(start_date=date(2028, 3, 1), description='Ekspozycja potrwa do 29 lutego.')
+
+    assert merge(listed(), page).end is None
 
 
 def test_the_pages_own_end_comes_before_the_text():

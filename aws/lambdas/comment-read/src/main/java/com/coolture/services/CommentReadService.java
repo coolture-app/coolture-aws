@@ -41,7 +41,8 @@ public class CommentReadService {
     }
 
     private List<CommentSummaryDto> findRepliesValidated(
-            UUID postId, UUID callerId, UUID parentId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+            UUID postId, UUID callerId, UUID parentId, Instant cursorCreatedAt, UUID cursorId, int limit)
+                    throws SQLException {
         CommentReadRepository.CommentHeader parent = repository.findCommentHeader(parentId, callerId)
             .orElseThrow(() -> new IllegalArgumentException(
                 "Comment with id '" + parentId + "' was not found"));
