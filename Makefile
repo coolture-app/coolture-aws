@@ -178,7 +178,7 @@ require-embeddings-build:
 # sam local invoke exits 0 when the function raises, so the output decides. The payload can't hold a comma.
 invoke-worker = out="$$(echo '$(2)' | sam local invoke $(1) --template-file $(EMBEDDINGS_TEMPLATE) --skip-pull-image --add-host host.docker.internal:host-gateway --event -)" && printf '%s\n' "$$out" && ! printf '%s\n' "$$out" | grep -q '"errorMessage"'
 
-embed-interests: require-embeddings-build ## Embed interests and kinds missing vectors locally; re-derives posts' kinds when a kind changed
+embed-interests: require-embeddings-build ## Embed interests and kinds with no vector, or a changed text or model, locally (then derive-kinds if a kind changed)
 	@$(call invoke-worker,PostEmbeddingFunction,{"action":"embed-interests"})
 
 embed-posts: $(if $(DRY_RUN),,require-embeddings-build) ## Embed posts missing/stale embeddings locally (ALL=1, POST_ID=<uuid>, DRY_RUN=1)
