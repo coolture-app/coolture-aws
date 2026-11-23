@@ -14,6 +14,7 @@ import com.coolture.services.PostWriteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
@@ -132,77 +133,26 @@ class PostWriteHandlerTest {
         }
     }
 
-    @Test
-    void upsertReaction_whenValidRequest_returns204() throws Exception {
+    @ParameterizedTest
+    @CsvSource(value = {"PUT|reaction|{\"type\":\"LIKE\"}", "DELETE|reaction|", "PUT|participation|{\"type\":\"INTERESTED\"}",
+        "DELETE|participation|"}, delimiter = '|')
+    void likesAndStances_return204_andReachTheirOwnCall(String method, String route, String body) throws Exception {
         UUID userId = UUID.randomUUID();
         UUID postId = UUID.randomUUID();
-        String body = "{\"type\":\"LIKE\"}";
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "PUT", "/posts/" + postId + "/reaction", body, Map.of("postId", postId.toString())
+            method, "/posts/" + postId + "/" + route, body, Map.of("postId", postId.toString())
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
 
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).upsertReaction(eq(postId), eq(userId), any());
-        }
-    }
-
-    @Test
-    void deleteReaction_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "DELETE", "/posts/" + postId + "/reaction", null, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).deleteReaction(eq(postId), eq(userId));
-        }
-    }
-
-    @Test
-    void upsertParticipation_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        String body = "{\"type\":\"INTERESTED\"}";
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "PUT", "/posts/" + postId + "/participation", body, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).upsertParticipation(eq(postId), eq(userId), any());
-        }
-    }
-
-    @Test
-    void deleteParticipation_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "DELETE", "/posts/" + postId + "/participation", null, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).deleteParticipation(eq(postId), eq(userId));
+            assertEquals(204, handler.handleRequest(event, lambdaContext).getStatusCode());
+            switch (method + " " + route) {
+                case "PUT reaction" -> verify(service).upsertReaction(eq(postId), eq(userId), any());
+                case "DELETE reaction" -> verify(service).deleteReaction(postId, userId);
+                case "PUT participation" -> verify(service).upsertParticipation(eq(postId), eq(userId), any());
+                default -> verify(service).deleteParticipation(postId, userId);
+            }
         }
     }
 

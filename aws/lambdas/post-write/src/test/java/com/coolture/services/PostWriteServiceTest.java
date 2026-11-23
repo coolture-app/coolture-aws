@@ -11,6 +11,7 @@ import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
 import com.coolture.common.messaging.EmbeddingRequestPublisher;
 import com.coolture.repository.PostWriteRepository;
+import com.coolture.repository.StanceWriteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -36,7 +37,7 @@ class PostWriteServiceTest {
     void setUp() {
         repository = mock(PostWriteRepository.class);
         embeddingPublisher = mock(EmbeddingRequestPublisher.class);
-        service = new PostWriteService(repository, embeddingPublisher);
+        service = new PostWriteService(repository, mock(StanceWriteRepository.class), embeddingPublisher);
     }
 
     @Test
@@ -117,62 +118,19 @@ class PostWriteServiceTest {
         assertTrue(ex.getMessage().contains("at most " + com.coolture.common.validation.PostLimits.MAX_PHOTOS + " photos"));
     }
 
-    @Test
-    void createPost_whenCoverMediaIdNotPresentInMediaIds_throwsIllegalArgumentException() {
-        UUID authorId = UUID.randomUUID();
-        UUID media1 = UUID.randomUUID();
-        UUID coverMedia = UUID.randomUUID();
-
-        CreatePostRequest req = new CreatePostRequest(
-            "Online Event", "Description", "https://example.com", null,
-            Instant.now(), Instant.now().plusSeconds(3600), null, PostType.ONLINE,
-            null, List.of(media1), coverMedia
-        );
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.createPost(authorId, req));
-        assertTrue(ex.getMessage().contains("coverMediaId must be present in mediaIds"));
-    }
-
-    private static CreatePostRequest onlinePostWith(List<UUID> mediaIds, UUID cover) {
+    private static CreatePostRequest onlinePostWith(List<UUID> mediaIds) {
         return new CreatePostRequest(
             "Online Event", "Description", "https://example.com", null,
             Instant.now(), Instant.now().plusSeconds(3600), null, PostType.ONLINE,
-            null, mediaIds, cover
+            null, mediaIds, null
         );
-    }
-
-    @Test
-    void createPost_keepsTheOrderItIsGiven() throws SQLException {
-        UUID authorId = UUID.randomUUID();
-        UUID first = UUID.randomUUID();
-        UUID second = UUID.randomUUID();
-        CreatePostRequest req = onlinePostWith(List.of(first, second), null);
-        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
-
-        service.createPost(authorId, req);
-
-        verify(repository).createPost(authorId, req);
-    }
-
-    @Test
-    void createPost_movesANamedCoverToTheFrontAndKeepsTheOthersInOrder() throws SQLException {
-        UUID authorId = UUID.randomUUID();
-        UUID first = UUID.randomUUID();
-        UUID second = UUID.randomUUID();
-        UUID cover = UUID.randomUUID();
-        CreatePostRequest req = onlinePostWith(List.of(first, second, cover), cover);
-        when(repository.createPost(eq(authorId), any())).thenReturn(mock(PostDetailDto.class));
-
-        service.createPost(authorId, req);
-
-        verify(repository).createPost(authorId, req.withMediaIds(List.of(cover, first, second)));
     }
 
     @Test
     void createPost_whenAPhotoIsAProfileImage_throwsIllegalArgumentException() throws SQLException {
         UUID authorId = UUID.randomUUID();
         UUID avatar = UUID.randomUUID();
-        CreatePostRequest req = onlinePostWith(List.of(avatar), null);
+        CreatePostRequest req = onlinePostWith(List.of(avatar));
         when(repository.validateMediaOwnership(authorId, req.mediaIds()))
             .thenReturn(Map.of(avatar, MediaPurpose.PROFILE_IMAGE));
 
@@ -274,21 +232,33 @@ class PostWriteServiceTest {
         );
     }
 
-    @Test
-    void updatePost_switchingAnInPersonPostToOnline_isAccepted() throws SQLException {
+    /** The place an edit of the given type saves on an in-person post. */
+    private EventLocationDto savedPlace(PostType type) throws SQLException {
         UUID postId = UUID.randomUUID();
         UUID authorId = UUID.randomUUID();
         PostWriteRepository.ExistingPost existing = inPersonPost(postId, authorId);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
         UpdatePostRequest req = new UpdatePostRequest(
-            null, null, null, null, null, null, null, PostType.ONLINE, null, null, null
+            null, null, null, null, null, null, null, type, null, null, null
         );
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
+        when(repository.updatePost(eq(postId), eq(existing.eventLocationId()), any()))
             .thenReturn(mock(com.coolture.common.dto.PostDetailDto.class));
 
         service.updatePost(postId, authorId, req, Set.of());
 
-        verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any());
+        var saved = org.mockito.ArgumentCaptor.forClass(PostWriteRepository.Fields.class);
+        verify(repository).updatePost(eq(postId), eq(existing.eventLocationId()), saved.capture());
+        return saved.getValue().location();
+    }
+
+    @Test
+    void updatePost_switchingAnInPersonPostToOnline_dropsThePlace() throws SQLException {
+        assertNull(savedPlace(PostType.ONLINE));
+    }
+
+    @Test
+    void updatePost_anInPersonPostWithNoPlaceSent_keepsItsPlace() throws SQLException {
+        assertEquals("Hala", savedPlace(null).venueName());
     }
 
     @Test
@@ -318,7 +288,7 @@ class PostWriteServiceTest {
             () -> service.updatePost(postId, authorId, req, Set.of()));
 
         assertTrue(ex.getMessage().contains("past"));
-        verify(repository, never()).updatePost(any(), any(), any(), any(), any());
+        verify(repository, never()).updatePost(any(), any(), any());
     }
 
     @Test
@@ -366,7 +336,7 @@ class PostWriteServiceTest {
             null, null, "https://new.example.com", null, null, null, null, null, null, null, null
         );
         PostDetailDto updated = postDetail(postId, "Title", "Desc");
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any())).thenReturn(updated);
+        when(repository.updatePost(eq(postId), eq(existing.eventLocationId()), any())).thenReturn(updated);
 
         service.updatePost(postId, authorId, req, Set.of());
 
@@ -398,11 +368,11 @@ class PostWriteServiceTest {
     private End savedEnd(UUID postId, UUID authorId, PostWriteRepository.ExistingPost existing,
                          UpdatePostRequest req, Set<String> removed) throws SQLException {
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
+        when(repository.updatePost(eq(postId), eq(existing.eventLocationId()), any()))
             .thenReturn(postDetail(postId, existing.title(), existing.description()));
         service.updatePost(postId, authorId, req, removed);
         var saved = org.mockito.ArgumentCaptor.forClass(PostWriteRepository.Fields.class);
-        verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), saved.capture());
+        verify(repository).updatePost(eq(postId), eq(existing.eventLocationId()), saved.capture());
         return new End(saved.getValue().eventUrl(), saved.getValue().endsAt(), saved.getValue().openEnded());
     }
 
@@ -504,11 +474,11 @@ class PostWriteServiceTest {
             "Desc", null, SAVED_LINKS, Instant.parse("2030-01-15T18:00:00Z"), null, false, PostType.ONLINE,
             PostStatus.ACTIVE, Instant.now(), null, null, null);
         when(repository.findById(postId)).thenReturn(Optional.of(existing));
-        when(repository.updatePost(eq(postId), eq(authorId), eq(existing), eq(req), any()))
+        when(repository.updatePost(eq(postId), eq(existing.eventLocationId()), any()))
             .thenReturn(postDetail(postId, existing.title(), existing.description()));
         service.updatePost(postId, authorId, req, removed);
         var saved = org.mockito.ArgumentCaptor.forClass(PostWriteRepository.Fields.class);
-        verify(repository).updatePost(eq(postId), eq(authorId), eq(existing), eq(req), saved.capture());
+        verify(repository).updatePost(eq(postId), eq(existing.eventLocationId()), saved.capture());
         return saved.getValue().links();
     }
 
