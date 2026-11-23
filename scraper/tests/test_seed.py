@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -7,8 +8,8 @@ import requests
 import seed
 from api import Outcome
 from images import Image
-from seed import (AVATAR_SIZES, AVATARS, BOT_ID, DEMO_USERS, FRIEND_CASES, FRIENDS, HISTORY_DAYS, SeedError,
-                  friend_stances, history, moved, picks, seed_events, seed_friends, seed_reactions, shift_days, shifted,
+from seed import (AVATAR_SIZES, AVATARS, BOT, DEMO_USERS, FRIEND_CASES, HISTORY_DAYS, SeedError, friend_stances,
+                  history, moved, picks, seed_events, seed_friends, seed_reactions, shift_days, shifted, user_ids,
                   wait_for_api)
 from snapshot import Snapshot
 
@@ -107,6 +108,11 @@ def test_no_snapshot_is_one_clear_error(tmp_path):
         seed_events(tmp_path, 'http://api.test', api_factory=FakeApi)
 
 
+def test_an_account_the_database_lacks_is_named_with_what_makes_it():
+    with pytest.raises(SeedError, match=r'No account for jan_demo.*make up'):
+        user_ids(lambda sql: ['anna_demo,id-anna_demo'], ['anna_demo', 'jan_demo'])
+
+
 def test_picks_leave_the_closest_posts_for_the_feed_and_mark_the_farthest_not_for_me():
     ranking = [f'p{rank}' for rank in range(30)]
 
@@ -142,6 +148,19 @@ class FakeSession:
         return response
 
 
+def id_of(username):
+    return f'id-{username}'
+
+
+def with_ids(query):
+    """Answers the lookup of accounts as the database does, with an id made from each username."""
+    def answer(sql):
+        if 'FROM users WHERE username' in sql:
+            return [f'{name},{id_of(name)}' for name in re.search(r"'\{(.*)\}'", sql).group(1).split(',')]
+        return query(sql)
+    return answer
+
+
 def fake_query(reacted=(), updates=None, held=()):
     def query(sql):
         if sql.lstrip().startswith(('UPDATE', 'DELETE')):
@@ -152,9 +171,9 @@ def fake_query(reacted=(), updates=None, held=()):
             return list(held)
         if 'count(*)' in sql:
             return ['1' if any(user_id in sql for user_id in reacted) else '0']
-        assert BOT_ID in sql
+        assert id_of(BOT) in sql
         return [f'p{rank}' for rank in range(30)]
-    return query
+    return with_ids(query)
 
 
 def test_each_demo_user_reacts_as_themself():
@@ -187,7 +206,7 @@ def test_history_spreads_evenly_over_the_weeks():
 def test_a_user_who_already_reacted_is_left_alone():
     session = FakeSession()
 
-    stats = seed_reactions('http://api.test', query=fake_query(reacted=['00000000-0000-0000-0000-000000000002']),
+    stats = seed_reactions('http://api.test', query=fake_query(reacted=[id_of('anna_demo')]),
                            session_factory=lambda: session)
 
     assert stats['users_skipped'] == 1
@@ -200,7 +219,7 @@ def test_a_reset_takes_back_what_they_hold_and_seeds_them_again():
     held = ['reaction,old', 'participation,gone']
     updates = []
 
-    stats = seed_reactions('http://api.test', query=fake_query(reacted=list(DEMO_USERS), updates=updates, held=held),
+    stats = seed_reactions('http://api.test', query=fake_query(reacted=[id_of(name) for name in DEMO_USERS], updates=updates, held=held),
                            session_factory=lambda: session, reset=True)
 
     assert stats['taken_back'] == 6 and stats['users'] == 3 and not stats['users_skipped']
@@ -213,7 +232,7 @@ def test_a_reset_takes_back_what_they_hold_and_seeds_them_again():
 
 def test_reactions_before_embeddings_say_what_to_run():
     with pytest.raises(SeedError, match='embed-posts'):
-        seed_reactions('http://api.test', query=lambda sql: ['0'] if 'count(*)' in sql else [],
+        seed_reactions('http://api.test', query=with_ids(lambda sql: ['0'] if 'count(*)' in sql else []),
                        session_factory=FakeSession)
 
 
@@ -299,10 +318,10 @@ def friends_query(post_count=len(FRIEND_CASES), stances=(), updates=None):
                 updates.append(sql)
             return []
         if 'ORDER BY p.starts_at' in sql:
-            assert BOT_ID in sql and FRIENDS['iza_demo'] in sql
+            assert id_of(BOT) in sql and id_of('iza_demo') in sql
             return [f'p{number}' for number in range(post_count)]
         return list(stances)
-    return query
+    return with_ids(query)
 
 
 def test_friends_take_their_stances_as_themselves_and_get_photos():
@@ -315,15 +334,15 @@ def test_friends_take_their_stances_as_themselves_and_get_photos():
     assert ('PUT', 'kasia_demo', 'http://api.test/posts/p0/participation', 'TAKES_PART') in sent
     assert ('PUT', 'iza_demo', 'http://api.test/posts/p6/participation', 'INTERESTED') in sent
     assert stats['takes_part'] + stats['interested'] == len(friend_stances(['p'] * len(FRIEND_CASES)))
-    assert [user_id for user_id, _, _ in api.set] == [FRIENDS[name] for name in AVATARS]
+    assert [user_id for user_id, _, _ in api.set] == [id_of(name) for name in AVATARS]
     assert api.set[0][1:] == AVATAR_SIZES
 
 
 def test_a_second_run_takes_back_stray_stances_and_keeps_photos():
     sent = []
     api = FakeAvatarApi()
-    stray = f"old,{FRIENDS['kasia_demo']}"
-    kept = f"p0,{FRIENDS['kasia_demo']}"
+    stray = f"old,{id_of('kasia_demo')}"
+    kept = f"p0,{id_of('kasia_demo')}"
 
     stats = seed_friends('http://api.test', query=friends_query(stances=[stray, kept]),
                          session_factory=lambda: FakeFriendSession(sent, avatars=set(AVATARS)),
@@ -344,7 +363,7 @@ def test_friends_stances_are_dated_back_so_their_own_picks_lead():
     planned = friend_stances([f'p{number}' for number in range(len(FRIEND_CASES))])
     assert len(updates) == 1 and updates[0].count('UPDATE post_participations') == len(planned)
     assert f"make_interval(days => {HISTORY_DAYS[1]})" in updates[0]
-    assert f"user_id = '{FRIENDS['kasia_demo']}' AND post_id = 'p0'" in updates[0]
+    assert f"user_id = '{id_of('kasia_demo')}' AND post_id = 'p0'" in updates[0]
 
 
 def test_friends_without_enough_posts_say_what_to_run():
