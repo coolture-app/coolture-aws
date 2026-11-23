@@ -6,5 +6,5 @@ ADD --checksum=sha256:a89707c0045e4807b2a1180e132e68e108d998709f48b6c94b98a6e281
     https://github.com/komoot/photon/releases/download/1.3.0/photon-1.3.0.jar /photon/photon.jar
 COPY photon.sh /photon/photon.sh
 EXPOSE 2322
-ENTRYPOINT ["/bin/sh", "/photon/photon.sh"]
+ENTRYPOINT ["/bin/bash", "/photon/photon.sh"]
 CMD ["serve"]

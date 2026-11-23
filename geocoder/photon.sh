@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 # Runs Photon the same way in the local container and on the AWS instance, which gets this file from make geo-publish.
 #   import: builds the Poland index from GraphHopper's weekly dump, with 3 GB of heap.
 #   serve:  answers on port 2322.
-set -eu
+set -euo pipefail
 
 DATA="${DATA:-/data}"
 PHOTON_JAR="${PHOTON_JAR:-/photon/photon.jar}"
@@ -10,7 +10,8 @@ DUMP_URL="${DUMP_URL:-https://download1.graphhopper.com/public/europe/poland/pho
 
 case "${1:-serve}" in
     import)
-        # Built beside the old index and swapped in at the end, so a failed import leaves the old one serving.
+        # Built beside the old index and swapped in at the end, so a failed import leaves the old one serving. pipefail
+        # makes a failed download fail the import: java would read the cut stream as the whole dump and exit 0.
         rm -rf "$DATA/import"
         mkdir -p "$DATA/import"
         curl -fsSL "$DUMP_URL" | zstd -dc |
