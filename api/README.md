@@ -10,7 +10,7 @@ Shapes and parameters are in the contracts (`aws/lambdas/<area>/contracts/`, bro
 | `posts.hurl` | A post's life: create, read, edit (only the author), react, "Nie dla mnie", comment, delete; a start moved to the past |
 | `media.hurl` | Uploading a photo to storage and making it an avatar |
 | `users.hurl` | Searching people, profiles, following, interests, the home area, a block |
-| `feed.hurl` | The ranked feed and its paging, the full list with filters, the map |
+| `feed.hurl` | The ranked feed and its paging, the full list with filters, the map, kinds of event |
 
 ## Running them
 
