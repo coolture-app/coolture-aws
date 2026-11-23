@@ -545,6 +545,37 @@ class PostReadDbTest {
     }
 
     @Test
+    void feed_aMarkThatIsTheZeroVectorOnceCentred_pushesNothingDown() throws SQLException {
+        UUID marked = postTitled("walk_7");
+        UUID twin = postTitled("twin_of_walk_7");
+        mark(marked, "now() - interval '1 second'");
+        try {
+            // An hour ahead, so a database clock ahead of this one still counts the mark.
+            Instant asOf = Instant.now().plus(Duration.ofHours(1));
+            double[] viewer = UserVector.blend(feedRepository.findVectorParts(ME, asOf));
+            double[] average = embeddingOf(marked);
+
+            double nearMark = feedRepository.findCandidates(ME, viewer, average, asOf, null, null, NO_FILTERS).stream()
+                .filter(f -> f.id().equals(twin)).findFirst().orElseThrow().nearMark();
+
+            assertEquals(0, nearMark);
+        } finally {
+            unmark(marked);
+        }
+    }
+
+    @Test
+    void feedCards_leaveOutDeletedAndBlockedPosts_butAGuestSeesTheBlockedOnes() throws SQLException {
+        List<UUID> ids = new ArrayList<>();
+        for (String title : List.of("future_public", "deleted", "by_i_blocked", "by_blocked_me")) {
+            ids.add(postTitled(title));
+        }
+
+        assertEquals(Set.of("future_public"), titlesOf(feedRepository.findCards(ME, ids)));
+        assertEquals(Set.of("future_public", "by_i_blocked", "by_blocked_me"), titlesOf(feedRepository.findCards(null, ids)));
+    }
+
+    @Test
     void vector_leavesMarksOut() throws SQLException {
         Instant asOf = Instant.now();
         UUID marked = postTitled("walk_7");

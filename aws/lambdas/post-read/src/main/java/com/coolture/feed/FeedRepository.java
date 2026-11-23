@@ -46,6 +46,8 @@ public class FeedRepository {
      * because a flattened lateral would read and centre the post's vector again for every mark. The PageRank score
      * comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf, so a run landing mid-session doesn't move
      * its pages, and less than PPR_RUN_MAX_AGE_HOURS before now too, since a cursor's asOf comes from the client.
+     * A zero centred vector gives NaN from pgvector, which Postgres sorts above every number, so the clamp would turn
+     * it into the full penalty. Those pairs are left out of near_mark.
      */
     private static final String FEATURES = """
         WITH marks AS MATERIALIZED (
@@ -65,8 +67,9 @@ public class FeedRepository {
                p.open_ended,
                %s AS engagement,
                1 - (c.centred <=> ?::vector) AS similarity,
-               (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
-                FROM marks m) AS near_mark,
+               (SELECT max(m.fade * LEAST(GREATEST((1 - x.d - ?) / (1 - ?), 0), 1))
+                FROM marks m, LATERAL (SELECT c.centred <=> m.centred AS d) x
+                WHERE x.d <> 'NaN'::float8) AS near_mark,
                ST_Distance(el.coordinates,
                            ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography)
                    AS meters,
@@ -297,9 +300,9 @@ public class FeedRepository {
         }
     }
 
-    /** No marks, or none to compare with, push nothing down. pgvector gives NaN for a zero vector. */
+    /** No marks, or none to compare with, push nothing down. */
     private static double nearMark(Double value) {
-        return value == null || value.isNaN() ? 0 : value;
+        return value == null ? 0 : value;
     }
 
     /** The fallback order, Nadchodzące's (Upcoming), from the given position. */
@@ -316,7 +319,7 @@ public class FeedRepository {
 
     /** In no particular order. A post deleted since it was ranked just isn't returned. */
     public List<PostCardDto> findCards(UUID viewer, List<UUID> ids) throws SQLException {
-        String sql = PostSelect.CARD + "WHERE p.id = ANY(?::uuid[])";
+        String sql = PostSelect.CARD + "WHERE p.id = ANY(?::uuid[]) AND p.deleted_at IS NULL AND " + PostSql.NOT_BLOCKED;
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -324,6 +327,7 @@ public class FeedRepository {
             ParamBinder b = new ParamBinder(stmt, conn);
             PostSelect.bindViewer(b, viewer);
             b.bindUUIDArray(ids.toArray(new UUID[0]));
+            Blocks.bindViewer(b, viewer);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 return PostSql.withPhotosAndFriends(conn, viewer, ResultSetMappers.mapPostCards(rs));
