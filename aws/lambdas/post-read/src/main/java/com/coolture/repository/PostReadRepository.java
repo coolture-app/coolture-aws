@@ -37,8 +37,12 @@ public class PostReadRepository {
     /** Enough for three lines of the map's preview, so a pin's preview needs no request of its own. */
     static final int EXCERPT_CHARS = 200;
 
-    /** Every sort but UPCOMING, which is {@link #findUpcoming}. These hide ended events unless asked; PAST shows only them. */
-    public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit) throws SQLException {
+    /**
+     * Every sort but UPCOMING, which is {@link #findUpcoming}. These hide ended events unless asked; PAST shows only
+     * them.
+     */
+    public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit)
+            throws SQLException {
         String sql = PostSelect.CARD
             + "WHERE p.deleted_at IS NULL\n"
             + "  AND " + PostFilterSql.MATCHES + "\n"
@@ -81,7 +85,8 @@ public class PostReadRepository {
     }
 
     /** With includePast, the ended events follow. A date range alone doesn't bring them, unlike in the other sorts. */
-    public Upcoming.Page findUpcoming(PostFeedFilters f, UUID callerId, Upcoming.Position at, int limit) throws SQLException {
+    public Upcoming.Page findUpcoming(PostFeedFilters f, UUID callerId, Upcoming.Position at, int limit)
+            throws SQLException {
         Upcoming.Binds binds = b -> {
             PostSelect.bindViewer(b, callerId);
             PostFilterSql.bind(b, f, callerId);
@@ -111,13 +116,16 @@ public class PostReadRepository {
      */
     private static final String PARTICIPATION_AND_REACTION = """
         (?::varchar[] IS NULL
-               OR EXISTS (SELECT 1 FROM post_participations pp WHERE pp.post_id = p.id AND pp.user_id = ?::uuid AND pp.type = ANY(?::varchar[])
+               OR EXISTS (SELECT 1 FROM post_participations pp
+                          WHERE pp.post_id = p.id AND pp.user_id = ?::uuid AND pp.type = ANY(?::varchar[])
                           AND (pp.user_id = ?::uuid OR """ + Friends.sharingFriend("pp.user_id") + """
         )))
           AND (?::varchar IS NULL
-               OR EXISTS (SELECT 1 FROM post_reactions pr WHERE pr.post_id = p.id AND pr.user_id = ?::uuid AND pr.type::varchar = ?::varchar))""";
+               OR EXISTS (SELECT 1 FROM post_reactions pr
+                          WHERE pr.post_id = p.id AND pr.user_id = ?::uuid AND pr.type::varchar = ?::varchar))""";
 
-    private static void bindParticipationAndReaction(ParamBinder b, PostFeedFilters f, UUID callerId) throws SQLException {
+    private static void bindParticipationAndReaction(ParamBinder b, PostFeedFilters f, UUID callerId)
+            throws SQLException {
         boolean hasPart = f.participationTypes() != null && !f.participationTypes().isEmpty() && callerId != null;
         String[] partArr = hasPart ? f.participationTypes().toArray(new String[0]) : null;
         UUID participant = f.participantId() != null ? f.participantId() : callerId;
@@ -169,7 +177,8 @@ public class PostReadRepository {
     }
 
     /** With excludeMine, the same posts the feed would show this viewer: none of their own, reacted to or attended. */
-    public List<PostMarkDto> findPostMarks(PostFeedFilters f, MapBoundsDto bounds, UUID callerId, boolean excludeMine) throws SQLException {
+    public List<PostMarkDto> findPostMarks(PostFeedFilters f, MapBoundsDto bounds, UUID callerId, boolean excludeMine)
+            throws SQLException {
         boolean hidesMine = excludeMine && callerId != null;
         String sql = """
             SELECT p.id, p.title, p.starts_at, p.ends_at, p.open_ended, p.positive_reaction_count,
@@ -256,8 +265,11 @@ public class PostReadRepository {
                 }
             }
 
-            Map<UUID, FriendStancesDto> friends = Friends.forPosts(conn, callerId, list.stream().map(PostMarkDto::id).toList());
-            return friends.isEmpty() ? list : list.stream().map(mark -> mark.withFriendStances(friends.get(mark.id()))).toList();
+            Map<UUID, FriendStancesDto> friends = Friends.forPosts(
+                conn, callerId, list.stream().map(PostMarkDto::id).toList());
+            return friends.isEmpty()
+                ? list
+                : list.stream().map(mark -> mark.withFriendStances(friends.get(mark.id()))).toList();
         }
     }
 }

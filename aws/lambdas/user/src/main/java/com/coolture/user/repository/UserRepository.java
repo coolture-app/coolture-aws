@@ -264,7 +264,8 @@ public class UserRepository {
 
     public record ListedUser(UserEntity user, boolean isFollowing, boolean followsYou) {}
 
-    public List<ListedUser> search(UUID callerId, String q, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    public List<ListedUser> search(UUID callerId, String q, Instant cursorCreatedAt, UUID cursorId, int limit)
+            throws SQLException {
         String sql = """
             SELECT id, username, first_name, last_name, bio, created_at,
                    %s
@@ -307,7 +308,8 @@ public class UserRepository {
             + " CASE WHEN sees.stances THEN stances.interested::int END AS interested"
             + " FROM users u"
             + " CROSS JOIN LATERAL (SELECT u.id = ?::uuid OR " + Friends.sharingFriend("u.id") + " AS stances) sees"
-            + " CROSS JOIN LATERAL (SELECT COUNT(*) AS posts, COUNT(*) FILTER (WHERE " + EventTime.NOT_ENDED + ") AS upcoming"
+            + " CROSS JOIN LATERAL (SELECT COUNT(*) AS posts,"
+            + "   COUNT(*) FILTER (WHERE " + EventTime.NOT_ENDED + ") AS upcoming"
             + "   FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL) own"
             + " CROSS JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE pp.type = 'TAKES_PART') AS takes_part,"
             + "   COUNT(*) FILTER (WHERE pp.type = 'INTERESTED') AS interested"
@@ -392,13 +394,15 @@ public class UserRepository {
         }
     }
 
-    public record UserRelationRow(UserEntity user, Instant relationCreatedAt, boolean isFollowing, boolean followsYou) {}
+    public record UserRelationRow(
+            UserEntity user, Instant relationCreatedAt, boolean isFollowing, boolean followsYou) {}
 
     /**
      * The name a follow list sorts by, the one its rows show: first and last name, or the username when there's no
      * first name, folded as {@link TextSearch} folds it. "C" so a local database and AWS's sort alike.
      */
-    private static final String SORT_NAME = "unaccent(lower(coalesce(nullif(u.first_name, '') || coalesce(' ' || nullif(u.last_name, ''), ''),"
+    private static final String SORT_NAME = "unaccent(lower(coalesce("
+        + "nullif(u.first_name, '') || coalesce(' ' || nullif(u.last_name, ''), ''),"
         + " u.username))) COLLATE \"C\"";
 
     public record FollowRow(UserEntity user, boolean isFollowing, boolean followsYou, String sortName) {}
@@ -406,11 +410,13 @@ public class UserRepository {
     /** Where a follow list's next page starts: after this sort name and id. */
     public record NameCursor(String name, UUID id) {}
 
-    public List<FollowRow> findFollowers(UUID userId, UUID callerId, String q, NameCursor after, int limit) throws SQLException {
+    public List<FollowRow> findFollowers(UUID userId, UUID callerId, String q, NameCursor after, int limit)
+            throws SQLException {
         return findFollows("source_user_id", "target_user_id", userId, callerId, q, after, limit);
     }
 
-    public List<FollowRow> findFollowing(UUID userId, UUID callerId, String q, NameCursor after, int limit) throws SQLException {
+    public List<FollowRow> findFollowing(UUID userId, UUID callerId, String q, NameCursor after, int limit)
+            throws SQLException {
         return findFollows("target_user_id", "source_user_id", userId, callerId, q, after, limit);
     }
 
@@ -452,9 +458,11 @@ public class UserRepository {
         }
     }
 
-    public List<UserRelationRow> findBlocking(UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    public List<UserRelationRow> findBlocking(UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId,
+                                              int limit) throws SQLException {
         String sql = """
-            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at,
+            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at,
+                   ur.created_at AS relation_created_at,
                    %s
             FROM user_relations ur
             JOIN users u ON u.id = ur.target_user_id

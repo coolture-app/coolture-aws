@@ -31,7 +31,7 @@ import java.util.regex.Pattern;
 public class UserService {
 
     private static final int MAX_USERNAME_LENGTH = 32;
-    /** What a person may choose. Accounts made from an email can hold less, such as two letters, until they change it. */
+    /** What a person may choose. Accounts made from an email can hold less, such as two letters, until changed. */
     private static final Pattern USERNAME = Pattern.compile("[a-z0-9._]{3,32}");
     private static final String UNIQUE_VIOLATION = "23505";
 
@@ -43,7 +43,8 @@ public class UserService {
         this(new UserRepository(), new InterestRepository(), new S3StorageService());
     }
 
-    public UserService(UserRepository userRepository, InterestRepository interestRepository, S3StorageService s3StorageService) {
+    public UserService(UserRepository userRepository, InterestRepository interestRepository,
+                       S3StorageService s3StorageService) {
         this.userRepository = userRepository;
         this.interestRepository = interestRepository;
         this.s3StorageService = s3StorageService;
@@ -58,7 +59,8 @@ public class UserService {
 
         List<ListedUser> users = userRepository.search(callerId, q, cursorCreatedAt, cursorId, limit + 1);
 
-        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(users.stream().map(u -> u.user().id()).toList());
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(
+                users.stream().map(u -> u.user().id()).toList());
         List<UserListItemDto> dtos = new ArrayList<>();
         for (ListedUser listed : users) {
             dtos.add(toListItem(listed.user(), listed.isFollowing(), listed.followsYou(), avatarMap));
@@ -88,7 +90,8 @@ public class UserService {
     private UserProfileDto profileFor(UserEntity user, UUID callerId, String asked) throws SQLException {
         if (callerId != null && !callerId.equals(user.id())) {
             if (userRepository.isBlocked(callerId, user.id())) {
-                return new UserProfileDto(user.id(), user.username(), user.firstName(), user.lastName(), avatarOf(user.id()),
+                return new UserProfileDto(user.id(), user.username(), user.firstName(), user.lastName(),
+                    avatarOf(user.id()),
                     null, null, null, null, false, true, false, null, null, null);
             }
             if (userRepository.isBlocked(user.id(), callerId)) {
@@ -165,7 +168,8 @@ public class UserService {
     public HomeDto setHome(UUID targetId, UUID callerId, HomeDto request) throws SQLException {
         requireSelf(targetId, callerId, "You can only set your own home");
         HomeDto home = new HomeDto(request.name().trim(), new GeoPointDto(
-                roundToKilometre(request.coordinates().latitude()), roundToKilometre(request.coordinates().longitude())));
+                roundToKilometre(request.coordinates().latitude()),
+                roundToKilometre(request.coordinates().longitude())));
         if (!userRepository.setHome(targetId, home)) {
             throw new IllegalArgumentException("User " + targetId + " not found");
         }
@@ -193,12 +197,14 @@ public class UserService {
         return Math.round(coordinate * 100) / 100.0;
     }
 
-    public CursorPage<UserListItemDto> getFollowers(UUID targetUserId, UUID callerId, String q, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getFollowers(UUID targetUserId, UUID callerId, String q, String cursor,
+                                                    int limit) throws SQLException {
         NameCursor after = checkFollowList(targetUserId, callerId, cursor, limit);
         return toFollowPage(userRepository.findFollowers(targetUserId, callerId, q, after, limit + 1), limit);
     }
 
-    public CursorPage<UserListItemDto> getFollowing(UUID targetUserId, UUID callerId, String q, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getFollowing(UUID targetUserId, UUID callerId, String q, String cursor,
+                                                    int limit) throws SQLException {
         NameCursor after = checkFollowList(targetUserId, callerId, cursor, limit);
         return toFollowPage(userRepository.findFollowing(targetUserId, callerId, q, after, limit + 1), limit);
     }
@@ -219,7 +225,8 @@ public class UserService {
     private CursorPage<UserListItemDto> toFollowPage(List<FollowRow> rows, int limit) throws SQLException {
         CursorPage<FollowRow> page = CursorPage.of(rows, limit,
             row -> CursorCodec.encode(new NameCursor(row.sortName(), row.user().id())));
-        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(page.items().stream().map(r -> r.user().id()).toList());
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(
+                page.items().stream().map(r -> r.user().id()).toList());
         List<UserListItemDto> dtos = new ArrayList<>();
         for (FollowRow row : page.items()) {
             dtos.add(toListItem(row.user(), row.isFollowing(), row.followsYou(), avatarMap));
@@ -227,7 +234,8 @@ public class UserService {
         return new CursorPage<>(dtos, page.page());
     }
 
-    public CursorPage<UserListItemDto> getBlocking(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
+    public CursorPage<UserListItemDto> getBlocking(UUID targetUserId, UUID callerId, String cursor, int limit)
+            throws SQLException {
         if (!callerId.equals(targetUserId)) {
             throw new SecurityException("You can only view your own block list");
         }
@@ -236,7 +244,8 @@ public class UserService {
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
 
-        List<UserRepository.UserRelationRow> rows = userRepository.findBlocking(targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
+        List<UserRepository.UserRelationRow> rows = userRepository.findBlocking(
+                targetUserId, callerId, cursorCreatedAt, cursorId, limit + 1);
         return toRelationPage(rows, limit);
     }
 
@@ -292,8 +301,10 @@ public class UserService {
         }
     }
 
-    private CursorPage<UserListItemDto> toRelationPage(List<UserRepository.UserRelationRow> rows, int limit) throws SQLException {
-        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(rows.stream().map(r -> r.user().id()).toList());
+    private CursorPage<UserListItemDto> toRelationPage(List<UserRepository.UserRelationRow> rows, int limit)
+            throws SQLException {
+        Map<UUID, AvatarRecord> avatarMap = userRepository.findActiveThumbnails(
+                rows.stream().map(r -> r.user().id()).toList());
 
         Map<UUID, Instant> relationCreatedAtMap = new HashMap<>();
         List<UserListItemDto> dtos = new ArrayList<>();
@@ -302,7 +313,8 @@ public class UserService {
             dtos.add(toListItem(row.user(), row.isFollowing(), row.followsYou(), avatarMap));
         }
 
-        return CursorPage.of(dtos, limit, dto -> dto.summary().id(), dto -> relationCreatedAtMap.get(dto.summary().id()));
+        return CursorPage.of(dtos, limit, dto -> dto.summary().id(),
+                dto -> relationCreatedAtMap.get(dto.summary().id()));
     }
 
     private UserListItemDto toListItem(UserEntity user, boolean isFollowing, boolean followsYou,
@@ -362,7 +374,8 @@ public class UserService {
 
         boolean isFollowing = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(callerId, user.id());
         boolean isBlocked = callerId != null && !callerId.equals(user.id()) && userRepository.isBlocked(callerId, user.id());
-        boolean followsYou = callerId != null && !callerId.equals(user.id()) && userRepository.isFollowing(user.id(), callerId);
+        boolean followsYou = callerId != null && !callerId.equals(user.id())
+                && userRepository.isFollowing(user.id(), callerId);
 
         UserInterestsDto picks = interestRepository.findPicks(user.id());
 
