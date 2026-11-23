@@ -602,9 +602,6 @@ Outputs:
     Value: !Ref DbConnectPolicy
     Export:
       Name: !Sub '${AWS::StackName}-DbConnectPolicyArn'
-  DbSecretArn:
-    Condition: IsAWS
-    Value: !Ref DbSecret
   LambdaSecurityGroupId:
     Condition: IsAWS
     Value: !Ref LambdaSecurityGroup

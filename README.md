@@ -6,8 +6,8 @@ The API, database, photo storage, recommender and event scraper of Coolture: Jav
 
 ## Run locally
 
-The whole app on your machine, with every event listed on trojmiasto.pl (a few hundred), twelve demo users with their
-own tastes, and a guest. It works on Windows (Git Bash or PowerShell), WSL, Linux and macOS.
+The whole app on your machine, with a sample of the events trojmiasto.pl lists for the next 30 days, twelve demo users
+with their own tastes, and a guest. It works on Windows (Git Bash or PowerShell), WSL, Linux and macOS.
 
 ### 1. Install the tools, once
 
@@ -37,21 +37,11 @@ make seed                     # terminal 2: realistic data. It waits for the API
 cd ../coolture-frontend && npm install && npm start    # terminal 3: http://localhost:4200
 ```
 
-`make seed` skips whatever is already done:
-
-1. Scrapes a snapshot of trojmiasto.pl into the gitignored `scraper/snapshot/`, if there's none yet: every event of the
-   next 30 days, about 40 minutes, once. A teammate's snapshot copied there skips it. An older, smaller snapshot stays
-   until it's deleted.
-2. Loads a sample of it through the API as `coolture_bot`, every category and day covered, with every date moved forward
-   so all events are ahead. About 10 minutes. `SIZE=all` loads the whole snapshot (about 40), `SIZE=N` another sample.
-3. Embeds interests and posts. The first run builds the embedding image (3.5 GB, about 10 minutes).
-4. Lets the demo users react to posts close to their interests, so their feeds are personal.
-5. Has Anna's, Jan's and Ola's friends mark the soonest posts, so the top of Wszystkie, sorted Nadchodzące, shows every
-   shape of a card's friends line. This step puts its cases back on every run, on the posts soonest then.
-6. Scores every user's events with personalised PageRank (`make ppr`).
-
-The first run takes about 30 minutes. Later runs take a minute and add only a new PageRank run. How the snapshot is
-picked and loaded is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
+`make seed` skips whatever is already done. It scrapes a snapshot of trojmiasto.pl once (a teammate's copied into the
+gitignored `scraper/snapshot/` skips that), loads a sample of it through the API as `coolture_bot`, embeds interests and
+posts, derives their kinds, has the demo users and their friends react to and mark posts, and scores every user's events
+with personalised PageRank. The first run is long, mostly the scrape and the embedding image's build; later runs add
+only what's missing. How the snapshot is picked and loaded is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
 
 **The geocoder**, Photon with an index of Poland, serves the post form's place search and locates the scraper's
 events. `make geo-index` builds it once, with 3 GB of disk, alone because of the memory. Then `make up` starts it on
@@ -203,8 +193,8 @@ or another AWS API runs outside the VPC. Embedding requests go through S3 for th
 
 The post form's place search calls `/geo` on the site. CloudFront strips `/geo` and sends it through a
 [VPC origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html) to
-Photon on a `t4g.micro` in a private subnet, about $7 a month. The instance has no public address and only CloudFront
-reaches it. It gets everything from the stack's bucket through the S3 gateway endpoint.
+Photon on a small instance (the stack's `InstanceType`) in a private subnet. The instance has no public address and
+only CloudFront reaches it. It gets everything from the stack's bucket through the S3 gateway endpoint.
 
 Before the first deploy, **attach an internet gateway to the VPC** in the networking stack (an `InternetGateway` and a
 `VPCGatewayAttachment`). CloudFront requires one for a VPC origin, though no route uses it, so nothing in the VPC gains

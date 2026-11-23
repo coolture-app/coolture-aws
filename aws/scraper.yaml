@@ -159,7 +159,3 @@ Resources:
 Outputs:
   FunctionName:
     Value: !Ref ScraperFunction
-  BotSecretArn:
-    Value: !Ref BotSecret
-  LedgerBucketName:
-    Value: !Ref LedgerBucket

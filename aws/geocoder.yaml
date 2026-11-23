@@ -2,9 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Coolture geocoder - Photon for the post form's place search, reached only through CloudFront at /geo
 
-# Before the first deploy, the networking stack needs an internet gateway attached to the VPC: CloudFront VPC origins
-# require one, though nothing routes through it. After it: make geo-publish uploads Photon and the index. The instance
-# installs Java from Amazon Linux's package mirror, an S3 bucket, so it needs the S3 gateway endpoint to allow it.
+# The instance installs Java from Amazon Linux's package mirror, an S3 bucket, so the S3 gateway endpoint must allow it.
+# The first deploy's steps, including the internet gateway the networking stack needs, are in README.md.
 
 Parameters:
   Environment:
