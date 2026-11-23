@@ -10,7 +10,7 @@ import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.ParticipationRequest;
 import com.coolture.dto.ReactionRequest;
 import com.coolture.dto.UpdatePostRequest;
-import com.coolture.common.messaging.EmbeddingRequestPublisher;
+import com.coolture.messaging.PostEmbeddingPublisher;
 import com.coolture.repository.PostWriteRepository;
 import com.coolture.repository.StanceWriteRepository;
 import com.coolture.common.validation.PostLimits;
@@ -28,14 +28,14 @@ public class PostWriteService {
 
     private final PostWriteRepository repository;
     private final StanceWriteRepository stances;
-    private final EmbeddingRequestPublisher embeddingPublisher;
+    private final PostEmbeddingPublisher embeddingPublisher;
 
     public PostWriteService() {
-        this(new PostWriteRepository(), new StanceWriteRepository(), new EmbeddingRequestPublisher());
+        this(new PostWriteRepository(), new StanceWriteRepository(), new PostEmbeddingPublisher());
     }
 
     PostWriteService(PostWriteRepository repository, StanceWriteRepository stances,
-                     EmbeddingRequestPublisher embeddingPublisher) {
+                     PostEmbeddingPublisher embeddingPublisher) {
         this.repository = repository;
         this.stances = stances;
         this.embeddingPublisher = embeddingPublisher;
@@ -49,7 +49,7 @@ public class PostWriteService {
 
         requireEventPhotos(repository.validateMediaOwnership(authorId, req.mediaIds()));
         PostDetailDto created = repository.createPost(authorId, req);
-        embeddingPublisher.requestPost(created.id());
+        embeddingPublisher.publish(created.id());
         return created;
     }
 
@@ -105,7 +105,7 @@ public class PostWriteService {
             req.coverMediaId());
         PostDetailDto updated = repository.updatePost(postId, existing.eventLocationId(), fields);
         // Asked on every edit, so the worker alone decides which fields are embedded.
-        embeddingPublisher.requestPost(updated.id());
+        embeddingPublisher.publish(updated.id());
         return updated;
     }
 

@@ -9,7 +9,7 @@ import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.UpdatePostRequest;
-import com.coolture.common.messaging.EmbeddingRequestPublisher;
+import com.coolture.messaging.PostEmbeddingPublisher;
 import com.coolture.repository.PostWriteRepository;
 import com.coolture.repository.StanceWriteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,13 +30,13 @@ import static org.mockito.Mockito.*;
 class PostWriteServiceTest {
 
     private PostWriteRepository repository;
-    private EmbeddingRequestPublisher embeddingPublisher;
+    private PostEmbeddingPublisher embeddingPublisher;
     private PostWriteService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(PostWriteRepository.class);
-        embeddingPublisher = mock(EmbeddingRequestPublisher.class);
+        embeddingPublisher = mock(PostEmbeddingPublisher.class);
         service = new PostWriteService(repository, mock(StanceWriteRepository.class), embeddingPublisher);
     }
 
@@ -322,7 +322,7 @@ class PostWriteServiceTest {
         PostDetailDto result = service.createPost(authorId, req);
 
         assertSame(created, result);
-        verify(embeddingPublisher).requestPost(created.id());
+        verify(embeddingPublisher).publish(created.id());
     }
 
     @Test
@@ -340,7 +340,7 @@ class PostWriteServiceTest {
 
         service.updatePost(postId, authorId, req, Set.of());
 
-        verify(embeddingPublisher).requestPost(postId);
+        verify(embeddingPublisher).publish(postId);
     }
 
     private PostWriteRepository.ExistingPost activeExistingPost(UUID postId, UUID authorId) {
