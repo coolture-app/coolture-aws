@@ -35,6 +35,7 @@ public record PostCardDto(
     Instant createdAt,
     Instant lastModifiedAt,
     Instant deletedAt,
+    /** The first of photos. */
     MediaResourceDto coverMedia,
     ReactionType myReaction,
     ParticipationType myParticipation,
@@ -43,10 +44,11 @@ public record PostCardDto(
     FriendStancesDto friendStances
 ) {
     public PostCardDto withPhotos(List<MediaResourceDto> newPhotos) {
+        List<MediaResourceDto> all = newPhotos == null || newPhotos.isEmpty() ? null : newPhotos;
         return new PostCardDto(id, author, location, title, description, eventUrl, links, startsAt, endsAt, openEnded,
             positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status,
-            createdAt, lastModifiedAt, deletedAt, coverMedia, myReaction, myParticipation,
-            newPhotos == null || newPhotos.isEmpty() ? null : newPhotos, friendStances);
+            createdAt, lastModifiedAt, deletedAt, all == null ? null : all.getFirst(), myReaction, myParticipation,
+            all, friendStances);
     }
 
     public PostCardDto withFriendStances(FriendStancesDto stances) {

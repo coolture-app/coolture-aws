@@ -155,24 +155,6 @@ class ResultSetMappersTest {
         assertNull(loc);
     }
 
-    @Test
-    void mapCoverMedia_whenPresent_mapsFields() throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        UUID coverId = UUID.randomUUID();
-        when(rs.getObject("cover_id")).thenReturn(coverId);
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_MEDIA");
-        when(rs.getString("cover_mime_type")).thenReturn("image/jpeg");
-        when(rs.getObject("cover_size_bytes")).thenReturn(2048L);
-        when(rs.getLong("cover_size_bytes")).thenReturn(2048L);
-        when(rs.getString("cover_status")).thenReturn("UPLOADED");
-
-        MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
-
-        assertNotNull(cover);
-        assertEquals(coverId, cover.id());
-        assertEquals(MediaPurpose.EVENT_MEDIA, cover.purpose());
-        assertEquals("image/jpeg", cover.mimeType());
-    }
 
     @Test
     void mapPostMedia_mapsCorrectly() throws SQLException {
@@ -207,21 +189,6 @@ class ResultSetMappersTest {
         assertEquals("https://signed/avatar", user.avatar().url());
     }
 
-    @Test
-    void mapCoverMedia_withObjectKey_presignsUrl() throws SQLException {
-        S3StorageService storage = mock(S3StorageService.class);
-        when(storage.presignGet("posts/1/cover.jpg")).thenReturn("https://signed/cover");
-        MediaUrls.useStorage(storage);
-        ResultSet rs = mock(ResultSet.class);
-        when(rs.getObject("cover_id")).thenReturn(UUID.randomUUID());
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_MEDIA");
-        when(rs.getString("cover_status")).thenReturn("UPLOADED");
-        when(rs.getString("cover_object_key")).thenReturn("posts/1/cover.jpg");
-
-        MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
-
-        assertEquals("https://signed/cover", cover.url());
-    }
 
     @Test
     void mapPostMedia_withObjectKey_presignsUrl() throws SQLException {
@@ -239,17 +206,6 @@ class ResultSetMappersTest {
         assertEquals("https://signed/photo", pm.media().url());
     }
 
-    @Test
-    void mapCoverMedia_withoutObjectKey_leavesUrlNull() throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        when(rs.getObject("cover_id")).thenReturn(UUID.randomUUID());
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_MEDIA");
-        when(rs.getString("cover_status")).thenReturn("UPLOADED");
-
-        MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
-
-        assertNull(cover.url());
-    }
 
     @AfterEach
     void resetMediaUrls() {
@@ -279,7 +235,6 @@ class ResultSetMappersTest {
         when(rs.getString("type")).thenReturn("ONLINE");
         when(rs.getString("status")).thenReturn("ACTIVE");
         when(rs.getTimestamp("created_at")).thenReturn(Timestamp.from(now));
-        when(rs.getObject("cover_id")).thenReturn(null);
         when(rs.getString("my_reaction")).thenReturn("LIKE");
         when(rs.getString("my_participation")).thenReturn("TAKES_PART");
 

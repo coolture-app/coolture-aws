@@ -93,29 +93,6 @@ public final class ResultSetMappers {
     }
 
     /**
-     * Maps cover media from ResultSet if present.
-     * Expects cover columns: cover_id, cover_purpose, cover_mime_type, cover_size_bytes, cover_status, cover_created_at, cover_deleted_at,
-     * cover_width, cover_height
-     */
-    public static MediaResourceDto mapCoverMedia(ResultSet rs) throws SQLException {
-        UUID coverId = (UUID) rs.getObject("cover_id");
-        if (coverId == null) return null;
-
-        return new MediaResourceDto(
-            coverId,
-            mapEnum(rs, "cover_purpose", MediaPurpose.class),
-            rs.getString("cover_mime_type"),
-            rs.getObject("cover_size_bytes") != null ? rs.getLong("cover_size_bytes") : null,
-            mapEnum(rs, "cover_status", MediaStatus.class),
-            MediaUrls.presign(rs.getString("cover_object_key")),
-            mapInstant(rs, "cover_created_at"),
-            mapInstant(rs, "cover_deleted_at"),
-            mapInteger(rs, "cover_width"),
-            mapInteger(rs, "cover_height")
-        );
-    }
-
-    /**
      * Maps a ResultSet row to EventLocationDto.
      * Expects columns: loc_id, country_code, venue_name, building_num, street, postal_code, city, latitude, longitude.
      */
@@ -239,9 +216,7 @@ public final class ResultSetMappers {
         );
     }
 
-    /**
-     * Maps a full PostCardDto directly from a single ResultSet row.
-     */
+    /** A card with no photos yet: PostCardDto.withPhotos adds them and the cover. */
     public static PostCardDto mapPostCard(ResultSet rs) throws SQLException {
         return new PostCardDto(
             (UUID) rs.getObject("id"),
@@ -264,7 +239,7 @@ public final class ResultSetMappers {
             mapInstant(rs, "created_at"),
             mapInstant(rs, "last_modified_at"),
             mapInstant(rs, "deleted_at"),
-            mapCoverMedia(rs),
+            null,
             mapMyReaction(rs),
             mapMyParticipation(rs),
             null,

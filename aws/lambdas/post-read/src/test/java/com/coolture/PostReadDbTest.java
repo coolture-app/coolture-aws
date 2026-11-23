@@ -976,7 +976,10 @@ class PostReadDbTest {
         assertEquals(UUID.fromString("a0000000-0000-0000-0001-000000000010"), card.photos().get(0).id());
         assertEquals(UUID.fromString("a0000000-0000-0000-0001-000000000001"), card.photos().get(1).id());
         assertEquals(800, card.photos().get(0).width());
-        assertNull(card(walkPosts(ME, filters("RECENT", false, null, null), 100), "future_public").photos());
+        assertEquals(card.photos().get(0), card.coverMedia());
+        PostCardDto none = card(walkPosts(ME, filters("RECENT", false, null, null), 100), "future_public");
+        assertNull(none.photos());
+        assertNull(none.coverMedia());
     }
 
     // ===== Walks =====
