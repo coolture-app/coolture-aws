@@ -6,21 +6,18 @@ import com.coolture.common.db.EventTime;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostSelect;
 import com.coolture.common.db.PostKinds;
 import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.StanceCounts;
 import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
-import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
-import com.coolture.common.dto.PostMediaDto;
-import com.coolture.common.dto.enums.PostStatus;
-import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.storage.MediaUrls;
 
 import java.sql.Connection;
@@ -42,7 +39,7 @@ public class PostReadRepository {
 
     /** Every sort but UPCOMING, which is {@link #findUpcoming}. These hide ended events unless asked; PAST shows only them. */
     public List<PostCardDto> findFeed(PostFeedFilters f, PostSort sort, UUID callerId, PostsCursor cursor, int limit) throws SQLException {
-        String sql = PostSql.CARD_SELECT
+        String sql = PostSelect.CARD
             + "WHERE p.deleted_at IS NULL\n"
             + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
@@ -57,7 +54,7 @@ public class PostReadRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn);
-            PostSql.bindCardViewer(b, callerId);
+            PostSelect.bindViewer(b, callerId);
             PostFilterSql.bind(b, f, callerId);
             Blocks.bindViewer(b, callerId);
 
@@ -86,7 +83,7 @@ public class PostReadRepository {
     /** With includePast, the ended events follow. A date range alone doesn't bring them, unlike in the other sorts. */
     public Upcoming.Page findUpcoming(PostFeedFilters f, UUID callerId, Upcoming.Position at, int limit) throws SQLException {
         Upcoming.Binds binds = b -> {
-            PostSql.bindCardViewer(b, callerId);
+            PostSelect.bindViewer(b, callerId);
             PostFilterSql.bind(b, f, callerId);
             Blocks.bindViewer(b, callerId);
             bindParticipationAndReaction(b, f, callerId);
@@ -99,7 +96,7 @@ public class PostReadRepository {
     }
 
     private static String upcomingSql(String endRule) {
-        return PostSql.CARD_SELECT
+        return PostSelect.CARD
             + "WHERE p.deleted_at IS NULL\n"
             + "  AND " + PostFilterSql.MATCHES + "\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
@@ -139,7 +136,7 @@ public class PostReadRepository {
     }
 
     public Optional<PostDetailDto> findById(UUID postId, UUID callerId) throws SQLException {
-        String sql = PostSql.cardSelect(",\n       " + PostKinds.OF_POST + " AS kinds")
+        String sql = PostSelect.DETAIL
             + "WHERE p.id = ? AND p.deleted_at IS NULL\n"
             + "  AND " + PostSql.NOT_BLOCKED;
 
@@ -147,46 +144,14 @@ public class PostReadRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn);
-            PostSql.bindCardViewer(b, callerId);
+            PostSelect.bindViewer(b, callerId);
             b.bindUUID(postId);
             Blocks.bindViewer(b, callerId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    List<PostMediaDto> mediaList = MediaQueries.getPostMediaList(conn, postId);
-                    MediaResourceDto coverMedia = mediaList.stream()
-                        .map(PostMediaDto::media)
-                        .findFirst()
-                        .orElse(null);
-
-                    return Optional.of(new PostDetailDto(
-                        (UUID) rs.getObject("id"),
-                        mapUserSummary(rs),
-                        mapEventLocation(rs),
-                        rs.getString("title"),
-                        rs.getString("description"),
-                        rs.getString("event_url"),
-                        mapLinks(rs),
-                        mapInstant(rs, "starts_at"),
-                        mapInstant(rs, "ends_at"),
-                        rs.getBoolean("open_ended"),
-                        rs.getInt("positive_reaction_count"),
-                        rs.getInt("participant_count"),
-                        rs.getInt("interested_count"),
-                        rs.getInt("going_count"),
-                        rs.getInt("comments_count"),
-                        mapEnum(rs, "type", PostType.class),
-                        mapEnum(rs, "status", PostStatus.class),
-                        mapStringList(rs, "kinds"),
-                        mapInstant(rs, "created_at"),
-                        mapInstant(rs, "last_modified_at"),
-                        mapInstant(rs, "deleted_at"),
-                        coverMedia,
-                        mediaList,
-                        mapMyReaction(rs),
-                        mapMyParticipation(rs),
-                        Friends.forPosts(conn, callerId, List.of(postId)).get(postId)
-                    ));
+                    return Optional.of(mapPostDetail(rs, MediaQueries.getPostMediaList(conn, postId),
+                        Friends.forPosts(conn, callerId, List.of(postId)).get(postId)));
                 }
             }
         }
@@ -246,7 +211,7 @@ public class PostReadRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn);
-            PostSql.bindCardViewer(b, callerId);
+            PostSelect.bindViewer(b, callerId);
             PostFilterSql.bind(b, f, callerId);
             Blocks.bindViewer(b, callerId);
 

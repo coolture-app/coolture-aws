@@ -69,7 +69,7 @@ public final class Upcoming {
 
     public record Page(List<PostCardDto> items, boolean hasMore, Position next) {}
 
-    /** A list's own query up to the streams' conditions: PostSql.CARD_SELECT's columns, a WHERE, and their binds. */
+    /** A list's own query up to the streams' conditions: PostSelect.CARD's columns, a WHERE, and their binds. */
     public record Query(String sql, Binds binds) {}
 
     @FunctionalInterface

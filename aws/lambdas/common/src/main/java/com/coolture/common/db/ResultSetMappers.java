@@ -2,9 +2,11 @@ package com.coolture.common.db;
 
 import com.coolture.common.dto.CommentSummaryDto;
 import com.coolture.common.dto.EventLocationDto;
+import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.UserSummaryDto;
@@ -253,6 +255,39 @@ public final class ResultSetMappers {
             mapMyParticipation(rs),
             null,
             null
+        );
+    }
+
+    /** The cover is the first photo. */
+    public static PostDetailDto mapPostDetail(ResultSet rs, List<PostMediaDto> photos, FriendStancesDto friendStances)
+            throws SQLException {
+        return new PostDetailDto(
+            (UUID) rs.getObject("id"),
+            mapUserSummary(rs),
+            mapEventLocation(rs),
+            rs.getString("title"),
+            rs.getString("description"),
+            rs.getString("event_url"),
+            mapLinks(rs),
+            mapInstant(rs, "starts_at"),
+            mapInstant(rs, "ends_at"),
+            rs.getBoolean("open_ended"),
+            rs.getInt("positive_reaction_count"),
+            rs.getInt("participant_count"),
+            rs.getInt("interested_count"),
+            rs.getInt("going_count"),
+            rs.getInt("comments_count"),
+            mapEnum(rs, "type", PostType.class),
+            mapEnum(rs, "status", PostStatus.class),
+            mapStringList(rs, "kinds"),
+            mapInstant(rs, "created_at"),
+            mapInstant(rs, "last_modified_at"),
+            mapInstant(rs, "deleted_at"),
+            photos.isEmpty() ? null : photos.get(0).media(),
+            photos,
+            mapMyReaction(rs),
+            mapMyParticipation(rs),
+            friendStances
         );
     }
 }

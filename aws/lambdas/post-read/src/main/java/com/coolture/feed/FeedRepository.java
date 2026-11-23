@@ -4,6 +4,7 @@ import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.EventTime;
 import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.PostSelect;
 import com.coolture.common.db.ResultSetMappers;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.PostCardDto;
@@ -299,8 +300,8 @@ public class FeedRepository {
 
     /** The fallback order, Nadchodzące's (Upcoming), from the given position. */
     public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
-        Upcoming.Query query = new Upcoming.Query(PostSql.CARD_SELECT + "WHERE " + feedRules(false), b -> {
-            PostSql.bindCardViewer(b, viewer);
+        Upcoming.Query query = new Upcoming.Query(PostSelect.CARD + "WHERE " + feedRules(false), b -> {
+            PostSelect.bindViewer(b, viewer);
             bindRules(b, viewer, at.asOf(), filters);
         });
         try (Connection conn = DatabaseConfig.getConnection()) {
@@ -310,13 +311,13 @@ public class FeedRepository {
 
     /** In no particular order. A post deleted since it was ranked just isn't returned. */
     public List<PostCardDto> findCards(UUID viewer, List<UUID> ids) throws SQLException {
-        String sql = PostSql.CARD_SELECT + "WHERE p.id = ANY(?::uuid[])";
+        String sql = PostSelect.CARD + "WHERE p.id = ANY(?::uuid[])";
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn);
-            PostSql.bindCardViewer(b, viewer);
+            PostSelect.bindViewer(b, viewer);
             b.bindUUIDArray(ids.toArray(new UUID[0]));
 
             try (ResultSet rs = stmt.executeQuery()) {

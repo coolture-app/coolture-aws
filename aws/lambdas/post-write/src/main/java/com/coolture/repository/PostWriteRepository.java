@@ -1,16 +1,13 @@
 package com.coolture.repository;
 
 import com.coolture.common.db.DatabaseConfig;
-import com.coolture.common.db.PostKinds;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
-import com.coolture.common.db.StanceCounts;
+import com.coolture.common.db.PostSelect;
 import com.coolture.common.json.JsonUtils;
 import com.coolture.common.dto.EventLocationDto;
-import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostLinkDto;
-import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
@@ -289,78 +286,16 @@ public class PostWriteRepository {
         });
     }
 
-    public PostDetailDto getPostDetail(UUID postId) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            return getPostDetail(conn, postId);
-        }
-    }
-
     private PostDetailDto getPostDetail(Connection conn, UUID postId) throws SQLException {
-        String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.links, p.type, p.status,
-                   p.positive_reaction_count, p.comments_count,
-                   stances.participant_count, stances.interested_count, stances.going_count,
-                   p.starts_at, p.ends_at, p.open_ended, p.created_at, p.last_modified_at, p.deleted_at,
-                   u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
-                   avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
-                   avatar_m.size_bytes AS avatar_size_bytes, avatar_m.status AS avatar_status,
-                   avatar_m.created_at AS avatar_created_at, avatar_m.deleted_at AS avatar_deleted_at, avatar_m.object_key AS avatar_object_key,
-                   el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
-                   el.street, el.postal_code, el.city,
-                   ST_Y(el.coordinates::geometry) AS latitude,
-                   ST_X(el.coordinates::geometry) AS longitude,
-                   """ + PostKinds.OF_POST + """
-                   AS kinds
-            FROM posts p
-            JOIN users u ON u.id = p.author_id
-            """ + StanceCounts.JOIN + """
-            LEFT JOIN profile_images pi ON pi.user_id = u.id AND pi.is_active = true
-            LEFT JOIN media avatar_m ON avatar_m.id = pi.thumbnail_media_id
-            LEFT JOIN event_locations el ON el.id = p.event_location_id
-            WHERE p.id = ?
-        """;
-
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
+        try (PreparedStatement stmt = conn.prepareStatement(PostSelect.DETAIL + "WHERE p.id = ?")) {
+            ParamBinder b = new ParamBinder(stmt, conn);
+            PostSelect.bindViewer(b, null);
+            b.bindUUID(postId);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (!rs.next()) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
-
-                List<PostMediaDto> mediaList = MediaQueries.getPostMediaList(conn, postId);
-                MediaResourceDto coverMedia = mediaList.stream()
-                    .map(PostMediaDto::media)
-                    .findFirst()
-                    .orElse(null);
-
-                return new PostDetailDto(
-                    (UUID) rs.getObject("id"),
-                    mapUserSummary(rs),
-                    mapEventLocation(rs),
-                    rs.getString("title"),
-                    rs.getString("description"),
-                    rs.getString("event_url"),
-                    mapLinks(rs),
-                    mapInstant(rs, "starts_at"),
-                    mapInstant(rs, "ends_at"),
-                    rs.getBoolean("open_ended"),
-                    rs.getInt("positive_reaction_count"),
-                    rs.getInt("participant_count"),
-                    rs.getInt("interested_count"),
-                    rs.getInt("going_count"),
-                    rs.getInt("comments_count"),
-                    mapEnum(rs, "type", PostType.class),
-                    mapEnum(rs, "status", PostStatus.class),
-                    mapStringList(rs, "kinds"),
-                    mapInstant(rs, "created_at"),
-                    mapInstant(rs, "last_modified_at"),
-                    mapInstant(rs, "deleted_at"),
-                    coverMedia,
-                    mediaList,
-                    null,
-                    null,
-                    null
-                );
+                return mapPostDetail(rs, MediaQueries.getPostMediaList(conn, postId), null);
             }
         }
     }
