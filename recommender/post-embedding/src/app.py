@@ -33,7 +33,6 @@ NEEDS_EMBEDDING = (
 )
 
 _model = None
-_conn: psycopg.Connection | None = None
 
 
 def _get_model():
@@ -46,19 +45,18 @@ def _get_model():
     return _model
 
 
-def _get_connection() -> psycopg.Connection:
-    global _conn
-    if _conn is None or _conn.closed:
-        _conn = psycopg.connect(
-            host=settings.db_host,
-            port=settings.db_port,
-            dbname=settings.db_name,
-            user=settings.db_username,
-            connect_timeout=settings.db_connect_timeout_seconds,
-            autocommit=True,
-            **_db_credentials(),
-        )
-    return _conn
+def _connect() -> psycopg.Connection:
+    # One per invocation: a connection kept between warm invocations is dead after Aurora pauses, and an idle one
+    # keeps Aurora from pausing.
+    return psycopg.connect(
+        host=settings.db_host,
+        port=settings.db_port,
+        dbname=settings.db_name,
+        user=settings.db_username,
+        connect_timeout=settings.db_connect_timeout_seconds,
+        autocommit=True,
+        **_db_credentials(),
+    )
 
 
 def _db_credentials() -> dict[str, str]:
@@ -97,8 +95,8 @@ def find_posts(
         LEFT JOIN event_locations el ON el.id = p.event_location_id
         WHERE {NOT_DELETED} AND {where}
         ORDER BY p.created_at DESC, p.id
-        """ + ("LIMIT %s" if limit else ""),
-        (*params, limit) if limit else params,
+        """ + ("LIMIT %s" if limit is not None else ""),
+        (*params, limit) if limit is not None else params,
     ).fetchall()
     return [
         (post_id, PostContent(title=title, description=description, venue_name=venue_name, city=city))
@@ -130,8 +128,7 @@ def upsert_embedding(conn: psycopg.Connection, post_id: UUID, vector: list[float
     )
 
 
-def process_post(post_id: UUID) -> None:
-    conn = _get_connection()
+def process_post(conn: psycopg.Connection, post_id: UUID) -> None:
     posts = find_posts(conn, "p.id = %s", (str(post_id),))
     if not posts:
         logger.warning("post %s not found or deleted, skipping", post_id)
@@ -166,7 +163,7 @@ def store_vectors(conn: psycopg.Connection, vectors: list[tuple[UUID, list[float
     try:
         upsert_post_kinds(conn, post_kinds)
     except errors.ForeignKeyViolation:
-        logger.warning("a post no longer exists, skipping the kinds of %s", [str(post_id) for post_id, _ in stored])
+        logger.warning("a post was deleted while the kinds were stored, run derive-kinds if some posts have none")
         return
     for post_id, derived in post_kinds:
         logger.info("stored kinds %s for post %s", derived, post_id)
@@ -211,17 +208,18 @@ def find_kind_vectors(conn: psycopg.Connection) -> dict[str, list[float]] | None
 
 
 def upsert_post_kinds(conn: psycopg.Connection, rows: list[tuple[UUID, list[str]]]) -> None:
+    """A post deleted in the meantime has no row in posts, so it is skipped and doesn't fail the others' inserts."""
     with conn.cursor() as cur:
         cur.executemany(
             """
             INSERT INTO rec_post_kinds (post_id, kinds, model)
-            VALUES (%s, %s, %s)
+            SELECT p.id, %s, %s FROM posts p WHERE p.id = %s
             ON CONFLICT (post_id) DO UPDATE
                 SET kinds      = EXCLUDED.kinds,
                     model      = EXCLUDED.model,
                     updated_at = now()
             """,
-            [(str(post_id), post_kinds, settings.embedding_model) for post_id, post_kinds in rows],
+            [(post_kinds, settings.embedding_model, str(post_id)) for post_id, post_kinds in rows],
         )
 
 
@@ -254,6 +252,9 @@ def embed_kinds(conn: psycopg.Connection) -> int:
     ).fetchall()
     for key, texts in rows:
         mean = np.asarray(_encode(texts), dtype=np.float64).mean(axis=0)
+        norm = np.linalg.norm(mean)
+        if not np.isfinite(norm) or norm == 0:
+            raise ValueError(f"the texts of kind {key} have no direction to embed")
         conn.execute(
             """
             INSERT INTO event_kind_embeddings (kind_key, embedding, model, embedded_texts)
@@ -264,7 +265,7 @@ def embed_kinds(conn: psycopg.Connection) -> int:
                     embedded_texts = EXCLUDED.embedded_texts,
                     updated_at     = now()
             """,
-            (key, (mean / np.linalg.norm(mean)).tolist(), settings.embedding_model, texts),
+            (key, (mean / norm).tolist(), settings.embedding_model, texts),
         )
     return len(rows)
 
@@ -295,22 +296,33 @@ def embed_interests(conn: psycopg.Connection) -> int:
     return len(rows)
 
 
-def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    if event.get("action") == EMBED_INTERESTS_ACTION:
-        conn = _get_connection()
-        return {"interests": embed_interests(conn), "kinds": embed_kinds(conn)}
-    if event.get("action") == DERIVE_KINDS_ACTION:
-        return {"posts": derive_all_kinds(_get_connection())}
-    if event.get("action") == EMBED_POSTS_ACTION:
-        return embed_pending_posts(_get_connection(), lambda: context.get_remaining_time_in_millis() / 1000)
-
+def _process_records(conn: psycopg.Connection, records: list[dict[str, Any]]) -> dict[str, Any]:
     failures = []
-    for record in event.get("Records", []):
+    for record in records:
         try:
             for post_id in post_ids_from_s3_event(record["body"]):
-                process_post(post_id)
+                process_post(conn, post_id)
         except Exception:
             logger.exception("error on message %s, leaving it for retry/DLQ", record.get("messageId"))
             failures.append({"itemIdentifier": record["messageId"]})
 
     return {"batchItemFailures": failures}
+
+
+ACTIONS: dict[str, Callable[[psycopg.Connection, Any], dict[str, int]]] = {
+    EMBED_INTERESTS_ACTION: lambda conn, context: {"interests": embed_interests(conn), "kinds": embed_kinds(conn)},
+    DERIVE_KINDS_ACTION: lambda conn, context: {"posts": derive_all_kinds(conn)},
+    EMBED_POSTS_ACTION: lambda conn, context: embed_pending_posts(
+        conn, lambda: context.get_remaining_time_in_millis() / 1000
+    ),
+}
+
+
+def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    action = event.get("action")
+    if "action" in event and action not in ACTIONS:
+        raise ValueError(f"unknown action: {action!r}")
+    with _connect() as conn:
+        if action is None:
+            return _process_records(conn, event.get("Records", []))
+        return ACTIONS[action](conn, context)

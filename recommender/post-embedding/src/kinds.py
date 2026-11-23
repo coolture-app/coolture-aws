@@ -13,22 +13,16 @@ def cosines(post: Sequence[float], kinds: Mapping[str, Sequence[float]]) -> dict
 
 def derive(scores: Mapping[str, float]) -> list[str]:
     """
-    A post's kinds, best first: the closest kind, plus the second when within the margin. Dla dzieci is a kind like the
-    others there, but it's kept, or added last, only when it's close enough to the best other kind, since the switch in
-    Filtry reads it and must be precise. Left alone, it gets the best other kind beside it, so a children's concert is
-    found by Koncerty with Dla dzieci on.
+    A post's kinds, best first: the closest kind, plus the second when within the margin. Dla dzieci is left out of that
+    ranking, so it never takes the second slot. It's added only when it's close enough to the best other kind, since
+    the switch in Filtry reads it and must be precise. Left alone, it gets the best other kind beside it, so a
+    children's concert is found by Koncerty with Dla dzieci on.
     """
-    ranked = sorted(scores, key=scores.__getitem__, reverse=True)
-    kept = ranked[:1]
-    if len(ranked) > 1 and scores[ranked[0]] - scores[ranked[1]] <= SECOND_MARGIN:
-        kept.append(ranked[1])
-
     kids = KIDS_KIND
-    if kids in scores:
-        others = [key for key in ranked if key != kids]
-        kept = [key for key in kept if key != kids]
-        if not others or scores[kids] - scores[others[0]] >= KIDS_MIN_LEAD:
-            kept.append(kids)
-        if kept == [kids] and others:
-            kept.append(others[0])
+    others = sorted((key for key in scores if key != kids), key=scores.__getitem__, reverse=True)
+    kept = others[:1]
+    if len(others) > 1 and scores[others[0]] - scores[others[1]] <= SECOND_MARGIN:
+        kept.append(others[1])
+    if kids in scores and (not others or scores[kids] - scores[others[0]] >= KIDS_MIN_LEAD):
+        kept.append(kids)
     return sorted(kept, key=scores.__getitem__, reverse=True)

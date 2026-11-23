@@ -55,3 +55,14 @@ def test_find_posts_gives_the_live_posts_newest_first_up_to_the_limit(conn):
     assert newest_three == everything[:3]
     assert [post_id for post_id, _ in one] == [live[1][0]]
     assert app.find_posts(conn, "p.id = %s", (str(gone),)) == []
+
+
+def test_kinds_are_stored_for_the_posts_that_exist_and_a_missing_post_does_not_fail_the_others(conn):
+    (post_id,) = conn.execute(f"SELECT p.id FROM posts p WHERE {app.NOT_DELETED} LIMIT 1").fetchone()
+    missing = "99999999-9999-9999-9999-999999999999"
+
+    app.upsert_post_kinds(conn, [(missing, ["concerts"]), (post_id, ["stage"])])
+
+    stored = dict(conn.execute("SELECT post_id::text, kinds FROM rec_post_kinds WHERE post_id IN (%s, %s)",
+                               (str(post_id), missing)).fetchall())
+    assert stored == {str(post_id): ["stage"]}

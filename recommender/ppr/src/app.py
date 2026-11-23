@@ -68,7 +68,7 @@ DELETE FROM rec_ppr_scores WHERE run_number IN (SELECT run_number FROM old)
 
 
 def _connect() -> psycopg.Connection:
-    # Copied, with _db_credentials, from post-embedding's _get_connection; change both.
+    # Copied, with _db_credentials, from post-embedding's _connect; change both.
     return psycopg.connect(
         host=settings.db_host,
         port=settings.db_port,

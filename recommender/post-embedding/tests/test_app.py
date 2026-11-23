@@ -41,6 +41,12 @@ def failures(*message_ids: str) -> dict:
     return {"batchItemFailures": [{"itemIdentifier": message_id} for message_id in message_ids]}
 
 
+def opened(conn: MagicMock) -> MagicMock:
+    """What `with _connect() as conn` gives back is the connection itself, as psycopg's does."""
+    conn.__enter__.return_value = conn
+    return conn
+
+
 @pytest.fixture
 def model(monkeypatch):
     m = MagicMock()
@@ -59,7 +65,7 @@ def db(monkeypatch):
         vectors=[],
         kinds=[],
     )
-    monkeypatch.setattr(app, "_get_connection", lambda: db.conn)
+    monkeypatch.setattr(app, "_connect", lambda: opened(db.conn))
     monkeypatch.setattr(app, "find_posts", lambda conn, where, params, limit=None: db.posts)
     monkeypatch.setattr(app, "find_kind_vectors", lambda conn: db.kind_vectors)
     monkeypatch.setattr(app, "upsert_embedding", lambda conn, post_id, vector: db.vectors.append((post_id, vector)))
@@ -232,7 +238,7 @@ def test_should_sign_iam_token_and_require_ssl_when_iam_auth_is_enabled(monkeypa
 def test_should_embed_only_interests_returned_when_invoked_with_embed_interests(model, monkeypatch):
     conn = MagicMock()
     conn.execute.return_value.fetchall.side_effect = [[("jazz", "Jazz: koncerty")], []]
-    monkeypatch.setattr(app, "_get_connection", lambda: conn)
+    monkeypatch.setattr(app, "_connect", lambda: opened(conn))
 
     result = app.lambda_handler({"action": "embed-interests"}, None)
 
@@ -257,7 +263,7 @@ def test_should_embed_changed_kinds_as_their_texts_mean(model, monkeypatch):
     conn.execute.return_value.fetchall.side_effect = [[], [("concerts", texts)]]
     model.encode.side_effect = None
     model.encode.return_value = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
-    monkeypatch.setattr(app, "_get_connection", lambda: conn)
+    monkeypatch.setattr(app, "_connect", lambda: opened(conn))
 
     # when
     result = app.lambda_handler({"action": "embed-interests"}, None)
@@ -274,7 +280,7 @@ def test_should_rederive_every_post_and_drop_other_models_kinds_when_invoked_wit
     conn = MagicMock()
     other = "22222222-2222-2222-2222-222222222222"
     conn.execute.return_value.fetchall.side_effect = [KIND_ROWS, [(POST_ID, [1.0, 0.0, 0.0]), (other, [0.0, 0.0, 1.0])]]
-    monkeypatch.setattr(app, "_get_connection", lambda: conn)
+    monkeypatch.setattr(app, "_connect", lambda: opened(conn))
 
     # when
     result = app.lambda_handler({"action": "derive-kinds"}, None)
@@ -282,7 +288,7 @@ def test_should_rederive_every_post_and_drop_other_models_kinds_when_invoked_wit
     # then
     assert result == {"posts": 2}
     assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
-        call(ANY, [(POST_ID, ["concerts"], MODEL), (other, ["stage"], MODEL)]),
+        call(ANY, [(["concerts"], MODEL, POST_ID), (["stage"], MODEL, other)]),
     ]
     delete = conn.execute.call_args_list[-1]
     assert "DELETE FROM rec_post_kinds" in delete.args[0]
@@ -293,7 +299,7 @@ def test_should_fail_derive_kinds_when_kinds_have_no_vectors(monkeypatch):
     # given
     conn = MagicMock()
     conn.execute.return_value.fetchall.return_value = [("concerts", None)]
-    monkeypatch.setattr(app, "_get_connection", lambda: conn)
+    monkeypatch.setattr(app, "_connect", lambda: opened(conn))
 
     # when, then
     with pytest.raises(RuntimeError):
@@ -336,3 +342,47 @@ def test_should_stop_before_the_timeout_and_say_how_many_posts_are_left(model, d
     # then
     assert result == {"posts": 1, "left": 40}
     assert len(model.encode.call_args_list) == 1
+
+
+def test_should_open_one_connection_per_invocation_and_close_it(model, db):
+    # when
+    app.lambda_handler(sqs_event(s3_body(POST_KEY), s3_body(POST_KEY)), None)
+
+    # then
+    assert (db.conn.__enter__.call_count, db.conn.__exit__.call_count) == (1, 1)
+
+
+def test_should_close_the_connection_when_the_action_fails(monkeypatch):
+    # given
+    conn = MagicMock()
+    conn.execute.return_value.fetchall.return_value = [("concerts", None)]
+    monkeypatch.setattr(app, "_connect", lambda: opened(conn))
+
+    # when, then
+    with pytest.raises(RuntimeError):
+        app.lambda_handler({"action": "derive-kinds"}, None)
+    assert conn.__exit__.call_count == 1
+
+
+def test_should_fail_without_connecting_when_the_action_is_unknown(monkeypatch):
+    # given
+    def never():
+        raise AssertionError("connected")
+
+    monkeypatch.setattr(app, "_connect", never)
+
+    # when, then
+    with pytest.raises(ValueError, match="embed_posts"):
+        app.lambda_handler({"action": "embed_posts"}, None)
+
+
+def test_should_fail_when_the_texts_of_a_kind_have_no_direction(model, monkeypatch):
+    # given
+    conn = MagicMock()
+    conn.execute.return_value.fetchall.return_value = [("concerts", ["a", "b"])]
+    model.encode.side_effect = None
+    model.encode.return_value = np.array([[1.0, 0.0], [-1.0, 0.0]], dtype=np.float32)
+
+    # when, then
+    with pytest.raises(ValueError, match="concerts"):
+        app.embed_kinds(conn)

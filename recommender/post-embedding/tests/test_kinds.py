@@ -29,3 +29,11 @@ def test_should_give_dla_dzieci_its_best_format_when_it_stands_alone(scores, exp
 ], ids=["kept first", "removed when too far below the best other", "added last", "kept as the second"])
 def test_should_keep_dla_dzieci_only_when_close_enough_to_the_best_other_kind(scores, expected):
     assert kinds.derive(scores) == expected
+
+
+@pytest.mark.parametrize("scores, expected", [
+    ({"concerts": 0.800, "kids": 0.795, "stage": 0.794}, ["concerts", "stage"]),
+    ({"concerts": 0.800, "kids": 0.802, "stage": 0.794}, ["kids", "concerts", "stage"]),
+], ids=["kids too far below, so it takes no slot", "kids kept, so it takes no slot"])
+def test_should_not_let_dla_dzieci_take_the_second_slot_from_a_format_within_the_margin(scores, expected):
+    assert kinds.derive(scores) == expected
