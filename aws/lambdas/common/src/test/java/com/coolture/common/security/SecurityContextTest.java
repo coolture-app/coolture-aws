@@ -25,6 +25,16 @@ class SecurityContextTest {
     }
 
     @Test
+    void isLocal_onlyForTheLocalEnvironment() {
+        assertTrue(SecurityContext.isLocal("local"));
+        assertTrue(SecurityContext.isLocal("LOCAL"));
+        assertFalse(SecurityContext.isLocal(null));
+        assertFalse(SecurityContext.isLocal(""));
+        assertFalse(SecurityContext.isLocal(" "));
+        assertFalse(SecurityContext.isLocal("dev"));
+    }
+
+    @Test
     void getUserId_whenDevFallbackEnabledAndNoHeaders_returnsDefaultDevUserId() {
         SecurityContext.setDevFallbackOverride(true);
         APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder().build();
