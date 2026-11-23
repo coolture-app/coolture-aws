@@ -117,7 +117,7 @@ paths:
       tags: [Profiles]
       operationId: updateUser
       summary: Changes the caller's own profile
-      description: A field that is left out or null stays as it is, so a field can't be cleared here.
+      description: A field that is left out stays as it is. Only the bio can be cleared, by sending null or a blank one.
       requestBody:
         required: true
         content:
@@ -225,6 +225,7 @@ paths:
     get:
       tags: [Interests]
       operationId: getInterestCatalog
+      security: [{}, {bearerAuth: []}]
       summary: Onboarding's choices, kinds of event then interests by category, with how many to pick
       description: >
         Only offered interests are listed, and only they can be picked. A category with no offered interest is left
@@ -235,7 +236,6 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/InterestCatalog'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
   /users/{userId}/interests:
     parameters:
       - $ref: '#/components/parameters/UserId'

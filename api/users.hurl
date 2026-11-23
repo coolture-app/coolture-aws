@@ -119,6 +119,7 @@ status < 300
 # The catalogue: kinds of event, then interests by category. Interests with no event behind them, or named like a kind,
 # are hidden.
 GET {{api}}/dicts/interests
+X-Anonymous: true
 HTTP 200
 [Asserts]
 jsonpath "$.kinds" count > 0
