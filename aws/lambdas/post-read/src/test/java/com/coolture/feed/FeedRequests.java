@@ -7,6 +7,8 @@ public final class FeedRequests {
 
     private FeedRequests() {}
 
+    public static final PostFeedFilters NO_FILTERS = page(null, 20, null, null);
+
     public static PostFeedFilters page(String cursor, int limit, Double latitude, Double longitude) {
         return new PostFeedFilters(null, null, null, null, null, null, null, latitude, longitude, null,
             null, null, cursor, limit, null, false, null, false, null);

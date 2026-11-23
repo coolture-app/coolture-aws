@@ -45,7 +45,7 @@ class PostReadServiceTest {
     void getFeed_whenParticipationFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            List.of("INTERESTED"), null, null, 20, null
+            List.of("INTERESTED"), null, null, 20, null, false, null, false, null
         );
 
         assertThrows(SecurityException.class, () -> service.getFeed(null, filters, null, 20));
@@ -56,7 +56,7 @@ class PostReadServiceTest {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            List.of("INVALID_TYPE"), null, null, 20, null
+            List.of("INVALID_TYPE"), null, null, 20, null, false, null, false, null
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, filters, null, 20));
@@ -66,7 +66,7 @@ class PostReadServiceTest {
     void getFeed_whenReactionFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, "LIKE", null, 20, null
+            null, "LIKE", null, 20, null, false, null, false, null
         );
 
         assertThrows(SecurityException.class, () -> service.getFeed(null, filters, null, 20));
@@ -77,7 +77,7 @@ class PostReadServiceTest {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, "SUPER_LIKE", null, 20, null
+            null, "SUPER_LIKE", null, 20, null, false, null, false, null
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, filters, null, 20));
@@ -98,7 +98,7 @@ class PostReadServiceTest {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, null, null, limit, null
+            null, null, null, limit, null, false, null, false, null
         );
 
         when(repository.findFeed(any(), any(), any(), any(), eq(21)))
@@ -114,7 +114,7 @@ class PostReadServiceTest {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 500, null
+            null, null, null, 500, null, false, null, false, null
         );
 
         when(repository.findFeed(any(), any(), any(), any(), eq(101)))
@@ -131,7 +131,7 @@ class PostReadServiceTest {
         boolean stances = "STANCE_NEWEST".equals(sortBy);
         return new PostFeedFilters(
             null, null, null, null, null, null, null, nearest ? 54.35 : null, nearest ? 18.65 : null, null,
-            stances ? List.of("NOT_INTERESTED") : null, null, null, 20, sortBy
+            stances ? List.of("NOT_INTERESTED") : null, null, null, 20, sortBy, false, null, false, null
         );
     }
 
@@ -139,7 +139,7 @@ class PostReadServiceTest {
     void getFeed_whenStanceNewestHasNoParticipationTypes_throws() {
         PostFeedFilters noStances = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, "STANCE_NEWEST"
+            null, null, null, 20, "STANCE_NEWEST", false, null, false, null
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), noStances, null, 20));
@@ -177,7 +177,7 @@ class PostReadServiceTest {
     @ValueSource(strings = {"interested", "takes_part", "not_interested", "OTHER"})
     void getFeed_whenAParticipationTypeIsNotInUppercase_throws(String type) {
         PostFeedFilters filters = new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
-            List.of(type), null, null, 20, "RECENT");
+            List.of(type), null, null, 20, "RECENT", false, null, false, null);
 
         assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), filters, null, 20));
         verifyNoInteractions(repository);
@@ -186,7 +186,7 @@ class PostReadServiceTest {
     @Test
     void getFeed_whenAReactionTypeIsNotInUppercase_throws() {
         PostFeedFilters filters = new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
-            null, "like", null, 20, "RECENT");
+            null, "like", null, 20, "RECENT", false, null, false, null);
 
         assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), filters, null, 20));
         verifyNoInteractions(repository);
@@ -196,7 +196,7 @@ class PostReadServiceTest {
     void getFeed_whenNearestHasNoPosition_throws() {
         PostFeedFilters noPosition = new PostFeedFilters(
             null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, "NEAREST"
+            null, null, null, 20, "NEAREST", false, null, false, null
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, noPosition, null, 20));
@@ -291,11 +291,11 @@ class PostReadServiceTest {
         Instant date = Instant.parse("2026-11-02T12:00:00Z");
         assertFalse(sortedBy(null).showsAllPastEvents());
         assertTrue(new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, null, true).showsAllPastEvents());
+            null, null, null, 20, null, true, null, false, null).showsAllPastEvents());
         assertTrue(new PostFeedFilters(null, null, null, null, null, date, null, null, null, null,
-            null, null, null, 20, null).showsAllPastEvents());
+            null, null, null, 20, null, false, null, false, null).showsAllPastEvents());
         assertTrue(new PostFeedFilters(null, null, null, null, null, null, date, null, null, null,
-            null, null, null, 20, null).showsAllPastEvents());
+            null, null, null, 20, null, false, null, false, null).showsAllPastEvents());
     }
 
 }

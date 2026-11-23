@@ -60,6 +60,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.coolture.feed.FeedRequests.NO_FILTERS;
 import static com.coolture.feed.FeedRequests.page;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -108,7 +109,7 @@ class PostReadDbTest {
 
     private static PostFeedFilters filters(String sortBy, boolean includePast, Instant startsFrom, Instant startsTo) {
         return new PostFeedFilters(null, null, null, null, null, startsFrom, startsTo, null, null, null,
-            null, null, null, 20, sortBy, includePast);
+            null, null, null, 20, sortBy, includePast, null, false, null);
     }
 
     private static Set<String> ruleTitles(List<PostCardDto> cards) {
@@ -216,8 +217,8 @@ class PostReadDbTest {
     @Test
     void feed_aPostCreatedAfterAsOf_appearsOnlyInALaterSession() throws SQLException {
         Instant now = Instant.now();
-        Set<UUID> thisSession = ids(feedRepository.findCandidates(ME, null, null, now, null, null, PostFeedFilters.none()));
-        Set<UUID> laterSession = ids(feedRepository.findCandidates(ME, null, null, now.plus(Duration.ofHours(2)), null, null, PostFeedFilters.none()));
+        Set<UUID> thisSession = ids(feedRepository.findCandidates(ME, null, null, now, null, null, NO_FILTERS));
+        Set<UUID> laterSession = ids(feedRepository.findCandidates(ME, null, null, now.plus(Duration.ofHours(2)), null, null, NO_FILTERS));
 
         laterSession.removeAll(thisSession);
         assertEquals(1, laterSession.size());
@@ -230,9 +231,9 @@ class PostReadDbTest {
     @Test
     void feed_theFallback_appliesTheSameRulesAndFilters() throws SQLException {
         assertEquals(ruleTitles(walkFeed(feedService, ME, 100, null, null, FeedMode.RANKED)),
-            ruleTitles(feedRepository.findUpcoming(ME, PostFeedFilters.none(), Upcoming.Position.start(Instant.now()), 1000).items()));
+            ruleTitles(feedRepository.findUpcoming(ME, NO_FILTERS, Upcoming.Position.start(Instant.now()), 1000).items()));
         assertEquals(ruleTitles(walkFeed(feedService, null, 100, null, null, FeedMode.RANKED)),
-            ruleTitles(feedRepository.findUpcoming(null, PostFeedFilters.none(), Upcoming.Position.start(Instant.now()), 1000).items()));
+            ruleTitles(feedRepository.findUpcoming(null, NO_FILTERS, Upcoming.Position.start(Instant.now()), 1000).items()));
 
         PostFeedFilters radius = around(null, 1.0);
         assertEquals(new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, radius, FeedMode.RANKED)))),
@@ -458,7 +459,7 @@ class PostReadDbTest {
     /** ME's candidates, as the feed's first page gathers them. */
     private List<FeedScorer.Facts> candidates(Instant asOf) throws SQLException {
         UserVector.Parts parts = feedRepository.findVectorParts(ME, asOf);
-        return feedRepository.findCandidates(ME, UserVector.blend(parts), parts.postAverage(), asOf, null, null, PostFeedFilters.none());
+        return feedRepository.findCandidates(ME, UserVector.blend(parts), parts.postAverage(), asOf, null, null, NO_FILTERS);
     }
 
     private double similarity(UUID post, Instant asOf) throws SQLException {
@@ -684,7 +685,7 @@ class PostReadDbTest {
 
     private static PostFeedFilters stances(String... types) {
         return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
-            List.of(types), null, null, 20, "STANCE_NEWEST", true);
+            List.of(types), null, null, 20, "STANCE_NEWEST", true, null, false, null);
     }
 
     @Test
@@ -715,7 +716,7 @@ class PostReadDbTest {
 
     private static PostFeedFilters followed() {
         return new PostFeedFilters(null, null, null, true, null, null, null, null, null, null,
-            null, null, null, 20, "RECENT", false);
+            null, null, null, 20, "RECENT", false, null, false, null);
     }
 
     @Test
@@ -831,12 +832,12 @@ class PostReadDbTest {
     /** Around the fixtures' centre, (54.35, 18.65): close is there, mid about 650 m away, far about 6.5 km. */
     private static PostFeedFilters around(String sortBy, Double radiusKm) {
         return new PostFeedFilters(null, null, null, null, null, null, null, 54.35, 18.65, radiusKm,
-            null, null, null, 20, sortBy, false);
+            null, null, null, 20, sortBy, false, null, false, null);
     }
 
     private static PostFeedFilters searching(String q) {
         return new PostFeedFilters(q, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, null, false);
+            null, null, null, 20, null, false, null, false, null);
     }
 
     /** The distance word of each near_ post, in order. */
@@ -1040,7 +1041,7 @@ class PostReadDbTest {
             .stream().map(PostCardDto::id).toList();
 
         assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
-        assertEquals(ids(feedRepository.findCandidates(viewer, null, null, Instant.now(), latitude, longitude, PostFeedFilters.none())), new HashSet<>(walked));
+        assertEquals(ids(feedRepository.findCandidates(viewer, null, null, Instant.now(), latitude, longitude, NO_FILTERS)), new HashSet<>(walked));
     }
 
     @Test
@@ -1082,7 +1083,7 @@ class PostReadDbTest {
 
     private static PostFeedFilters by(UUID author, String sortBy, Instant from, Instant to, String q) {
         return new PostFeedFilters(q, author, null, null, null, from, to, null, null, null,
-            null, null, null, 100, sortBy, false);
+            null, null, null, 100, sortBy, false, null, false, null);
     }
 
     private Set<String> timeTitles(Instant from, Instant to) throws SQLException {
