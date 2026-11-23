@@ -4,6 +4,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3ClientBuilder;
@@ -140,6 +141,7 @@ public class S3StorageService {
         AwsCredentialsProvider credentialsProvider = resolveCredentialsProvider();
 
         S3ClientBuilder builder = S3Client.builder()
+                .httpClientBuilder(UrlConnectionHttpClient.builder())
                 .region(region)
                 .credentialsProvider(credentialsProvider);
 
