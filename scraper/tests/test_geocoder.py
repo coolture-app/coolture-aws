@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 import requests
 
-from geocoder import Geocoder, GeocoderUnavailable, Place, is_street, same_street
+from geocoder import Geocoder, GeocoderUnavailable, is_street, same_street
 from trojmiasto import Event
 
 

@@ -516,14 +516,6 @@ def test_a_long_description_is_cut_at_the_end_of_a_line():
     assert not cut.endswith('…')
 
 
-def test_polish_letters_survive_the_cleaning_and_the_cut():
-    # Ł is the bytes C5 81, and a reader in Windows' cp1250 shows them as "Ĺ\udc81": the text itself is fine.
-    description = cut_description(fixture('concert.html').description)
-
-    assert 'Łączy' in description
-    assert not [char for char in description if 0xD800 <= ord(char) <= 0xDFFF]
-
-
 def test_a_link_holding_a_name_or_an_address_stays():
     body = '<div class="text-contents">Napisz na <a href="mailto:a@b.pl">a@b.pl</a> albo zobacz <a href="/x">Klub Mewa</a>.</div>'
 

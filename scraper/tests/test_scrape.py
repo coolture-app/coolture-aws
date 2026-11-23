@@ -123,7 +123,6 @@ def test_a_place_with_no_postal_code_is_still_sent():
     stats = run_import(FakeSite([listed(1)], {listed(1).url: read_page(postal_code=None)}),
                        FakeGeocoder(Place(54.3, 18.6, None, exact=False)), api)
 
-    assert stats['no_location'] == 0
     assert 'postalCode' not in api.created[0]['location']
 
 

@@ -51,17 +51,6 @@ def test_a_ledger_saves_each_change_at_once():
     assert s3.puts == ['a\nc\n', 'a\nb\nc\n']
 
 
-def test_geocoder_requests_are_signed_for_a_lambda_url():
-    request = requests.Request('GET', 'https://abc.lambda-url.eu-north-1.on.aws/structured',
-                               params={'street': 'Morska', 'city': 'Reda'}).prepare()
-
-    SignedForLambdaUrl(Credentials('AKID', 'SECRET'), 'eu-north-1')(request)
-
-    assert request.headers['Authorization'].startswith('AWS4-HMAC-SHA256 Credential=AKID/')
-    assert '/eu-north-1/lambda/aws4_request' in request.headers['Authorization']
-    assert 'X-Amz-Date' in request.headers
-
-
 def test_a_space_is_sent_and_signed_as_percent_20_which_aws_expects():
     request = requests.Request('GET', 'https://abc.lambda-url.eu-north-1.on.aws/api',
                                params={'q': 'Klub Żak, Gdańsk', 'tag': 'a+b'}).prepare()

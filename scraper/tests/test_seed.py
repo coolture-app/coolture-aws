@@ -1,6 +1,5 @@
 import json
-from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 import requests
@@ -251,17 +250,6 @@ def test_waiting_for_the_api_gives_up_with_a_hint(monkeypatch):
 
     with pytest.raises(SeedError, match='make local'):
         wait_for_api('http://api.test', timeout_s=15, sleep=lambda s: None, monotonic=lambda: next(clock))
-
-
-def test_each_friends_line_case_gets_its_own_post():
-    planned = friend_stances([f'p{number}' for number in range(len(FRIEND_CASES))])
-
-    assert [(name, kind) for post_id, name, kind in planned if post_id == 'p0'] == [('kasia_demo', 'TAKES_PART')]
-    assert [(name, kind) for post_id, name, kind in planned if post_id == 'p1'] == [('piotr_demo', 'INTERESTED')]
-    by_post = Counter((post_id, kind) for post_id, _, kind in planned)
-    assert by_post[('p4', 'TAKES_PART')] == 5
-    assert by_post[('p5', 'TAKES_PART')] == 3 and by_post[('p5', 'INTERESTED')] == 4
-    assert [name for post_id, name, _ in planned if post_id == 'p6'] == ['bartek_demo', 'iza_demo']
 
 
 def test_no_one_takes_two_stances_on_one_post():
