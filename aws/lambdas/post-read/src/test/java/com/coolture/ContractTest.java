@@ -13,7 +13,9 @@ import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostLinkDto;
+import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.UserSummaryDto;
@@ -23,6 +25,7 @@ import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
 import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.response.ApiResponse;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.feed.FeedMode;
@@ -53,6 +56,8 @@ class ContractTest {
 
     private static final OpenApiInteractionValidator VALIDATOR = OpenApiInteractionValidator
         .createForSpecificationUrl(Path.of("contracts", "feed-api.yaml").toUri().toString())
+        // Merges PostDetail's allOf, so PostCard's additionalProperties: false allows media and kinds.
+        .withResolveCombinators(true)
         .build();
 
     private final PostReadService posts = mock(PostReadService.class);
@@ -172,6 +177,34 @@ class ContractTest {
         assertEquals(404, handler.handleRequest(event, context).getStatusCode());
         assertMatches(responseReport(path, event));
         assertTrue(bodyReport(path, "{\"going\":[]}").hasErrors());
+    }
+
+    @Test
+    void postDetail_matches() throws Exception {
+        UUID postId = UUID.randomUUID();
+        String path = "/posts/" + postId;
+        PostCardDto card = fullCard();
+        PostDetailDto minimal = detail(minimalCard(), List.of(), null);
+        when(posts.getById(any(), any()))
+            .thenReturn(detail(card, List.of(new PostMediaDto(card.coverMedia(), 0)), List.of("concert")))
+            .thenReturn(minimal)
+            .thenThrow(new IllegalArgumentException("Post not found: " + postId));
+
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(path, null, Map.of("id", postId.toString()));
+
+        assertMatches(responseReport(path, event));
+        assertMatches(responseReport(path, event));
+        assertEquals(404, handler.handleRequest(event, context).getStatusCode());
+        String body = ApiResponse.ok(minimal).getBody();
+        assertTrue(bodyReport(path, "{\"surprise\":1," + body.substring(1)).hasErrors());
+    }
+
+    private static PostDetailDto detail(PostCardDto card, List<PostMediaDto> media, List<String> kinds) {
+        return new PostDetailDto(card.id(), card.author(), card.location(), card.title(), card.description(),
+            card.eventUrl(), card.links(), card.startsAt(), card.endsAt(), card.openEnded(), card.positiveReactionCount(),
+            card.participantCount(), card.interestedCount(), card.goingCount(), card.commentsCount(), card.type(),
+            card.status(), kinds, card.createdAt(), card.lastModifiedAt(), card.deletedAt(), card.coverMedia(), media,
+            card.myReaction(), card.myParticipation(), card.friendStances());
     }
 
     @Test

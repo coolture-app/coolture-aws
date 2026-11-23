@@ -143,6 +143,28 @@ paths:
                 items: {$ref: '#/components/schemas/PostMark'}
         '400':
           $ref: '#/components/responses/BadRequest'
+  /posts/{id}:
+    get:
+      tags: [Lists]
+      operationId: getPost
+      summary: One post, with all its photos and kinds, for its page and its edit form
+      description: >
+        A deleted post is a 404, and so is a post whose author and viewer blocked one another. post-write's POST and
+        PATCH answer the same shape.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: The post.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PostDetail'}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
   /posts/{postId}/friends:
     get:
       tags: [Lists]
@@ -364,6 +386,29 @@ components:
           maxItems: 8
           items: {$ref: '#/components/schemas/MediaResource'}
         friendStances: {$ref: '#/components/schemas/FriendStances'}
+    PostDetail:
+      description: A card's fields, with every photo and its position in place of photos, and the kinds.
+      allOf:
+        - $ref: '#/components/schemas/PostCard'
+        - type: object
+          required: [media]
+          properties:
+            media:
+              type: array
+              description: In the post's order. Empty when it has none.
+              maxItems: 8
+              items: {$ref: '#/components/schemas/PostMedia'}
+            kinds:
+              type: array
+              description: Kinds of event, best first. Left out until derived.
+              items: {type: string}
+    PostMedia:
+      type: object
+      additionalProperties: false
+      required: [media, position]
+      properties:
+        media: {$ref: '#/components/schemas/MediaResource'}
+        position: {type: integer, minimum: 0}
     PostMark:
       type: object
       additionalProperties: false
