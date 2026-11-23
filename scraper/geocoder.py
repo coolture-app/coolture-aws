@@ -22,7 +22,8 @@ HOUSE_NUMBER = re.compile(r'\d+[a-zA-Z]?')
 TRAILING_NUMBER = re.compile(r'^(?P<street>.*[^\d\s])\s+(?P<number>\d\S*)$')
 WRONG_SHAPE = (KeyError, IndexError, AttributeError, TypeError, ValueError)
 # The site sometimes puts a hall in the street field ("w Sali Haxo"), which a search would place on some other street.
-NOT_A_STREET = re.compile(r'^(w|we|sala|sali)\b', re.IGNORECASE)
+# The negative lookahead keeps "W. Stwosza", a street named for Wit Stwosz.
+NOT_A_STREET = re.compile(r'^(w|we|sala|sali)\b(?!\.)', re.IGNORECASE)
 # Words that say what kind of street it is, which Photon writes out or leaves out ("pl." for "Plac").
 STREET_KINDS = {'ul', 'ulica', 'al', 'aleja', 'aleje', 'pl', 'plac', 'os', 'osiedle', 'rondo', 'skwer', 'bulwar'}
 
@@ -120,10 +121,14 @@ def is_street(street: str | None) -> bool:
 def same_street(asked: str, properties: dict) -> bool:
     """Whether Photon's answer is on the street asked for: every word of letters in the asked name begins a word of the
     answer's street, or of its name when the answer is the street itself, so "gen. Hallera" finds "Generała Józefa
-    Hallera". Numbers are left out, since some streets arrive with their house number ("Rakoczego 11/U3")."""
+    Hallera". A number is left out, since some streets arrive with their house number ("Rakoczego 11/U3"), unless it
+    starts the name ("3 Maja"), where it must be the same number."""
     found = _words(properties.get('street') or properties.get('name') or '')
-    wanted = [w for w in _words(asked) if w not in STREET_KINDS and len(w) > 1 and w.isalpha()]
-    return bool(wanted) and all(any(f.startswith(w) for f in found) for w in wanted)
+    words = [w for w in _words(asked) if w not in STREET_KINDS]
+    wanted = [w for w in words if len(w) > 1 and w.isalpha()]
+    if len(words) > 1 and words[0].isdigit() and words[1].isalpha():
+        wanted.insert(0, words[0])
+    return bool(wanted) and all(any(f == w if w.isdigit() else f.startswith(w) for f in found) for w in wanted)
 
 
 def _words(text: str) -> list[str]:

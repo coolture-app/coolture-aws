@@ -220,7 +220,7 @@ def test_a_hall_in_the_street_field_is_not_searched_and_the_venue_places_it():
 @pytest.mark.parametrize('street, expected', [
     ('Portowa', True), ('w Sali Haxo', False), ('W sali kameralnej', False), ('we Dworze Artusa', False),
     ('Sala Koncertowa', False), ('35/38', False), ('', False), (None, False), ('Wały Jagiellońskie', True),
-    ('Wielopole', True),
+    ('Wielopole', True), ('W. Stwosza', True), ('w. Witosa', True), ('W Sali Haxo', False),
 ])
 def test_what_counts_as_a_street(street, expected):
     assert is_street(street) is expected
@@ -234,6 +234,10 @@ def test_what_counts_as_a_street(street, expected):
     ('al. Zwycięstwa', {'name': 'Aleja Zwycięstwa'}, True),
     ('Łąkowa', {'name': 'Lakowa'}, True),
     ('3 Maja', {'name': '3 Maja'}, True),
+    ('3 Maja', {'name': '1 Maja'}, False),
+    ('3 Maja', {'name': '30 Maja'}, False),
+    ('10 Lutego', {'street': '1 Lutego'}, False),
+    ('ul. 3 Maja 11', {'street': '3 Maja'}, True),
     ('Franciszka Rakoczego 11/U3', {'street': 'Franciszka Rakoczego', 'name': 'Sun Way Travel'}, True),
     ('Portowa', {}, False),
     ('ul.', {'name': 'Portowa'}, False),
