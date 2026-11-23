@@ -119,7 +119,8 @@ WHERE r.user_id = '{user_id}' AND p.deleted_at IS NULL
 """
 # The API refuses a deleted post, and a deleted post has no counts left to keep.
 ON_DELETED_SQL = """
-DELETE FROM post_reactions WHERE user_id = '{user_id}' AND post_id IN (SELECT id FROM posts WHERE deleted_at IS NOT NULL);
+DELETE FROM post_reactions WHERE user_id = '{user_id}'
+  AND post_id IN (SELECT id FROM posts WHERE deleted_at IS NOT NULL);
 DELETE FROM post_participations WHERE user_id = '{user_id}'
   AND post_id IN (SELECT id FROM posts WHERE deleted_at IS NOT NULL);
 """
@@ -184,7 +185,8 @@ def wait_for_api(base_url: str, timeout_s: float = API_WAIT_S, sleep: Callable[[
             raise SeedError(f'The API at {base_url} did not answer in {timeout_s / 60:.0f} minutes. '
                             'Is `make local` (or `make dev`) running?')
         if not told:
-            log.info('Waiting for the API at %s. Start it with `make local` or `make dev` in another terminal.', base_url)
+            log.info('Waiting for the API at %s. Start it with `make local` or `make dev` in another terminal.',
+                     base_url)
             told = True
         sleep(API_POLL_S)
 
@@ -345,7 +347,8 @@ def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
                         f'GET /users/{ids[name]}', name).json()
         if profile.get('avatar'):
             continue
-        full, thumbnail = (Image.read(solid_png(size, colour), 'image/png', f'{name}-{size}.png') for size in AVATAR_SIZES)
+        full, thumbnail = (Image.read(solid_png(size, colour), 'image/png', f'{name}-{size}.png')
+                           for size in AVATAR_SIZES)
         new_api(ids[name]).set_profile_image(ids[name], full, thumbnail)
         stats['photos'] += 1
 

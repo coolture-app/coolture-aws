@@ -110,7 +110,8 @@ public class SecurityContext {
         if (isDevFallbackEnabled()) {
             Map<String, String> headers = event.getHeaders();
             String userId = getHeaderCaseInsensitive(headers, "x-user-id");
-            if ("true".equalsIgnoreCase(getHeaderCaseInsensitive(headers, "x-anonymous")) || "anonymous".equalsIgnoreCase(userId)) {
+            if ("true".equalsIgnoreCase(getHeaderCaseInsensitive(headers, "x-anonymous"))
+                || "anonymous".equalsIgnoreCase(userId)) {
                 return Optional.empty();
             }
             Optional<String> fromHeader = Optional.ofNullable(devHeaderFor(claimName))

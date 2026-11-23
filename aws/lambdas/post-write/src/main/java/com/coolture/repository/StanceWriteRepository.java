@@ -63,7 +63,8 @@ public class StanceWriteRepository {
             } else if (oldTypeOpt.get() != newType) {
                 updateParticipation(conn, postId, userId, newType);
             }
-            int countChange = (counted(newType) ? 1 : 0) - (oldTypeOpt.map(StanceWriteRepository::counted).orElse(false) ? 1 : 0);
+            boolean wasCounted = oldTypeOpt.map(StanceWriteRepository::counted).orElse(false);
+            int countChange = (counted(newType) ? 1 : 0) - (wasCounted ? 1 : 0);
             changeParticipantCount(conn, postId, countChange);
             if (newType == ParticipationType.NOT_INTERESTED && findReaction(conn, postId, userId).isPresent()) {
                 deleteReactionRow(conn, postId, userId);
@@ -138,7 +139,8 @@ public class StanceWriteRepository {
         }
     }
 
-    private Optional<ParticipationType> findParticipation(Connection conn, UUID postId, UUID userId) throws SQLException {
+    private Optional<ParticipationType> findParticipation(Connection conn, UUID postId, UUID userId)
+            throws SQLException {
         String sql = "SELECT type FROM post_participations WHERE post_id = ? AND user_id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, postId);
@@ -152,7 +154,8 @@ public class StanceWriteRepository {
         return Optional.empty();
     }
 
-    private void insertParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type) throws SQLException {
+    private void insertParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type)
+            throws SQLException {
         String sql = "INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, ?, now())";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setObject(1, postId);
@@ -162,7 +165,8 @@ public class StanceWriteRepository {
         }
     }
 
-    private void updateParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type) throws SQLException {
+    private void updateParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type)
+            throws SQLException {
         String sql = "UPDATE post_participations SET type = ?, created_at = now() WHERE post_id = ? AND user_id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, type.name());

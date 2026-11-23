@@ -28,6 +28,7 @@ public record MediaResourceDto(
     }
 
     public MediaResourceDto withUrl(String newUrl) {
-        return new MediaResourceDto(id, purpose, mimeType, sizeBytes, status, newUrl, createdAt, deletedAt, width, height);
+        return new MediaResourceDto(
+            id, purpose, mimeType, sizeBytes, status, newUrl, createdAt, deletedAt, width, height);
     }
 }

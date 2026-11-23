@@ -1,7 +1,7 @@
 """A saved set of scraped events and their photos, so a local stack gets realistic data without scraping the site again.
 
-`scrape.py --snapshot` writes it and `seed.py` loads it. It lives in a gitignored folder, because scraped text and photos
-stay out of the public repository.
+`scrape.py --snapshot` writes it and `seed.py` loads it. It lives in a gitignored folder, because scraped text and
+photos stay out of the public repository.
 """
 import hashlib
 import json
@@ -65,7 +65,7 @@ def allocate(supply: dict[str, int], total: int, power: float = ALLOCATION_POWER
 
 
 def spread_over_dates(items: Iterable[T], day_of: Callable[[T], date | None] = lambda item: item.start_date) -> list[T]:
-    """Orders items so that any first few cover as many days as they can: each day's first event, then each day's second."""
+    """Orders items so that any first few cover as many days as they can: each day's first, then each day's second."""
     by_day: dict[date, list[T]] = defaultdict(list)
     for item in items:
         by_day[day_of(item) or date.max].append(item)

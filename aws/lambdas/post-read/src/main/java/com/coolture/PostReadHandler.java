@@ -221,7 +221,8 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
     /** Keys only by their form: a kind no post has matches nothing, like any filter. */
     private List<String> parseKinds(String raw) {
         List<String> kinds = parseList(raw);
-        if (kinds != null && (kinds.size() > MAX_KINDS || !kinds.stream().allMatch(k -> KIND_KEY.matcher(k).matches()))) {
+        if (kinds != null
+            && (kinds.size() > MAX_KINDS || !kinds.stream().allMatch(k -> KIND_KEY.matcher(k).matches()))) {
             throw new IllegalArgumentException("Invalid kinds");
         }
         return kinds;

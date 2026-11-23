@@ -68,7 +68,8 @@ public class PostReadService {
             .orElseThrow(() -> new IllegalArgumentException("Post not found: " + postId));
     }
 
-    public List<PostMarkDto> getMapMarks(UUID callerId, PostFeedFilters filters, MapBoundsDto bounds, boolean excludeMine) throws SQLException {
+    public List<PostMarkDto> getMapMarks(
+            UUID callerId, PostFeedFilters filters, MapBoundsDto bounds, boolean excludeMine) throws SQLException {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
         validateParticipant(filters, callerId);

@@ -34,7 +34,8 @@ public record PostMarkDto(
     FriendStancesDto friendStances
 ) {
     public PostMarkDto withFriendStances(FriendStancesDto stances) {
-        return new PostMarkDto(id, title, startsAt, endsAt, openEnded, coverMediaUrl, excerpt, positiveReactionCount, interestedCount,
-            goingCount, coordinates, venueName, city, kind, kinds, myReaction, myParticipation, stances);
+        return new PostMarkDto(id, title, startsAt, endsAt, openEnded, coverMediaUrl, excerpt, positiveReactionCount,
+            interestedCount, goingCount, coordinates, venueName, city, kind, kinds, myReaction, myParticipation,
+            stances);
     }
 }

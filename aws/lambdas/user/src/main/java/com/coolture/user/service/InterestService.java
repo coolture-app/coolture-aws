@@ -67,7 +67,8 @@ public class InterestService {
         return picks;
     }
 
-    public UserInterestsDto replaceSelection(UUID targetId, UUID callerId, UserInterestsDto request) throws SQLException {
+    public UserInterestsDto replaceSelection(UUID targetId, UUID callerId, UserInterestsDto request)
+            throws SQLException {
         requireOwner(targetId, callerId);
 
         Set<String> knownKinds = repository.findKinds().stream()

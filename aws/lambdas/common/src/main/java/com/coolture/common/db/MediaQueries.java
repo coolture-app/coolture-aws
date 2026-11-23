@@ -25,8 +25,8 @@ public final class MediaQueries {
     public static List<PostMediaDto> getPostMediaList(Connection conn, UUID postId) throws SQLException {
         String sql = """
             SELECT pm.position,
-                   m.id AS media_id, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at, m.deleted_at, m.object_key,
-                   m.width, m.height
+                   m.id AS media_id, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at, m.deleted_at,
+                   m.object_key, m.width, m.height
             FROM post_media pm
             JOIN media m ON m.id = pm.media_id
             WHERE pm.post_id = ?
@@ -51,7 +51,8 @@ public final class MediaQueries {
             return cards;
         }
         String sql = """
-            SELECT post_id, media_id, purpose, mime_type, size_bytes, status, created_at, deleted_at, object_key, width, height
+            SELECT post_id, media_id, purpose, mime_type, size_bytes, status, created_at, deleted_at, object_key,
+                   width, height
             FROM (
                 SELECT pm.post_id, m.id AS media_id, m.purpose, m.mime_type, m.size_bytes, m.status, m.created_at,
                        m.deleted_at, m.object_key, m.width, m.height,

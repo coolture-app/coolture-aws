@@ -7,8 +7,10 @@ import java.util.function.Function;
 
 public record CursorPage<T>(List<T> items, PaginationMeta page) {
 
-    public static <T> CursorPage<T> of(List<T> rows, int limit, Function<T, UUID> idOf, Function<T, Instant> timestampOf) {
-        return of(rows, limit, last -> CursorCodec.encode(new CursorPayload(idOf.apply(last), timestampOf.apply(last))));
+    public static <T> CursorPage<T> of(
+            List<T> rows, int limit, Function<T, UUID> idOf, Function<T, Instant> timestampOf) {
+        return of(rows, limit,
+            last -> CursorCodec.encode(new CursorPayload(idOf.apply(last), timestampOf.apply(last))));
     }
 
     public static <T> CursorPage<T> of(List<T> rows, int limit, Function<T, String> cursorOf) {

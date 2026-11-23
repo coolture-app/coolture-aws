@@ -40,10 +40,11 @@ public final class PostSql {
 
     /**
      * What popularity counts, for the feed's score and Popularne's order: likes, Interesuje mnie and Biorę udział, from
-     * the stored counters, which leave "Nie dla mnie" out. Comments don't count: most commenters have already reacted, and
-     * counting them again made the ranking worse.
+     * the stored counters, which leave "Nie dla mnie" out. Comments don't count: most commenters have already reacted,
+     * and counting them again made the ranking worse.
      */
-    public static final String ENGAGEMENT = "(COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0))";
+    public static final String ENGAGEMENT =
+        "(COALESCE(p.positive_reaction_count, 0) + COALESCE(p.participant_count, 0))";
 
     public static List<PostCardDto> withPhotosAndFriends(Connection conn, UUID viewer, List<PostCardDto> cards)
             throws SQLException {

@@ -256,7 +256,8 @@ public class PostWriteRepository {
 
                 // Each post has its own row, so a post gone online leaves nothing pointing at it.
                 if (locationId == null && savedLocationId != null) {
-                    try (PreparedStatement delStmt = conn.prepareStatement("DELETE FROM event_locations WHERE id = ?")) {
+                    String deleteSql = "DELETE FROM event_locations WHERE id = ?";
+                    try (PreparedStatement delStmt = conn.prepareStatement(deleteSql)) {
                         delStmt.setObject(1, savedLocationId);
                         delStmt.executeUpdate();
                     }

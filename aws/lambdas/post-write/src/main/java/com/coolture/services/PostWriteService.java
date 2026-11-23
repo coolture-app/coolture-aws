@@ -57,7 +57,8 @@ public class PostWriteService {
      * Merge-patch: a field left out of the request keeps its value, and one in removed (sent as null) loses it. Only
      * endsAt, eventUrl and links can be removed; a null in any other field keeps it.
      */
-    public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req, Set<String> removed) throws SQLException {
+    public PostDetailDto updatePost(UUID postId, UUID callerId, UpdatePostRequest req, Set<String> removed)
+            throws SQLException {
         PostWriteRepository.ExistingPost existing = repository.findById(postId)
             .orElseThrow(() -> new IllegalArgumentException("Post not found: " + postId));
 

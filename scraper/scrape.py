@@ -40,9 +40,9 @@ class PacedRetry(Retry):
 def http_session(retry_timeouts: bool = False) -> requests.Session:
     # read=False keeps a POST from being sent again after a timeout, and lets the timeout arrive as requests.Timeout.
     # The site and the geocoder only get GETs, which are safe to send again, and one slow answer shouldn't end a run.
-    retry = PacedRetry(total=3, connect=2, read=2 if retry_timeouts else False, status_forcelist={429}, backoff_factor=2,
-                       allowed_methods=None, respect_retry_after_header=True, retry_after_max=RETRY_AFTER_MAX_S,
-                       raise_on_status=False)
+    retry = PacedRetry(total=3, connect=2, read=2 if retry_timeouts else False, status_forcelist={429},
+                       backoff_factor=2, allowed_methods=None, respect_retry_after_header=True,
+                       retry_after_max=RETRY_AFTER_MAX_S, raise_on_status=False)
     session = requests.Session()
     session.headers['User-Agent'] = USER_AGENT
     session.mount('https://', HTTPAdapter(max_retries=retry))
@@ -138,7 +138,8 @@ def main() -> int:
     parser.add_argument('--limit', type=int, help='stop after this many new posts')
     parser.add_argument('--dry-run', action='store_true', help='print the posts as JSON lines instead of sending them')
     parser.add_argument('--snapshot', type=Path, metavar='DIR',
-                        help='save the whole listing, with photos, into DIR instead of sending it; adds to what DIR holds')
+                        help='save the whole listing, with photos, into DIR instead of sending it; '
+                             'adds to what DIR holds')
     args = parser.parse_args()
     if args.snapshot and args.limit:
         parser.error('--limit would leave a snapshot unfinished; it takes the whole listing')

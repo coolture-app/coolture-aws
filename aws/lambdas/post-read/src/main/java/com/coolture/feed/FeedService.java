@@ -39,7 +39,8 @@ public class FeedService {
     private final LongSupplier seeds;
 
     public FeedService() {
-        this(new FeedRepository(), FeedConfig.fromEnvironment(), Clock.systemUTC(), () -> ThreadLocalRandom.current().nextLong());
+        this(new FeedRepository(), FeedConfig.fromEnvironment(), Clock.systemUTC(),
+            () -> ThreadLocalRandom.current().nextLong());
     }
 
     public FeedService(FeedRepository repository, FeedConfig config, Clock clock, LongSupplier seeds) {
@@ -103,8 +104,9 @@ public class FeedService {
 
     private List<Ranked> rank(UUID viewer, Session session, PostFeedFilters filters, int count) throws SQLException {
         UserVector.Parts parts = repository.findVectorParts(viewer, session.asOf());
-        List<FeedScorer.Facts> candidates = repository.findCandidates(viewer, UserVector.blend(parts), parts.postAverage(),
-            session.asOf(), session.latitude(), session.longitude(), filters);
+        List<FeedScorer.Facts> candidates = repository.findCandidates(
+            viewer, UserVector.blend(parts), parts.postAverage(), session.asOf(), session.latitude(),
+            session.longitude(), filters);
 
         List<Ranked> ranked = new ArrayList<>(candidates.size());
         for (FeedScorer.Facts facts : candidates) {
@@ -129,7 +131,8 @@ public class FeedService {
         return ids.stream().filter(cards::containsKey).map(cards::get).toList();
     }
 
-    private FeedPage upcomingPage(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
+    private FeedPage upcomingPage(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit)
+            throws SQLException {
         Upcoming.Page page = repository.findUpcoming(viewer, filters, at, limit);
         String next = page.hasMore() ? FeedCursor.upcoming(page.next()).encode() : null;
         return new FeedPage(FeedMode.UPCOMING, page.items(), new PaginationMeta(limit, page.hasMore(), next));

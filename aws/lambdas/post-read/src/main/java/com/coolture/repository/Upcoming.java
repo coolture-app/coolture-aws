@@ -19,9 +19,9 @@ import java.util.UUID;
 /**
  * Nadchodzące: /posts with sortBy=UPCOMING and /feed's fallback. Two streams from the moment m, the later of the list's
  * asOf and the filter's from: events starting at or after m, by start, and events already running at m, ending soonest
- * first and those with no end date last. Every RUNNING_EVERY-th card comes from the running stream, so running events are
- * neither always first nor always last. A stream that runs out leaves the other to continue alone. With Pokaż minione,
- * the events that ended before asOf follow both, latest end first.
+ * first and those with no end date last. Every RUNNING_EVERY-th card comes from the running stream, so running events
+ * are neither always first nor always last. A stream that runs out leaves the other to continue alone. With Pokaż
+ * minione, the events that ended before asOf follow both, latest end first.
  */
 public final class Upcoming {
 
@@ -36,8 +36,9 @@ public final class Upcoming {
      * endedEnd and endedId are the last one given.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Position(Instant asOf, Instant datedStart, UUID datedId, Instant runningEnd, UUID runningId, int count,
-                           @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean ended, Instant endedEnd, UUID endedId) {
+    public record Position(Instant asOf, Instant datedStart, UUID datedId, Instant runningEnd, UUID runningId,
+                           int count, @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean ended, Instant endedEnd,
+                           UUID endedId) {
 
         public Position(Instant asOf, Instant datedStart, UUID datedId, Instant runningEnd, UUID runningId, int count) {
             this(asOf, datedStart, datedId, runningEnd, runningId, count, false, null, null);
@@ -79,11 +80,11 @@ public final class Upcoming {
 
     /**
      * Both streams from the given position, merged, with photos and friends' stances. Once both ran out and ended isn't
-     * null, the events of ended (the list's query with ended events in place of its rule against them) that ended before
-     * asOf.
+     * null, the events of ended (the list's query with ended events in place of its rule against them) that ended
+     * before asOf.
      */
-    public static Page find(Connection conn, Query query, Query ended, UUID viewer, Instant from, Position at, int limit)
-            throws SQLException {
+    public static Page find(Connection conn, Query query, Query ended, UUID viewer, Instant from, Position at,
+                            int limit) throws SQLException {
         Page page = at.ended()
             ? new Page(List.of(), false, at)
             : merge(Stream.DATED.read(conn, query, at, from, limit + 1),
@@ -117,7 +118,8 @@ public final class Upcoming {
             if (items.size() <= limit) {
                 next = takeRunning
                     ? new Position(at.asOf(), next.datedStart(), next.datedId(),
-                        EventTime.end(card.startsAt(), card.endsAt(), card.openEnded()), card.id(), at.count() + items.size())
+                        EventTime.end(card.startsAt(), card.endsAt(), card.openEnded()), card.id(),
+                        at.count() + items.size())
                     : new Position(at.asOf(), card.startsAt(), card.id(),
                         next.runningEnd(), next.runningId(), at.count() + items.size());
             }
@@ -204,7 +206,8 @@ public final class Upcoming {
             boolean continues = lastId(at) != null;
             String sql = query.sql()
                 + "  AND " + within + "\n"
-                // A running post with no end date has a null last key, read as infinity. An ended event always has an end.
+                // A running post with no end date has a null last key, read as infinity. An ended event always has an
+                // end.
                 + (continues ? "  AND (" + key + ", p.id) " + after
                     + " (COALESCE(?::timestamptz, 'infinity'::timestamptz), ?::uuid)\n" : "")
                 + "ORDER BY " + key + " " + order + ", p.id " + order + "\n"

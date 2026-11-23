@@ -41,12 +41,11 @@ public class FeedRepository {
 
     /**
      * Each post loses the post average once (centred), and is compared with the viewer's vector and with each of the
-     * viewer's "Nie dla mnie" marks, centred the same way. Marks count up to asOf, fade as stances do, and only the newest
-     * NOT_FOR_ME_MARKS. MATERIALIZED, because an inlined CTE would run again for every candidate, and OFFSET 0, because a
-     * flattened lateral would read and centre the post's vector again for every mark.
-     * The PageRank score comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf, so a run landing
-     * mid-session doesn't move its pages, and less than PPR_RUN_MAX_AGE_HOURS before now too, since a cursor's asOf
-     * comes from the client.
+     * viewer's "Nie dla mnie" marks, centred the same way. Marks count up to asOf, fade as stances do, and only the
+     * newest NOT_FOR_ME_MARKS. MATERIALIZED, because an inlined CTE would run again for every candidate, and OFFSET 0,
+     * because a flattened lateral would read and centre the post's vector again for every mark. The PageRank score
+     * comes from the latest run finished PPR_RUN_MARGIN_SECONDS before asOf, so a run landing mid-session doesn't move
+     * its pages, and less than PPR_RUN_MAX_AGE_HOURS before now too, since a cursor's asOf comes from the client.
      */
     private static final String FEATURES = """
         WITH marks AS MATERIALIZED (
@@ -69,7 +68,8 @@ public class FeedRepository {
                (SELECT max(m.fade * LEAST(GREATEST((1 - (c.centred <=> m.centred) - ?) / (1 - ?), 0), 1))
                 FROM marks m) AS near_mark,
                ST_Distance(el.coordinates,
-                           ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography) AS meters,
+                           ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography)
+                   AS meters,
                pr.score::float8 AS ppr
         FROM posts p
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
@@ -112,7 +112,8 @@ public class FeedRepository {
             JOIN interest_embeddings ie ON ie.interest_key = i.key AND ie.model = ?
             WHERE ui.user_id = ?::uuid
         )
-        SELECT type AS part, sum(embedding * array_fill(fade::real, ARRAY[vector_dims(embedding)])::vector)::real[] AS total,
+        SELECT type AS part,
+               sum(embedding * array_fill(fade::real, ARRAY[vector_dims(embedding)])::vector)::real[] AS total,
                sum(stances * fade) AS amount
         FROM daily
         GROUP BY type
@@ -131,7 +132,8 @@ public class FeedRepository {
         JOIN interest_embeddings ie ON ie.interest_key = i.key AND ie.model = ?
         GROUP BY chosen.category_key
         UNION ALL
-        SELECT 'INTEREST_AVERAGE', avg(embedding)::real[], count(*) FROM interest_embeddings WHERE model = ? HAVING count(*) > 0
+        SELECT 'INTEREST_AVERAGE', avg(embedding)::real[], count(*)
+        FROM interest_embeddings WHERE model = ? HAVING count(*) > 0
         UNION ALL
         SELECT 'POST_AVERAGE', avg(pe.embedding)::real[], count(*)
         FROM post_embeddings pe
@@ -235,11 +237,13 @@ public class FeedRepository {
     }
 
     /**
-     * One row per candidate. Has its own timeout, so slow ranking falls back to the upcoming order instead of holding up
-     * the page. The position is the session's, for proximity; a radius in the filters uses the filters' own position.
+     * One row per candidate. Has its own timeout, so slow ranking falls back to the upcoming order instead of holding
+     * up the page. The position is the session's, for proximity; a radius in the filters uses the filters' own
+     * position.
      */
     public List<FeedScorer.Facts> findCandidates(UUID viewer, double[] viewerVector, double[] postAverage, Instant asOf,
-                                                 Double latitude, Double longitude, PostFeedFilters filters) throws SQLException {
+                                                 Double latitude, Double longitude, PostFeedFilters filters)
+                                                         throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(FEATURES + feedRules(filters.showsAllPastEvents()))) {
 
@@ -299,7 +303,8 @@ public class FeedRepository {
     }
 
     /** The fallback order, Nadchodzące's (Upcoming), from the given position. */
-    public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
+    public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit)
+            throws SQLException {
         Upcoming.Query query = new Upcoming.Query(PostSelect.CARD + "WHERE " + feedRules(false), b -> {
             PostSelect.bindViewer(b, viewer);
             bindRules(b, viewer, at.asOf(), filters);
@@ -326,7 +331,8 @@ public class FeedRepository {
         }
     }
 
-    private static void bindRules(ParamBinder b, UUID viewer, Instant asOf, PostFeedFilters filters) throws SQLException {
+    private static void bindRules(ParamBinder b, UUID viewer, Instant asOf, PostFeedFilters filters)
+            throws SQLException {
         b.bindTimestamp(asOf);
         Blocks.bindViewer(b, viewer);
         PostSql.bindNotMine(b, viewer);

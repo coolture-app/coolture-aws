@@ -11,25 +11,29 @@ import java.sql.SQLException;
 import java.util.UUID;
 
 /**
- * The filters a person sets: search, author, status, people I follow, type, dates, a radius and kinds of event. /posts, /posts/map
- * and /feed all narrow their posts with exactly this, so a filter means the same everywhere. Needs `p` and `el`
- * (posts and event_locations) in the query.
+ * The filters a person sets: search, author, status, people I follow, type, dates, a radius and kinds of event. /posts,
+ * /posts/map and /feed all narrow their posts with exactly this, so a filter means the same everywhere. Needs `p` and
+ * `el` (posts and event_locations) in the query.
  */
 public final class PostFilterSql {
 
     private PostFilterSql() {}
 
     /** A point from a longitude and a latitude, in that order. */
-    public static final String POINT = "ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography";
+    public static final String POINT =
+        "ST_SetSRID(ST_MakePoint(?::double precision, ?::double precision), 4326)::geography";
 
     /** Bind with {@link #bind}. Search reads the place too, so "Sopot" finds events held there. */
-    public static final String MATCHES = TextSearch.matchesAll("p.title", "p.description", "el.city", "el.venue_name") + """
+    public static final String MATCHES =
+        TextSearch.matchesAll("p.title", "p.description", "el.city", "el.venue_name") + """
 
           AND (?::uuid IS NULL OR p.author_id = ?::uuid)
           AND (?::varchar IS NULL OR p.status = ?::varchar)
           AND (?::boolean IS NOT TRUE
-               OR EXISTS (SELECT 1 FROM user_relations fw WHERE fw.source_user_id = ?::uuid AND fw.target_user_id = p.author_id AND fw.type = 'FOLLOW')
-               OR EXISTS (SELECT 1 FROM post_participations fs WHERE fs.post_id = p.id AND fs.type IN ('INTERESTED', 'TAKES_PART')
+               OR EXISTS (SELECT 1 FROM user_relations fw
+                          WHERE fw.source_user_id = ?::uuid AND fw.target_user_id = p.author_id AND fw.type = 'FOLLOW')
+               OR EXISTS (SELECT 1 FROM post_participations fs
+                          WHERE fs.post_id = p.id AND fs.type IN ('INTERESTED', 'TAKES_PART')
                           AND """ + Friends.sharingFriend("fs.user_id") + """
         ))
           AND (?::varchar IS NULL OR p.type = ?::varchar)

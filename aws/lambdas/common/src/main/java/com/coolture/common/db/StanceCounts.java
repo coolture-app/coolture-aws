@@ -1,9 +1,9 @@
 package com.coolture.common.db;
 
 /**
- * How many marked a post Interesuje mnie and Biorę udział, live from {@code post_participations}, selected as
- * {@code stances.interested_count}, {@code stances.going_count} and their sum {@code stances.participant_count}. The sum
- * is counted here too rather than read from {@code posts.participant_count}, so a card's total always matches its two
+ * How many marked a post Interesuje mnie and Biorę udział, live from {@code post_participations}, selected as {@code
+ * stances.interested_count}, {@code stances.going_count} and their sum {@code stances.participant_count}. The sum is
+ * counted here too rather than read from {@code posts.participant_count}, so a card's total always matches its two
  * badges; the stored column stays for the feed's engagement score. Needs the post as {@code p}.
  */
 public final class StanceCounts {

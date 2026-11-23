@@ -7,8 +7,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * The counts, createdAt, interests, kinds and events are null only in a blocker's slim profile, which leaves out the bio
- * too.
+ * The counts, createdAt, interests, kinds and events are null only in a blocker's slim profile, which leaves out the
+ * bio too.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record UserProfileDto(

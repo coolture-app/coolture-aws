@@ -55,9 +55,11 @@ HEADING_MAX = 60
 SENTENCE_ENDS = ('.', '!', '?', '…', ':', ';')
 LIST_ITEM = re.compile(r'^([•·*\-–—>]|\d)')
 CUT_LINK = '\x00'
-# A link's label, such as "KUP BILET" or "Posłuchaj UMI", means nothing without the link. Links holding a name or an address stay.
-LINK_LABEL = re.compile(r'^(kup|kupuj|posłuchaj|zobacz|obejrzyj|przeczytaj|zapisz|wypełnij|sprawdź|zarezerwuj|rezerwuj|kliknij)\b',
-                        re.IGNORECASE)
+# A link's label, such as "KUP BILET" or "Posłuchaj UMI", means nothing without the link. Links holding a name or an
+# address stay.
+LINK_LABEL = re.compile(
+    r'^(kup|kupuj|posłuchaj|zobacz|obejrzyj|przeczytaj|zapisz|wypełnij|sprawdź|zarezerwuj|rezerwuj|kliknij)\b',
+    re.IGNORECASE)
 REPEATED_FACT = re.compile(r'^(kiedy|gdzie|termin|miejsce|data|godzina)\s*:', re.IGNORECASE)
 FACT = re.compile(r'^[^\W\d][\w ]{1,24}:\s*\S')
 # The site's own markup, left in some texts, such as [lead].
@@ -279,7 +281,8 @@ def _paragraphs(text: str) -> list[list[str]]:
 
 
 def _without_repeated_facts(paragraphs: list[list[str]]) -> list[list[str]]:
-    # "Kiedy: …" and "Gdzie: …" at the start repeat the post's own start and address. "Bilety: …" and "Dla kogo: …" stay.
+    # "Kiedy: …" and "Gdzie: …" at the start repeat the post's own start and address. "Bilety: …" and "Dla kogo: …"
+    # stay.
     kept: list[list[str]] = []
     at_start = True
     for lines in paragraphs:

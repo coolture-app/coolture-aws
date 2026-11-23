@@ -37,7 +37,8 @@ def cut_description(text: str) -> str:
         return text
     head = _head(text, DESCRIPTION_MAX)
     # A sentence or a line ends there, so a list or a schedule isn't cut in the middle of an item.
-    ends = [match.end() - 1 for match in SENTENCE_END.finditer(head)] + [match.start() for match in LINE_END.finditer(head)]
+    ends = [match.end() - 1 for match in SENTENCE_END.finditer(head)]
+    ends += [match.start() for match in LINE_END.finditer(head)]
     end = max(ends, default=0)
     return head[:end].rstrip() if end >= DESCRIPTION_MAX // 2 else cut(text, DESCRIPTION_MAX)
 

@@ -125,7 +125,8 @@ public class InterestRepository {
         }
     }
 
-    public void replaceSelection(UUID userId, Collection<String> kinds, Collection<String> interests) throws SQLException {
+    public void replaceSelection(UUID userId, Collection<String> kinds, Collection<String> interests)
+            throws SQLException {
         String lockSql = "SELECT 1 FROM users WHERE id = ? FOR NO KEY UPDATE";
 
         try (Connection conn = DatabaseConfig.getConnection()) {

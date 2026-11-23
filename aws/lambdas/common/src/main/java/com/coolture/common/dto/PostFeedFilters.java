@@ -32,8 +32,8 @@ public record PostFeedFilters(
     /** Only posts for children (PostKinds.KIDS), whatever their other kinds. */
     boolean kids,
     /**
-     * Whose stances participationTypes reads: the viewer when null. Someone else's only when they're the viewer's friend
-     * and share their stances, as on cards.
+     * Whose stances participationTypes reads: the viewer when null. Someone else's only when they're the viewer's
+     * friend and share their stances, as on cards.
      */
     UUID participantId
 ) {
