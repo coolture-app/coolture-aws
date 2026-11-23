@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
@@ -309,7 +310,8 @@ class PostReadHandlerTest {
         UUID callerId = UUID.randomUUID();
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed",
             Map.of("limit", "10", "cursor", "abc", "latitude", "54.35", "longitude", "18.65"));
-        when(feedService.getFeed(eq(callerId), eq("abc"), eq(10), eq(54.35), eq(18.65), any()))
+        when(feedService.getFeed(eq(callerId), argThat(f -> "abc".equals(f.cursor()) && f.limit() == 10
+                && f.latitude() == 54.35 && f.longitude() == 18.65)))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(), new PaginationMeta(10, false, null)));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
@@ -326,7 +328,7 @@ class PostReadHandlerTest {
     @Test
     void getHomeFeed_whenNoIdentity_thenCallsFeedServiceAsGuest() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/feed");
-        when(feedService.getFeed(isNull(), isNull(), eq(20), isNull(), isNull(), any()))
+        when(feedService.getFeed(isNull(), argThat(f -> f.cursor() == null && f.limit() == 20 && f.latitude() == null)))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(), new PaginationMeta(20, false, null)));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {

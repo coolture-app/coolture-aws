@@ -114,7 +114,7 @@ class ContractTest {
 
     @Test
     void feed_firstPageWithMore_matches() throws Exception {
-        when(feed.getFeed(any(), any(), anyInt(), any(), any(), any()))
+        when(feed.getFeed(any(), any()))
             .thenReturn(new FeedPage(FeedMode.RANKED, List.of(minimalCard(), fullCard()), new PaginationMeta(2, true, "abc")));
 
         assertMatches(responseReport("/feed", ApiGatewayEvents.get("/feed", Map.of("limit", "2", "latitude", "54.35", "longitude", "18.65"))));
@@ -122,7 +122,7 @@ class ContractTest {
 
     @Test
     void feed_laterPageInUpcomingMode_matches() throws Exception {
-        when(feed.getFeed(any(), any(), anyInt(), any(), any(), any()))
+        when(feed.getFeed(any(), any()))
             .thenReturn(new FeedPage(FeedMode.UPCOMING, List.of(), new PaginationMeta(20, false, null)));
 
         assertMatches(responseReport("/feed", ApiGatewayEvents.get("/feed", Map.of("cursor", "abc"))));

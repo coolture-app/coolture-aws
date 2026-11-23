@@ -86,13 +86,8 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
     }
 
     private APIGatewayV2HTTPResponse getHomeFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
-        Map<String, String> qp = getQueryParams(event);
-        String cursor = qp.get("cursor");
-        int limit = parseLimit(qp.get("limit"), 20);
         // The same filters as /posts, which also check the position. My Events' filters and sortBy don't apply here.
-        PostFeedFilters filters = parseFeedFilters(qp);
-
-        return ApiResponse.ok(feedService.getFeed(callerId, cursor, limit, filters.latitude(), filters.longitude(), filters));
+        return ApiResponse.ok(feedService.getFeed(callerId, parseFeedFilters(getQueryParams(event))));
     }
 
     private APIGatewayV2HTTPResponse getFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {

@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
+import static com.coolture.feed.FeedRequests.page;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -145,7 +146,7 @@ class FeedServiceTest {
         List<UUID> seen = new ArrayList<>();
         String cursor = null;
         for (int guard = 0; guard < 1000; guard++) {
-            FeedPage page = service.getFeed(viewer, cursor, limit, null, null);
+            FeedPage page = service.getFeed(viewer, page(cursor, limit, null, null));
             assertEquals(FeedMode.RANKED, page.mode());
             page.items().forEach(c -> seen.add(c.id()));
             if (!page.page().hasMore()) {
@@ -172,7 +173,7 @@ class FeedServiceTest {
         repository.candidates = posts(3);
         repository.postAverage = new double[]{0.5, 0.25};
 
-        service().getFeed(VIEWER, null, 20, null, null);
+        service().getFeed(VIEWER, page(null, 20, null, null));
 
         assertSame(repository.postAverage, repository.postAverages.getFirst());
     }
@@ -187,12 +188,12 @@ class FeedServiceTest {
     @Test
     void hasMore_isRightOnEachSideOfTheLimit() throws SQLException {
         repository.candidates = posts(21);
-        FeedPage first = service().getFeed(VIEWER, null, 20, null, null);
+        FeedPage first = service().getFeed(VIEWER, page(null, 20, null, null));
         assertEquals(20, first.items().size());
         assertTrue(first.page().hasMore());
 
         repository.candidates = posts(20);
-        FeedPage only = service().getFeed(VIEWER, null, 20, null, null);
+        FeedPage only = service().getFeed(VIEWER, page(null, 20, null, null));
         assertEquals(20, only.items().size());
         assertFalse(only.page().hasMore());
         assertNull(only.page().nextCursor());
@@ -200,7 +201,7 @@ class FeedServiceTest {
 
     @Test
     void noCandidates_givesAnEmptyLastPage() throws SQLException {
-        FeedPage page = service().getFeed(VIEWER, null, 20, null, null);
+        FeedPage page = service().getFeed(VIEWER, page(null, 20, null, null));
 
         assertEquals(FeedMode.RANKED, page.mode());
         assertTrue(page.items().isEmpty());
@@ -242,7 +243,7 @@ class FeedServiceTest {
         FeedScorer scorer = new FeedScorer(FeedConfig.DEFAULTS);
 
         List<UUID> actual = new FeedService(repository, FeedConfig.DEFAULTS, jumping, () -> 42)
-            .getFeed(VIEWER, null, 60, null, null).items().stream().map(PostCardDto::id).toList();
+            .getFeed(VIEWER, page(null, 60, null, null)).items().stream().map(PostCardDto::id).toList();
 
         List<UUID> atAsOf = repository.candidates.stream()
             .sorted(Comparator.comparingDouble((FeedScorer.Facts f) -> scorer.score(f, START, 42).total()).reversed())
@@ -255,8 +256,8 @@ class FeedServiceTest {
     void differentSessions_giveADifferentFirstPage() throws SQLException {
         repository.candidates = posts(100);
 
-        List<UUID> first = service(FeedConfig.DEFAULTS, 1).getFeed(VIEWER, null, 20, null, null).items().stream().map(PostCardDto::id).toList();
-        List<UUID> second = service(FeedConfig.DEFAULTS, 2).getFeed(VIEWER, null, 20, null, null).items().stream().map(PostCardDto::id).toList();
+        List<UUID> first = service(FeedConfig.DEFAULTS, 1).getFeed(VIEWER, page(null, 20, null, null)).items().stream().map(PostCardDto::id).toList();
+        List<UUID> second = service(FeedConfig.DEFAULTS, 2).getFeed(VIEWER, page(null, 20, null, null)).items().stream().map(PostCardDto::id).toList();
 
         assertNotEquals(first, second);
     }
@@ -275,8 +276,8 @@ class FeedServiceTest {
     void location_isRoundedAndStaysInTheCursor() throws SQLException {
         repository.candidates = posts(5);
 
-        FeedPage first = service().getFeed(VIEWER, null, 2, 54.3512345, 18.6512345);
-        service().getFeed(VIEWER, first.page().nextCursor(), 2, null, null);
+        FeedPage first = service().getFeed(VIEWER, page(null, 2, 54.3512345, 18.6512345));
+        service().getFeed(VIEWER, page(first.page().nextCursor(), 2, null, null));
 
         assertEquals(List.of(54.35, 54.35), repository.latitudes);
         assertEquals(18.65, FeedCursor.decode(first.page().nextCursor()).orElseThrow().lon());
@@ -287,8 +288,8 @@ class FeedServiceTest {
         repository.candidates = posts(5);
         repository.home = new GeoPointDto(54.52, 18.54);
 
-        FeedPage first = service().getFeed(VIEWER, null, 2, null, null);
-        service().getFeed(VIEWER, first.page().nextCursor(), 2, null, null);
+        FeedPage first = service().getFeed(VIEWER, page(null, 2, null, null));
+        service().getFeed(VIEWER, page(first.page().nextCursor(), 2, null, null));
 
         assertEquals(List.of(54.52, 54.52), repository.latitudes);
         assertEquals(18.54, FeedCursor.decode(first.page().nextCursor()).orElseThrow().lon());
@@ -299,7 +300,7 @@ class FeedServiceTest {
         repository.candidates = posts(5);
         repository.home = new GeoPointDto(54.52, 18.54);
 
-        service().getFeed(VIEWER, null, 2, 54.35, 18.65);
+        service().getFeed(VIEWER, page(null, 2, 54.35, 18.65));
 
         assertEquals(List.of(54.35), repository.latitudes);
     }
@@ -308,8 +309,8 @@ class FeedServiceTest {
     void aGuest_orSomeoneWithNoHome_getsNoProximity() throws SQLException {
         repository.candidates = posts(5);
 
-        service().getFeed(null, null, 2, null, null);
-        service().getFeed(VIEWER, null, 2, null, null);
+        service().getFeed(null, page(null, 2, null, null));
+        service().getFeed(VIEWER, page(null, 2, null, null));
 
         assertEquals(Arrays.asList(null, null), repository.latitudes);
     }
@@ -319,7 +320,7 @@ class FeedServiceTest {
         repository.candidates = posts(5);
         repository.homeFailure = new SQLException("connection reset");
 
-        FeedPage page = service().getFeed(VIEWER, null, 2, null, null);
+        FeedPage page = service().getFeed(VIEWER, page(null, 2, null, null));
 
         assertEquals(FeedMode.RANKED, page.mode());
         assertNull(repository.latitudes.getFirst());
@@ -330,7 +331,7 @@ class FeedServiceTest {
         repository.candidates = posts(3);
         repository.rankingFailure = new SQLException("canceling statement due to statement timeout");
 
-        FeedPage page = service().getFeed(VIEWER, null, 20, null, null);
+        FeedPage page = service().getFeed(VIEWER, page(null, 20, null, null));
 
         assertEquals(FeedMode.UPCOMING, page.mode());
         assertEquals(3, page.items().size());
@@ -342,17 +343,17 @@ class FeedServiceTest {
         repository.candidates = posts(3);
         repository.rankingBug = new IllegalStateException("bug");
 
-        assertEquals(FeedMode.UPCOMING, service().getFeed(VIEWER, null, 20, null, null).mode());
+        assertEquals(FeedMode.UPCOMING, service().getFeed(VIEWER, page(null, 20, null, null)).mode());
     }
 
     @Test
     void whenRankingFailsMidSession_restartsUpcomingFromTheTop_withTheSameAsOf() throws SQLException {
         repository.candidates = posts(25);
-        FeedPage first = service().getFeed(VIEWER, null, 10, null, null);
+        FeedPage first = service().getFeed(VIEWER, page(null, 10, null, null));
         Instant asOf = repository.asOfs.getFirst();
 
         repository.rankingFailure = new SQLException("timeout");
-        FeedPage second = service().getFeed(VIEWER, first.page().nextCursor(), 10, null, null);
+        FeedPage second = service().getFeed(VIEWER, page(first.page().nextCursor(), 10, null, null));
 
         assertEquals(FeedMode.UPCOMING, second.mode());
         UUID soonest = repository.candidates.stream()
@@ -370,7 +371,7 @@ class FeedServiceTest {
         List<UUID> seen = new ArrayList<>();
         String cursor = null;
         do {
-            FeedPage page = service().getFeed(VIEWER, cursor, 10, null, null);
+            FeedPage page = service().getFeed(VIEWER, page(cursor, 10, null, null));
             assertEquals(FeedMode.UPCOMING, page.mode());
             page.items().forEach(c -> seen.add(c.id()));
             cursor = page.page().nextCursor();
@@ -387,7 +388,7 @@ class FeedServiceTest {
         repository.rankingFailure = new SQLException("down");
         repository.upcomingFailure = new SQLException("down");
 
-        assertThrows(SQLException.class, () -> service().getFeed(VIEWER, null, 20, null, null));
+        assertThrows(SQLException.class, () -> service().getFeed(VIEWER, page(null, 20, null, null)));
     }
 
     @Test
@@ -401,7 +402,7 @@ class FeedServiceTest {
         };
         missingCard.candidates = repository.candidates;
 
-        FeedPage page = new FeedService(missingCard, FeedConfig.DEFAULTS, movingClock, () -> 42).getFeed(VIEWER, null, 3, null, null);
+        FeedPage page = new FeedService(missingCard, FeedConfig.DEFAULTS, movingClock, () -> 42).getFeed(VIEWER, page(null, 3, null, null));
 
         assertEquals(2, page.items().size());
         assertTrue(page.page().hasMore());
@@ -409,15 +410,15 @@ class FeedServiceTest {
 
     @Test
     void anUnreadableCursor_throws_ratherThanFallingBack() {
-        assertThrows(IllegalArgumentException.class, () -> service().getFeed(VIEWER, "garbage", 20, null, null));
+        assertThrows(IllegalArgumentException.class, () -> service().getFeed(VIEWER, page("garbage", 20, null, null)));
     }
 
     @Test
     void limit_isClampedLikeOtherLists() throws SQLException {
         repository.candidates = posts(150);
 
-        assertEquals(100, service().getFeed(VIEWER, null, 500, null, null).page().limit());
-        assertEquals(20, service().getFeed(VIEWER, null, 0, null, null).page().limit());
+        assertEquals(100, service().getFeed(VIEWER, page(null, 500, null, null)).page().limit());
+        assertEquals(20, service().getFeed(VIEWER, page(null, 0, null, null)).page().limit());
     }
 
 }

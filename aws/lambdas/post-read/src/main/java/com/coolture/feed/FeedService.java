@@ -49,19 +49,13 @@ public class FeedService {
         this.seeds = seeds;
     }
 
-    /** The plain feed, with no filters. */
-    public FeedPage getFeed(UUID viewer, String rawCursor, int limit, Double latitude, Double longitude) throws SQLException {
-        return getFeed(viewer, rawCursor, limit, latitude, longitude, PostFeedFilters.none());
-    }
-
     /**
-     * The location is used for proximity only on the first page. Later pages take it from the cursor. The filters are
-     * sent with every page, as with /posts, and narrow which posts are ranked.
+     * The filters' position is used for proximity only on the first page. Later pages take it from the cursor. The
+     * filters are sent with every page, as with /posts, and narrow which posts are ranked.
      */
-    public FeedPage getFeed(UUID viewer, String rawCursor, int limit, Double latitude, Double longitude,
-                            PostFeedFilters filters) throws SQLException {
-        int effectiveLimit = clampLimit(limit);
-        Optional<FeedCursor> cursor = FeedCursor.decode(rawCursor);
+    public FeedPage getFeed(UUID viewer, PostFeedFilters filters) throws SQLException {
+        int effectiveLimit = clampLimit(filters.limit());
+        Optional<FeedCursor> cursor = FeedCursor.decode(filters.cursor());
 
         if (cursor.isPresent() && !cursor.get().ranked()) {
             return upcomingPage(viewer, filters, cursor.get().position(), effectiveLimit);
@@ -69,7 +63,7 @@ public class FeedService {
 
         Session session = cursor.isPresent()
             ? resume(cursor.get())
-            : newSession(viewer, round(latitude), round(longitude));
+            : newSession(viewer, round(filters.latitude()), round(filters.longitude()));
 
         List<Ranked> ranked;
         try {

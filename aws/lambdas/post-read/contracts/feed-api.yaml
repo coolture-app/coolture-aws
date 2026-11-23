@@ -40,7 +40,7 @@ paths:
         - $ref: '#/components/parameters/RadiusKm'
       responses:
         '200':
-          description: One page. A short or empty page doesn't mean the end. Only hasMore false does.
+          description: One page.
           content:
             application/json:
               schema:
@@ -78,9 +78,7 @@ paths:
             default: RECENT
           description: >
             NEAREST needs latitude and longitude, and shows only posts with a place. STANCE_NEWEST needs participationTypes
-            and puts the viewer's newest of those stances first. UPCOMING mixes events already running into the events
-            to come, every 5th card, and with includePast the ended events follow them. PAST shows only ended events, the latest end first. POPULAR orders by likes +
-            Interesuje mnie + Biorę udział (README.md).
+            and puts the viewer's newest of those stances first. The orders are in README.md.
         - $ref: '#/components/parameters/IncludePast'
         - $ref: '#/components/parameters/Q'
         - $ref: '#/components/parameters/AuthorId'
@@ -194,9 +192,8 @@ components:
       name: latitude
       in: query
       description: >
-        Send together with longitude, rounded to 2 decimals. The centre of radiusKm and of NEAREST. On /feed, the first
-        page's position is also used for proximity, and later pages send it again only with radiusKm. Without it, /feed
-        measures proximity from the viewer's home, if they set one.
+        Send together with longitude, rounded to 2 decimals. The centre of radiusKm and of NEAREST, and on /feed of
+        proximity (README.md).
       schema: {type: number, format: double, minimum: -90, maximum: 90}
     Longitude:
       name: longitude
@@ -286,8 +283,7 @@ components:
     FeedMode:
       type: string
       description: >
-        How this page was ordered. RANKED is the scorer, also for guests and new users. UPCOMING is the fallback when
-        ranking failed. The UI must work the same for both. New values may be added, so treat unknown ones like RANKED.
+        How this page was ordered (README.md).
       enum: [RANKED, UPCOMING]
     FeedPage:
       type: object

@@ -60,6 +60,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.coolture.feed.FeedRequests.page;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -168,15 +169,15 @@ class PostReadDbTest {
     }
 
     private List<PostCardDto> walkFeed(FeedService service, UUID viewer, int limit, Double latitude, Double longitude, FeedMode mode) throws SQLException {
-        return walkFeed(service, viewer, limit, latitude, longitude, PostFeedFilters.none(), mode);
+        return walkFeed(service, viewer, limit, page(null, limit, latitude, longitude), mode);
     }
 
-    private List<PostCardDto> walkFeed(FeedService service, UUID viewer, int limit, Double latitude, Double longitude,
-                                       PostFeedFilters filters, FeedMode mode) throws SQLException {
+    private List<PostCardDto> walkFeed(FeedService service, UUID viewer, int limit, PostFeedFilters filters, FeedMode mode)
+            throws SQLException {
         List<PostCardDto> cards = new ArrayList<>();
         String cursor = null;
         do {
-            FeedPage page = service.getFeed(viewer, cursor, limit, latitude, longitude, filters);
+            FeedPage page = service.getFeed(viewer, page(filters, cursor, limit));
             assertEquals(mode, page.mode());
             cards.addAll(page.items());
             cursor = page.page().nextCursor();
@@ -234,7 +235,7 @@ class PostReadDbTest {
             ruleTitles(feedRepository.findUpcoming(null, PostFeedFilters.none(), Upcoming.Position.start(Instant.now()), 1000).items()));
 
         PostFeedFilters radius = around(null, 1.0);
-        assertEquals(new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, radius, FeedMode.RANKED)))),
+        assertEquals(new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, radius, FeedMode.RANKED)))),
             new HashSet<>(distances(titles(feedRepository.findUpcoming(ME, radius, Upcoming.Position.start(Instant.now()), 1000).items()))));
     }
 
@@ -474,12 +475,12 @@ class PostReadDbTest {
         double twinBefore = similarity(twin, asOf);
 
         List<UUID> walked = new ArrayList<>();
-        FeedPage page = session.getFeed(ME, null, 7, null, null);
+        FeedPage page = session.getFeed(ME, page(null, 7, null, null));
         walked.addAll(idsOf(page.items()));
         like(liked);
         try {
             while (page.page().nextCursor() != null) {
-                page = session.getFeed(ME, page.page().nextCursor(), 7, null, null);
+                page = session.getFeed(ME, page(page.page().nextCursor(), 7, null, null));
                 walked.addAll(idsOf(page.items()));
             }
             assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
@@ -500,12 +501,12 @@ class PostReadDbTest {
         UUID twin = postTitled("twin_of_walk_7");
 
         List<UUID> walked = new ArrayList<>();
-        FeedPage page = session.getFeed(ME, null, 7, null, null);
+        FeedPage page = session.getFeed(ME, page(null, 7, null, null));
         walked.addAll(idsOf(page.items()));
         mark(marked, "now()");
         try {
             while (page.page().nextCursor() != null) {
-                page = session.getFeed(ME, page.page().nextCursor(), 7, null, null);
+                page = session.getFeed(ME, page(page.page().nextCursor(), 7, null, null));
                 walked.addAll(idsOf(page.items()));
             }
             assertEquals(walked.size(), new HashSet<>(walked).size(), "a post came twice");
@@ -720,7 +721,7 @@ class PostReadDbTest {
     @Test
     void followed_keepsPostsByPeopleIFollow_andWhatFriendsAreInterestedInOrGoTo() throws SQLException {
         assertEquals(FOLLOWED_AND_FRIENDS, ruleTitles(walkPosts(ME, followed(), 100)));
-        assertEquals(FOLLOWED_AND_FRIENDS, ruleTitles(walkFeed(feedService, ME, 100, null, null, followed(), FeedMode.RANKED)));
+        assertEquals(FOLLOWED_AND_FRIENDS, ruleTitles(walkFeed(feedService, ME, 100, followed(), FeedMode.RANKED)));
     }
 
     @Test
@@ -850,24 +851,24 @@ class PostReadDbTest {
     @Test
     void feed_aRadius_keepsOnlyThePostsInsideIt() throws SQLException {
         assertEquals(Set.of("close", "mid"),
-            new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, around(null, 1.0), FeedMode.RANKED)))));
+            new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, around(null, 1.0), FeedMode.RANKED)))));
         assertEquals(Set.of("close", "mid", "far"),
-            new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, null, null, around(null, 10.0), FeedMode.RANKED)))));
+            new HashSet<>(distances(titles(walkFeed(feedService, ME, 7, around(null, 10.0), FeedMode.RANKED)))));
     }
 
     @Test
     void feed_aSearch_narrowsTheRankedPosts_andStillHidesMine() throws SQLException {
-        List<String> found = titles(walkFeed(feedService, ME, 7, null, null, searching("near_far"), FeedMode.RANKED));
+        List<String> found = titles(walkFeed(feedService, ME, 7, searching("near_far"), FeedMode.RANKED));
         assertEquals(8, found.size());
         assertTrue(found.stream().allMatch(t -> t.startsWith("near_far_")));
 
-        assertEquals(Set.of(), new HashSet<>(titles(walkFeed(feedService, ME, 7, null, null, searching("map_mine"), FeedMode.RANKED))));
+        assertEquals(Set.of(), new HashSet<>(titles(walkFeed(feedService, ME, 7, searching("map_mine"), FeedMode.RANKED))));
     }
 
     @Test
     void aSearch_readsTheCityAndThePlacesName_inEveryList() throws SQLException {
         for (String q : List.of("fixturowo", "HALA FIXTUROWA")) {
-            List<String> feed = titles(walkFeed(feedService, ME, 7, null, null, searching(q), FeedMode.RANKED));
+            List<String> feed = titles(walkFeed(feedService, ME, 7, searching(q), FeedMode.RANKED));
             List<String> posts = titles(postRepository.findFeed(searching(q), PostSort.RECENT, ME, null, 100));
             List<String> marks = postRepository.findPostMarks(searching(q), AROUND_THE_FIXTURES, ME, false).stream()
                 .map(PostMarkDto::title).toList();
@@ -934,7 +935,7 @@ class PostReadDbTest {
     @Test
     void feed_includePast_letsEndedEventsIn_andKeepsHidingWhatIsMine() throws SQLException {
         assertEquals(union(PUBLIC_LIVE, ENDED),
-            ruleTitles(walkFeed(feedService, ME, 100, null, null, filters(null, true, null, null), FeedMode.RANKED)));
+            ruleTitles(walkFeed(feedService, ME, 100, filters(null, true, null, null), FeedMode.RANKED)));
     }
 
     @Test
@@ -1113,7 +1114,7 @@ class PostReadDbTest {
     @Test
     void dates_meanTheSameInTheFeed() throws SQLException {
         PostFeedFilters filters = by(TIMEKEEPER, null, WINDOW_FROM, WINDOW_TO, null);
-        Set<String> feed = walkFeed(feedService, ME, 100, null, null, filters, FeedMode.RANKED).stream()
+        Set<String> feed = walkFeed(feedService, ME, 100, filters, FeedMode.RANKED).stream()
             .map(PostCardDto::title).collect(Collectors.toSet());
 
         assertEquals(timeTitles(WINDOW_FROM, WINDOW_TO), feed);
