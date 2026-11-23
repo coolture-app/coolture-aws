@@ -36,15 +36,15 @@ public class PostReadService {
         this.repository = repository;
     }
 
-    public CursorPage<PostCardDto> getFeed(UUID callerId, PostFeedFilters filters, String cursor, int limit) throws SQLException {
+    public CursorPage<PostCardDto> getFeed(UUID callerId, PostFeedFilters filters) throws SQLException {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
         validateParticipant(filters, callerId);
         PostSort sort = PostSort.parse(filters.sortBy());
         validateSort(sort, filters, callerId);
-        PostsCursor keyset = PostsCursor.decode(cursor, sort).orElse(null);
+        PostsCursor keyset = PostsCursor.decode(filters.cursor(), sort).orElse(null);
 
-        int effectiveLimit = clampLimit(limit);
+        int effectiveLimit = clampLimit(filters.limit());
         if (sort == PostSort.UPCOMING) {
             Upcoming.Position at = keyset != null
                 ? keyset.upcoming()

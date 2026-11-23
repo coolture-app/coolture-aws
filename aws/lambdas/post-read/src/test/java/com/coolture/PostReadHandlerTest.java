@@ -104,9 +104,7 @@ class PostReadHandlerTest {
 
             when(postReadService.getFeed(
                 eq(callerId),
-                filtersCaptor.capture(),
-                eq("abc123"),
-                eq(10)
+                filtersCaptor.capture()
             )).thenReturn(emptyPage);
 
             APIGatewayV2HTTPResponse response =
@@ -117,6 +115,8 @@ class PostReadHandlerTest {
 
         PostFeedFilters filters = filtersCaptor.getValue();
 
+        assertEquals("abc123", filters.cursor());
+        assertEquals(10, filters.limit());
         assertEquals("jazz", filters.q());
         org.junit.jupiter.api.Assertions.assertTrue(filters.includePast());
         assertEquals(List.of("concerts", "stage"), filters.kinds());
@@ -146,7 +146,7 @@ class PostReadHandlerTest {
                 .getById(postId, null);
 
             verify(postReadService, never())
-                .getFeed(any(), any(), any(), anyInt());
+                .getFeed(any(), any());
         }
     }
 
@@ -185,12 +185,7 @@ class PostReadHandlerTest {
                 .when(() -> SecurityContext.getUserIdOptional(event))
                 .thenReturn(Optional.empty());
 
-            when(postReadService.getFeed(
-                any(),
-                any(),
-                any(),
-                anyInt()
-            )).thenThrow(new RuntimeException(internalDetail));
+            when(postReadService.getFeed(any(), any())).thenThrow(new RuntimeException(internalDetail));
 
             APIGatewayV2HTTPResponse response =
                 handler.handleRequest(event, lambdaContext);
@@ -219,9 +214,7 @@ class PostReadHandlerTest {
 
             when(postReadService.getFeed(
                 isNull(),
-                any(),
-                isNull(),
-                anyInt()
+                argThat(f -> f.cursor() == null)
             )).thenThrow(
                 new SecurityException(
                     "Authentication is required to filter by reaction type"
@@ -253,12 +246,7 @@ class PostReadHandlerTest {
                 .when(() -> SecurityContext.getUserIdOptional(event))
                 .thenReturn(Optional.empty());
 
-            when(postReadService.getFeed(
-                any(),
-                any(),
-                any(),
-                anyInt()
-            )).thenThrow(new IllegalArgumentException(message));
+            when(postReadService.getFeed(any(), any())).thenThrow(new IllegalArgumentException(message));
 
             APIGatewayV2HTTPResponse response =
                 handler.handleRequest(event, lambdaContext);
@@ -286,7 +274,7 @@ class PostReadHandlerTest {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of(name, value));
 
         assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
-        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
+        verify(postReadService, never()).getFeed(any(), any());
     }
 
     @ParameterizedTest
@@ -302,7 +290,7 @@ class PostReadHandlerTest {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("latitude", latitude, "longitude", longitude));
 
         assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
-        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
+        verify(postReadService, never()).getFeed(any(), any());
     }
 
     @Test
@@ -322,7 +310,7 @@ class PostReadHandlerTest {
             assertEquals(200, response.getStatusCode());
             org.junit.jupiter.api.Assertions.assertTrue(response.getBody().contains("\"mode\":\"RANKED\""));
         }
-        verify(postReadService, never()).getFeed(any(), any(), any(), anyInt());
+        verify(postReadService, never()).getFeed(any(), any());
     }
 
     @Test

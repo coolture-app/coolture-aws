@@ -190,7 +190,7 @@ class PostReadDbTest {
         List<PostCardDto> cards = new ArrayList<>();
         String cursor = null;
         do {
-            CursorPage<PostCardDto> page = postService.getFeed(viewer, filters, cursor, limit);
+            CursorPage<PostCardDto> page = postService.getFeed(viewer, page(filters, cursor, limit));
             cards.addAll(page.items());
             cursor = page.page().nextCursor();
         } while (cursor != null);

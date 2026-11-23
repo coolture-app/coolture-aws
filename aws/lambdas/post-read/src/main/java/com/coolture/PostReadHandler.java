@@ -6,13 +6,11 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MapBoundsDto;
-import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.dto.PostMarkDto;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
 import com.coolture.feed.FeedService;
@@ -91,13 +89,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
     }
 
     private APIGatewayV2HTTPResponse getFeed(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {
-        Map<String, String> qp = getQueryParams(event);
-        PostFeedFilters filters = parseFeedFilters(qp);
-        String cursor = qp.get("cursor");
-        int limit = parseLimit(qp.get("limit"), 20);
-
-        CursorPage<PostCardDto> page = service.getFeed(callerId, filters, cursor, limit);
-        return ApiResponse.ok(page);
+        return ApiResponse.ok(service.getFeed(callerId, parseFeedFilters(getQueryParams(event))));
     }
 
     private APIGatewayV2HTTPResponse getPostById(APIGatewayV2HTTPEvent event, UUID callerId) throws Exception {

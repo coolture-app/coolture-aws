@@ -130,7 +130,7 @@ class ContractTest {
 
     @Test
     void posts_firstPageWithMore_matches() throws Exception {
-        when(posts.getFeed(any(), any(), any(), anyInt()))
+        when(posts.getFeed(any(), any()))
             .thenReturn(new CursorPage<>(List.of(minimalCard(), fullCard()), new PaginationMeta(2, true, "abc")));
 
         assertMatches(responseReport("/posts", ApiGatewayEvents.get("/posts", Map.of("limit", "2"))));
@@ -138,7 +138,7 @@ class ContractTest {
 
     @Test
     void posts_lastPageWithCursor_matches() throws Exception {
-        when(posts.getFeed(any(), any(), any(), anyInt()))
+        when(posts.getFeed(any(), any()))
             .thenReturn(new CursorPage<>(List.of(minimalCard()), new PaginationMeta(20, false, null)));
 
         assertMatches(responseReport("/posts", ApiGatewayEvents.get("/posts", Map.of("cursor", "abc", "sortBy", "POPULAR"))));
