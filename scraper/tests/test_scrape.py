@@ -182,6 +182,25 @@ def test_a_deadline_ends_the_run_between_two_events():
     assert stats['stopped_for_time'] == 1
 
 
+def test_limit_ends_the_run_even_when_the_rest_of_the_listing_is_imported():
+    site = FakeSite([listed(1), listed(2), listed(3), listed(4)])
+    api = FakeApi(existing={listed(2).url, listed(3).url, listed(4).url})
+
+    stats = run_import(site, FakeGeocoder(), api, limit=1)
+
+    assert (stats['created'], stats['listed']) == (1, 2)
+
+
+def test_a_deadline_ends_the_run_even_when_the_rest_of_the_listing_is_imported():
+    api, stats = FakeApi(existing={listed(2).url, listed(3).url}), Counter()
+    moments = iter([NOW, NOW + timedelta(minutes=5), NOW + timedelta(minutes=13)])
+
+    run(FakeSite([listed(1), listed(2), listed(3)]), FakeGeocoder(), api, stats, None, lambda: next(moments),
+        stop_at=NOW + timedelta(minutes=12))
+
+    assert (len(api.created), stats['listed'], stats['stopped_for_time']) == (1, 2, 1)
+
+
 def test_dry_run_prints_posts_and_needs_no_api(capsys):
     stats = run_import(FakeSite([listed(1)]), FakeGeocoder(), DryRun())
 

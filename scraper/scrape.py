@@ -79,14 +79,14 @@ def run(site: Site, geocoder: Geocoder, sink: CooltureApi | DryRun | Snapshot, s
 
     for item in site.listing_items():
         stats['listed'] += 1
-        if item.url in existing:
-            stats['already_imported'] += 1
-            continue
         if limit is not None and stats['created'] >= limit:
             break
         if stop_at is not None and clock() >= stop_at:
             stats['stopped_for_time'] += 1
             break
+        if item.url in existing:
+            stats['already_imported'] += 1
+            continue
         import_item(item, site, geocoder, sink, stats, clock)
 
 
