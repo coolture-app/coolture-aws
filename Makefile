@@ -220,7 +220,7 @@ test-db: build-common $(VENV_PY) ## Run the database tests of posts, comments, u
 
 api-test: ## Run the request flows in api/ against the local stack (after make dev and make seed)
 	@command -v hurl > /dev/null || { echo "hurl not found: mise install, or see https://hurl.dev"; exit 1; }
-	@hurl --test --variables-file api/local.env api/*.hurl
+	@hurl --test --jobs 1 --variables-file api/local.env api/*.hurl
 
 # Every aws/lambdas/<area>/contracts folder shows up under its area's name.
 api-docs: ## Browse the API contracts and try requests on http://localhost:8081 (Ctrl+C stops)
@@ -238,28 +238,28 @@ deploy: ## Build + deploy stacks via scripts/deploy.sh (ENV=dev STACKS="auth bac
 	@scripts/deploy.sh $(STACK_ENV) $(STACKS)
 
 deploy-all: ## Deploy all stacks (dev)
-	@scripts/deploy.sh dev
+	@scripts/deploy.sh $(STACK_ENV)
 
 deploy-auth: ## Deploy auth (Cognito + optional-auth authorizer) to AWS (dev)
-	@scripts/deploy.sh dev auth
+	@scripts/deploy.sh $(STACK_ENV) auth
 
 deploy-backend: ## Deploy backend to AWS (dev, arm64; FEED_WEIGHTS=ppr=0 sets the feed's weights) - needs mgmt-stack-networking (management stack) + auth deployed
-	@scripts/deploy.sh dev backend
+	@scripts/deploy.sh $(STACK_ENV) backend
 
 deploy-embeddings: ## Deploy the embedding worker and PageRank to AWS (dev, arm64; PPR_SCHEDULE=true turns PageRank's schedule on) - needs mgmt-stack-networking + backend deployed
-	@scripts/deploy.sh dev embeddings
+	@scripts/deploy.sh $(STACK_ENV) embeddings
 
 deploy-geocoder: ## Deploy the geocoder instance and its CloudFront VPC origin (dev) - ~$7/month, needs an internet gateway in the VPC
-	@scripts/deploy.sh dev geocoder
+	@scripts/deploy.sh $(STACK_ENV) geocoder
 
 deploy-scraper: ## Deploy the scheduled scraper (dev; SCRAPER_SCHEDULE=true to run it, SCRAPER_END_DATE to stop it) - needs auth, backend, geocoder
-	@scripts/deploy.sh dev scraper
+	@scripts/deploy.sh $(STACK_ENV) scraper
 
 deploy-waf: ## Deploy CloudFront WAF web ACL + allowed-IP sets to us-east-1 (dev) - ~$8/month + $0.60 per 1M requests
-	@scripts/deploy.sh dev waf
+	@scripts/deploy.sh $(STACK_ENV) waf
 
 deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to AWS (dev) - needs backend deployed
-	@scripts/deploy.sh dev frontend
+	@scripts/deploy.sh $(STACK_ENV) frontend
 
 geo-publish: ## Upload the geocoder and its index to AWS and restart the instance (ENV=dev), after make geo-index and deploy-geocoder
 	@scripts/geo-publish.sh $(STACK_ENV)
@@ -283,19 +283,19 @@ logs-api: ## Tail the backend's logs on AWS (ENV=dev)
 		--query "StackResources[?ResourceType=='AWS::Lambda::Function'].LogicalResourceId" | tr -d '\r' | xargs printf -- '--name %s ')
 
 delete-embeddings: ## Delete the embedding worker and PageRank stack
-	@sam delete --stack-name coolture-embeddings-dev --no-prompts
+	@sam delete --stack-name coolture-embeddings-$(STACK_ENV) --no-prompts
 
 delete-backend: ## Delete backend stack (delete embeddings first: it imports backend outputs)
-	@sam delete --stack-name coolture-backend-dev --no-prompts
+	@sam delete --stack-name coolture-backend-$(STACK_ENV) --no-prompts
 
 delete-scraper: ## Delete the scheduled scraper's stack (its ledger bucket must be emptied first)
-	@sam delete --stack-name coolture-scraper-dev --no-prompts
+	@sam delete --stack-name coolture-scraper-$(STACK_ENV) --no-prompts
 
 delete-geocoder: ## Delete geocoder stack (first delete-scraper, and NO_GEOCODER=1 make deploy-frontend: both import it)
-	@sam delete --stack-name coolture-geocoder-dev --no-prompts
+	@sam delete --stack-name coolture-geocoder-$(STACK_ENV) --no-prompts
 
 delete-frontend: ## Delete frontend stack
-	@sam delete --stack-name coolture-frontend-dev --no-prompts
+	@sam delete --stack-name coolture-frontend-$(STACK_ENV) --no-prompts
 
 delete-auth: ## Delete auth stack
-	@sam delete --stack-name coolture-auth-dev --no-prompts
+	@sam delete --stack-name coolture-auth-$(STACK_ENV) --no-prompts
