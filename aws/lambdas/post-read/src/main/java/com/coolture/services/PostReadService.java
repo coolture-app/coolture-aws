@@ -6,9 +6,7 @@ import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.PostFeedFilters;
 import com.coolture.common.dto.PostFriendsDto;
 import com.coolture.common.dto.PostMarkDto;
-import com.coolture.common.pagination.CursorCodec;
 import com.coolture.common.pagination.CursorPage;
-import com.coolture.common.pagination.CursorPayload;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.repository.PostReadRepository;
 import com.coolture.repository.PostSort;
@@ -19,7 +17,6 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -42,19 +39,9 @@ public class PostReadService {
     public CursorPage<PostCardDto> getFeed(UUID callerId, PostFeedFilters filters, String cursor, int limit) throws SQLException {
         validateParticipationFilter(filters.participationTypes(), callerId);
         validateReactionFilter(filters.reactionType(), callerId);
-
         validateParticipant(filters, callerId);
-
         PostSort sort = PostSort.parse(filters.sortBy());
-        if (sort.needsStances() && someoneElse(filters, callerId)) {
-            throw new IllegalArgumentException("participantId can't go with STANCE_NEWEST");
-        }
-        if (sort.needsPosition() && (filters.latitude() == null || filters.longitude() == null)) {
-            throw new IllegalArgumentException("sortBy NEAREST needs latitude and longitude");
-        }
-        if (sort.needsStances() && (filters.participationTypes() == null || filters.participationTypes().isEmpty())) {
-            throw new IllegalArgumentException("sortBy STANCE_NEWEST needs participationTypes");
-        }
+        validateSort(sort, filters, callerId);
         PostsCursor keyset = PostsCursor.decode(cursor, sort).orElse(null);
 
         int effectiveLimit = clampLimit(limit);
@@ -105,6 +92,18 @@ public class PostReadService {
         }
         if (filters.reactionType() != null) {
             throw new IllegalArgumentException("participantId can't go with reactionType");
+        }
+    }
+
+    private static void validateSort(PostSort sort, PostFeedFilters filters, UUID callerId) {
+        if (sort.needsPosition() && (filters.latitude() == null || filters.longitude() == null)) {
+            throw new IllegalArgumentException("sortBy NEAREST needs latitude and longitude");
+        }
+        if (sort.needsStances() && someoneElse(filters, callerId)) {
+            throw new IllegalArgumentException("participantId can't go with STANCE_NEWEST");
+        }
+        if (sort.needsStances() && (filters.participationTypes() == null || filters.participationTypes().isEmpty())) {
+            throw new IllegalArgumentException("sortBy STANCE_NEWEST needs participationTypes");
         }
     }
 

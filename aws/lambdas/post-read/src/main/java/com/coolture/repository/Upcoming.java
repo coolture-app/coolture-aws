@@ -1,8 +1,6 @@
 package com.coolture.repository;
 
 import com.coolture.common.db.EventTime;
-import com.coolture.common.db.Friends;
-import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.ResultSetMappers;
 import com.coolture.common.dto.PostCardDto;
@@ -99,12 +97,11 @@ public final class Upcoming {
             page = new Page(items, past.size() > room,
                 page.next().endedAfter(taken.isEmpty() ? null : taken.get(taken.size() - 1)));
         }
-        return new Page(Friends.withFriendStances(conn, viewer, MediaQueries.withPhotos(conn, page.items())),
-            page.hasMore(), page.next());
+        return new Page(PostSql.withPhotosAndFriends(conn, viewer, page.items()), page.hasMore(), page.next());
     }
 
     /** Each stream's next cards, at least limit + 1 of each when there are that many. */
-    public static Page merge(List<PostCardDto> dated, List<PostCardDto> running, Position at, int limit) {
+    static Page merge(List<PostCardDto> dated, List<PostCardDto> running, Position at, int limit) {
         List<PostCardDto> items = new ArrayList<>();
         Position next = at;
         int d = 0;
@@ -222,13 +219,9 @@ public final class Upcoming {
                 }
                 b.bindInt(limit);
 
-                List<PostCardDto> cards = new ArrayList<>();
                 try (ResultSet rs = stmt.executeQuery()) {
-                    while (rs.next()) {
-                        cards.add(ResultSetMappers.mapPostCard(rs));
-                    }
+                    return ResultSetMappers.mapPostCards(rs);
                 }
-                return cards;
             }
         }
     }

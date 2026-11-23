@@ -57,14 +57,9 @@ public class PostReadRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             ParamBinder b = new ParamBinder(stmt, conn);
-
-            b.bindUUID(callerId)
-             .bindUUID(callerId);
-
+            PostSql.bindCardViewer(b, callerId);
             PostFilterSql.bind(b, f, callerId);
-
-            b.bindNullableUUID(callerId)
-                .bindNullableUUID(callerId);
+            Blocks.bindViewer(b, callerId);
 
             if (!sort.endedOnly()) {
                 b.bindBoolean(f.showsAllPastEvents());
@@ -83,7 +78,7 @@ public class PostReadRepository {
             b.bindInt(limit);
 
             try (ResultSet rs = stmt.executeQuery()) {
-                return Friends.withFriendStances(conn, callerId, MediaQueries.withPhotos(conn, mapPostCardList(rs)));
+                return PostSql.withPhotosAndFriends(conn, callerId, mapPostCards(rs));
             }
         }
     }
@@ -91,14 +86,12 @@ public class PostReadRepository {
     /** With includePast, the ended events follow. A date range alone doesn't bring them, unlike in the other sorts. */
     public Upcoming.Page findUpcoming(PostFeedFilters f, UUID callerId, Upcoming.Position at, int limit) throws SQLException {
         Upcoming.Binds binds = b -> {
-            b.bindUUID(callerId)
-             .bindUUID(callerId);
+            PostSql.bindCardViewer(b, callerId);
             PostFilterSql.bind(b, f, callerId);
-            b.bindNullableUUID(callerId)
-                .bindNullableUUID(callerId);
+            Blocks.bindViewer(b, callerId);
             bindParticipationAndReaction(b, f, callerId);
         };
-        Upcoming.Query query = new Upcoming.Query(upcomingSql(PostSql.NOT_ENDED), binds);
+        Upcoming.Query query = new Upcoming.Query(upcomingSql(EventTime.NOT_ENDED), binds);
         Upcoming.Query ended = f.includePast() ? new Upcoming.Query(upcomingSql(EventTime.ENDED), binds) : null;
         try (Connection conn = DatabaseConfig.getConnection()) {
             return Upcoming.find(conn, query, ended, callerId, f.from(), at, limit);
@@ -146,41 +139,16 @@ public class PostReadRepository {
     }
 
     public Optional<PostDetailDto> findById(UUID postId, UUID callerId) throws SQLException {
-        String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.links, p.type, p.status,
-                   p.positive_reaction_count, p.comments_count,
-                   stances.participant_count, stances.interested_count, stances.going_count,
-                   p.starts_at, p.ends_at, p.open_ended, p.created_at, p.last_modified_at, p.deleted_at,
-                   u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
-                   avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
-                   avatar_m.size_bytes AS avatar_size_bytes, avatar_m.status AS avatar_status,
-                   avatar_m.created_at AS avatar_created_at, avatar_m.deleted_at AS avatar_deleted_at, avatar_m.object_key AS avatar_object_key,
-                   el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
-                   el.street, el.postal_code, el.city,
-                   ST_Y(el.coordinates::geometry) AS latitude,
-                   ST_X(el.coordinates::geometry) AS longitude,
-                   pr_my.type AS my_reaction,
-                   pp_my.type AS my_participation,
-                   """ + PostKinds.OF_POST + """
-                   AS kinds
-            FROM posts p
-            JOIN users u ON u.id = p.author_id
-            """ + StanceCounts.JOIN + """
-            LEFT JOIN profile_images pi ON pi.user_id = u.id AND pi.is_active = true
-            LEFT JOIN media avatar_m ON avatar_m.id = pi.thumbnail_media_id
-            LEFT JOIN event_locations el ON el.id = p.event_location_id
-            LEFT JOIN post_reactions pr_my ON pr_my.post_id = p.id AND pr_my.user_id = ?::uuid
-            LEFT JOIN post_participations pp_my ON pp_my.post_id = p.id AND pp_my.user_id = ?::uuid
-            WHERE p.id = ? AND p.deleted_at IS NULL
-            """ + "  AND " + PostSql.NOT_BLOCKED;
+        String sql = PostSql.cardSelect(",\n       " + PostKinds.OF_POST + " AS kinds")
+            + "WHERE p.id = ? AND p.deleted_at IS NULL\n"
+            + "  AND " + PostSql.NOT_BLOCKED;
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            ParamBinder b = new ParamBinder(stmt, conn)
-                .bindUUID(callerId)
-                .bindUUID(callerId)
-                .bindUUID(postId);
+            ParamBinder b = new ParamBinder(stmt, conn);
+            PostSql.bindCardViewer(b, callerId);
+            b.bindUUID(postId);
             Blocks.bindViewer(b, callerId);
 
             try (ResultSet rs = stmt.executeQuery()) {
@@ -277,15 +245,10 @@ public class PostReadRepository {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            // The viewer's own reaction and stance
-            ParamBinder b = new ParamBinder(stmt, conn)
-                .bindNullableUUID(callerId)
-                .bindNullableUUID(callerId);
-
+            ParamBinder b = new ParamBinder(stmt, conn);
+            PostSql.bindCardViewer(b, callerId);
             PostFilterSql.bind(b, f, callerId);
-
-            b.bindNullableUUID(callerId)
-                .bindNullableUUID(callerId);
+            Blocks.bindViewer(b, callerId);
 
             // Past events
             b.bindBoolean(f.showsAllPastEvents());
@@ -331,13 +294,5 @@ public class PostReadRepository {
             Map<UUID, FriendStancesDto> friends = Friends.forPosts(conn, callerId, list.stream().map(PostMarkDto::id).toList());
             return friends.isEmpty() ? list : list.stream().map(mark -> mark.withFriendStances(friends.get(mark.id()))).toList();
         }
-    }
-
-    private List<PostCardDto> mapPostCardList(ResultSet rs) throws SQLException {
-        List<PostCardDto> list = new ArrayList<>();
-        while (rs.next()) {
-            list.add(mapPostCard(rs));
-        }
-        return list;
     }
 }

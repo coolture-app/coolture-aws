@@ -1,9 +1,8 @@
 package com.coolture.feed;
 
+import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
 import com.coolture.common.db.EventTime;
-import com.coolture.common.db.Friends;
-import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.ResultSetMappers;
 import com.coolture.common.dto.GeoPointDto;
@@ -32,7 +31,7 @@ public class FeedRepository {
      */
     private static String feedRules(boolean showsEnded) {
         return "p.deleted_at IS NULL\n"
-            + (showsEnded ? "" : "  AND " + PostSql.NOT_ENDED + "\n")
+            + (showsEnded ? "" : "  AND " + EventTime.NOT_ENDED + "\n")
             + "  AND p.created_at <= ?::timestamptz\n"
             + "  AND " + PostSql.NOT_BLOCKED + "\n"
             + "  AND " + PostSql.NOT_MINE + "\n"
@@ -301,8 +300,7 @@ public class FeedRepository {
     /** The fallback order, Nadchodzące's (Upcoming), from the given position. */
     public Upcoming.Page findUpcoming(UUID viewer, PostFeedFilters filters, Upcoming.Position at, int limit) throws SQLException {
         Upcoming.Query query = new Upcoming.Query(PostSql.CARD_SELECT + "WHERE " + feedRules(false), b -> {
-            b.bindNullableUUID(viewer)
-             .bindNullableUUID(viewer);
+            PostSql.bindCardViewer(b, viewer);
             bindRules(b, viewer, at.asOf(), filters);
         });
         try (Connection conn = DatabaseConfig.getConnection()) {
@@ -317,31 +315,20 @@ public class FeedRepository {
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            new ParamBinder(stmt, conn)
-                .bindNullableUUID(viewer)
-                .bindNullableUUID(viewer)
-                .bindUUIDArray(ids.toArray(new UUID[0]));
+            ParamBinder b = new ParamBinder(stmt, conn);
+            PostSql.bindCardViewer(b, viewer);
+            b.bindUUIDArray(ids.toArray(new UUID[0]));
 
-            return readCards(stmt, viewer);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return PostSql.withPhotosAndFriends(conn, viewer, ResultSetMappers.mapPostCards(rs));
+            }
         }
     }
 
     private static void bindRules(ParamBinder b, UUID viewer, Instant asOf, PostFeedFilters filters) throws SQLException {
         b.bindTimestamp(asOf);
-        b.bindNullableUUID(viewer)
-         .bindNullableUUID(viewer);
+        Blocks.bindViewer(b, viewer);
         PostSql.bindNotMine(b, viewer);
         PostFilterSql.bind(b, filters, viewer);
-    }
-
-    private static List<PostCardDto> readCards(PreparedStatement stmt, UUID viewer) throws SQLException {
-        List<PostCardDto> cards = new ArrayList<>();
-        try (ResultSet rs = stmt.executeQuery()) {
-            while (rs.next()) {
-                cards.add(ResultSetMappers.mapPostCard(rs));
-            }
-        }
-        Connection conn = stmt.getConnection();
-        return Friends.withFriendStances(conn, viewer, MediaQueries.withPhotos(conn, cards));
     }
 }

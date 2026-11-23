@@ -160,7 +160,7 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         String cursor = qp.get("cursor");
         int limit = parseLimit(qp.get("limit"), 20);
         String sortBy = qp.get("sortBy");
-        boolean includePast = parseIncludePast(qp.get("includePast"));
+        boolean includePast = parseBoolean(qp.get("includePast"), "includePast");
         List<String> kinds = parseKinds(qp.get("kinds"));
         boolean kids = parseBoolean(qp.get("kids"), "kids");
         UUID participantId = qp.get("participantId") != null ? UUID.fromString(qp.get("participantId")) : null;
@@ -192,10 +192,6 @@ public class PostReadHandler implements RequestHandler<APIGatewayV2HTTPEvent, AP
         if ((lat == null) != (lng == null)) {
             throw new IllegalArgumentException("latitude and longitude must be sent together");
         }
-    }
-
-    private boolean parseIncludePast(String raw) {
-        return parseBoolean(raw, "includePast");
     }
 
     private boolean parseBoolean(String raw, String name) {

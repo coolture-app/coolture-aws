@@ -84,7 +84,11 @@ class FeedServiceTest {
                 .limit(limit + 1L)
                 .map(FeedServiceTest::card)
                 .toList();
-            return Upcoming.merge(dated, List.of(), at, limit);
+            boolean hasMore = dated.size() > limit;
+            List<PostCardDto> items = hasMore ? dated.subList(0, limit) : dated;
+            PostCardDto last = items.isEmpty() ? null : items.getLast();
+            return new Upcoming.Page(items, hasMore, last == null ? at
+                : new Upcoming.Position(at.asOf(), last.startsAt(), last.id(), null, null, at.count() + items.size()));
         }
 
         @Override

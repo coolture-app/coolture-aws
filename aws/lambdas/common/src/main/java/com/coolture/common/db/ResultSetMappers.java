@@ -216,6 +216,15 @@ public final class ResultSetMappers {
         );
     }
 
+    /** Every row left, as cards. */
+    public static List<PostCardDto> mapPostCards(ResultSet rs) throws SQLException {
+        List<PostCardDto> cards = new java.util.ArrayList<>();
+        while (rs.next()) {
+            cards.add(mapPostCard(rs));
+        }
+        return cards;
+    }
+
     /** A card with no photos yet: PostCardDto.withPhotos adds them and the cover. */
     public static PostCardDto mapPostCard(ResultSet rs) throws SQLException {
         return new PostCardDto(
