@@ -9,6 +9,7 @@ import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.CursorPayload;
 import com.coolture.common.storage.S3StorageService;
 import com.coolture.user.dto.HomeDto;
+import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserInterestsDto;
@@ -18,7 +19,6 @@ import com.coolture.user.repository.InterestRepository;
 import com.coolture.user.repository.UserRepository;
 import com.coolture.user.repository.UserRepository.AvatarRecord;
 import com.coolture.user.repository.UserRepository.FollowRow;
-import com.coolture.user.repository.UserRepository.HomeRecord;
 import com.coolture.user.repository.UserRepository.ListedUser;
 import com.coolture.user.repository.UserRepository.NameCursor;
 import com.coolture.user.repository.UserRepository.UserEntity;
@@ -50,12 +50,7 @@ public class UserService {
     }
 
     public CursorPage<UserListItemDto> search(UUID callerId, String q, String cursor, int limit) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
-        if (limit < 1 || limit > 100) {
-            throw new IllegalArgumentException("Limit must be between 1 and 100");
-        }
+        requireLimit(limit);
 
         Optional<CursorPayload> payload = CursorCodec.decode(cursor);
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
@@ -155,24 +150,12 @@ public class UserService {
         userRepository.deactivateProfileImages(targetId, Instant.now());
     }
 
-    public UserProfileDto getMe(UUID callerId, String username, String firstName, String lastName) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
-        String uname = toUsername(username, callerId);
-        String fName = firstName != null ? firstName : "";
-        String lName = lastName != null ? lastName : "";
-        userRepository.createUserIfAbsent(callerId, uname, fName, lName);
-        return getByIdForCaller(callerId, callerId);
-    }
-
-    public boolean sharesStances(UUID callerId) throws SQLException {
-        return userRepository.sharesStances(callerId);
-    }
-
-    public Optional<HomeDto> getHome(UUID callerId) throws SQLException {
-        return userRepository.findHome(callerId)
-                .map(home -> new HomeDto(home.name(), new GeoPointDto(home.latitude(), home.longitude())));
+    public MeDto getMe(UUID callerId, String username, String firstName, String lastName) throws SQLException {
+        UserEntity user = userRepository.createUserIfAbsent(callerId, toUsername(username, callerId),
+                firstName != null ? firstName : "", lastName != null ? lastName : "");
+        UserProfileDto profile = toProfileDto(user, callerId);
+        return new MeDto(profile, !profile.kinds().isEmpty(), userRepository.sharesStances(callerId),
+                userRepository.findHome(callerId).orElse(null));
     }
 
     /**
@@ -181,12 +164,12 @@ public class UserService {
      */
     public HomeDto setHome(UUID targetId, UUID callerId, HomeDto request) throws SQLException {
         requireSelf(targetId, callerId, "You can only set your own home");
-        HomeRecord home = new HomeRecord(request.name().trim(),
-                roundToKilometre(request.coordinates().latitude()), roundToKilometre(request.coordinates().longitude()));
+        HomeDto home = new HomeDto(request.name().trim(), new GeoPointDto(
+                roundToKilometre(request.coordinates().latitude()), roundToKilometre(request.coordinates().longitude())));
         if (!userRepository.setHome(targetId, home)) {
             throw new IllegalArgumentException("User " + targetId + " not found");
         }
-        return new HomeDto(home.name(), new GeoPointDto(home.latitude(), home.longitude()));
+        return home;
     }
 
     public void clearHome(UUID targetId, UUID callerId) throws SQLException {
@@ -195,11 +178,14 @@ public class UserService {
     }
 
     private static void requireSelf(UUID targetId, UUID callerId, String refusal) {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (!targetId.equals(callerId)) {
             throw new SecurityException(refusal);
+        }
+    }
+
+    private static void requireLimit(int limit) {
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("Limit must be between 1 and 100");
         }
     }
 
@@ -218,9 +204,7 @@ public class UserService {
     }
 
     private NameCursor checkFollowList(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
-        if (limit < 1 || limit > 100) {
-            throw new IllegalArgumentException("Limit must be between 1 and 100");
-        }
+        requireLimit(limit);
         NameCursor after = CursorCodec.decode(cursor, NameCursor.class).orElse(null);
         if (after != null && (after.name() == null || after.id() == null)) {
             throw new IllegalArgumentException("Invalid cursor");
@@ -244,15 +228,10 @@ public class UserService {
     }
 
     public CursorPage<UserListItemDto> getBlocking(UUID targetUserId, UUID callerId, String cursor, int limit) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (!callerId.equals(targetUserId)) {
             throw new SecurityException("You can only view your own block list");
         }
-        if (limit < 1 || limit > 100) {
-            throw new IllegalArgumentException("Limit must be between 1 and 100");
-        }
+        requireLimit(limit);
         Optional<CursorPayload> payload = CursorCodec.decode(cursor);
         Instant cursorCreatedAt = payload.map(CursorPayload::createdAt).orElse(null);
         UUID cursorId = payload.map(CursorPayload::id).orElse(null);
@@ -262,9 +241,6 @@ public class UserService {
     }
 
     public void follow(UUID callerId, UUID targetUserId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (callerId.equals(targetUserId)) {
             throw new IllegalStateException("Cannot FOLLOW yourself");
         }
@@ -281,9 +257,6 @@ public class UserService {
     }
 
     public void unfollow(UUID callerId, UUID targetUserId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (!userRepository.existsById(targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
         }
@@ -294,9 +267,6 @@ public class UserService {
     }
 
     public void block(UUID callerId, UUID targetUserId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (callerId.equals(targetUserId)) {
             throw new IllegalStateException("Cannot BLOCK yourself");
         }
@@ -313,9 +283,6 @@ public class UserService {
     }
 
     public void unblock(UUID callerId, UUID targetUserId) throws SQLException {
-        if (callerId == null) {
-            throw new SecurityException("User not authenticated: missing 'sub' claim");
-        }
         if (!userRepository.existsById(targetUserId)) {
             throw new IllegalArgumentException("User " + targetUserId + " not found");
         }
@@ -425,7 +392,7 @@ public class UserService {
             normalized = normalized.substring(0, MAX_USERNAME_LENGTH);
         }
         if (normalized.replace("_", "").isEmpty()) {
-            return "user_" + callerId.toString().replace("-", "").substring(0, 12);
+            return UserRepository.fallbackUsername(callerId);
         }
         return normalized;
     }

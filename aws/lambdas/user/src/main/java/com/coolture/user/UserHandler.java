@@ -10,13 +10,11 @@ import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
 import com.coolture.user.dto.HomeDto;
-import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.dto.UserProfileUpdateRequest;
-import com.coolture.user.repository.UserRepository.UserEntity;
 import com.coolture.user.service.InterestService;
 import com.coolture.user.service.UserService;
 
@@ -45,101 +43,25 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
                     : "GET";
             String path = event.getRawPath() != null ? event.getRawPath() : "";
 
-            if (path.contains("/auth/me")) {
-                if ("GET".equalsIgnoreCase(method)) {
-                    return getMe(event);
-                }
-                return ApiResponse.badRequest("Unsupported method for /auth/me: " + method);
-            }
+            // API Gateway passes on only the methods backend.yaml declares, one or two per path.
+            boolean get = "GET".equalsIgnoreCase(method);
+            boolean put = "PUT".equalsIgnoreCase(method);
+            boolean post = "POST".equalsIgnoreCase(method);
 
+            if (path.contains("/auth/me")) return getMe(event);
             // A username can be any route's last word, such as home or follow, so this comes before them.
-            if (path.contains("/by-username/")) {
-                if ("GET".equalsIgnoreCase(method)) {
-                    return getByUsername(event);
-                }
-                return ApiResponse.badRequest("Unsupported method for by-username: " + method);
-            }
-
-            if (path.endsWith("/dicts/interests")) {
-                if ("GET".equalsIgnoreCase(method)) {
-                    return ApiResponse.ok(interestService.getCatalog());
-                }
-                return ApiResponse.badRequest("Unsupported method for interests: " + method);
-            }
-
-            if (path.contains("/profile-image")) {
-                return switch (method.toUpperCase()) {
-                    case "PUT" -> setProfileImage(event);
-                    case "DELETE" -> removeProfileImage(event);
-                    default -> ApiResponse.badRequest("Unsupported method for profile-image: " + method);
-                };
-            }
-
-            if (path.endsWith("/home")) {
-                return switch (method.toUpperCase()) {
-                    case "PUT" -> setHome(event);
-                    case "DELETE" -> clearHome(event);
-                    default -> ApiResponse.badRequest("Unsupported method for home: " + method);
-                };
-            }
-
-            if (path.contains("/followers")) {
-                if ("GET".equalsIgnoreCase(method)) {
-                    return getFollowers(event);
-                }
-                return ApiResponse.badRequest("Unsupported method for followers: " + method);
-            }
-
-            if (path.contains("/following")) {
-                if ("GET".equalsIgnoreCase(method)) {
-                    return getFollowing(event);
-                }
-                return ApiResponse.badRequest("Unsupported method for following: " + method);
-            }
-
-            if (path.endsWith("/follow")) {
-                return switch (method.toUpperCase()) {
-                    case "POST" -> follow(event);
-                    case "DELETE" -> unfollow(event);
-                    default -> ApiResponse.badRequest("Unsupported method for follow: " + method);
-                };
-            }
-
-            if (path.contains("/blocking")) {
-                if ("GET".equalsIgnoreCase(method)) {
-                    return getBlocking(event);
-                }
-                return ApiResponse.badRequest("Unsupported method for blocking: " + method);
-            }
-
-            if (path.endsWith("/block")) {
-                return switch (method.toUpperCase()) {
-                    case "POST" -> block(event);
-                    case "DELETE" -> unblock(event);
-                    default -> ApiResponse.badRequest("Unsupported method for block: " + method);
-                };
-            }
-
-            if (path.endsWith("/interests")) {
-                return switch (method.toUpperCase()) {
-                    case "GET" -> getInterests(event);
-                    case "PUT" -> replaceInterests(event);
-                    default -> ApiResponse.badRequest("Unsupported method for interests: " + method);
-                };
-            }
-
-            if (isRootUsersPath(path)) {
-                return switch (method.toUpperCase()) {
-                    case "GET" -> searchUsers(event);
-                    default -> ApiResponse.badRequest("Unsupported method for /users: " + method);
-                };
-            }
-
-            return switch (method.toUpperCase()) {
-                case "GET" -> getById(event);
-                case "PATCH" -> update(event);
-                default -> ApiResponse.badRequest("Unsupported method for user: " + method);
-            };
+            if (path.contains("/by-username/")) return getByUsername(event);
+            if (path.endsWith("/dicts/interests")) return ApiResponse.ok(interestService.getCatalog());
+            if (path.contains("/profile-image")) return put ? setProfileImage(event) : removeProfileImage(event);
+            if (path.endsWith("/home")) return put ? setHome(event) : clearHome(event);
+            if (path.contains("/followers")) return getFollowers(event);
+            if (path.contains("/following")) return getFollowing(event);
+            if (path.endsWith("/follow")) return post ? follow(event) : unfollow(event);
+            if (path.contains("/blocking")) return getBlocking(event);
+            if (path.endsWith("/block")) return post ? block(event) : unblock(event);
+            if (path.endsWith("/interests")) return get ? getInterests(event) : replaceInterests(event);
+            if (isRootUsersPath(path)) return searchUsers(event);
+            return get ? getById(event) : update(event);
 
         } catch (SecurityException e) {
             String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
@@ -239,9 +161,7 @@ public class UserHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGat
             .orElse(null);
         String firstName = SecurityContext.getClaim(event, "given_name").orElse(null);
         String lastName = SecurityContext.getClaim(event, "family_name").orElse(null);
-        UserProfileDto profile = service.getMe(callerId, username, firstName, lastName);
-        return ApiResponse.ok(new MeDto(profile, !profile.kinds().isEmpty(), service.sharesStances(callerId),
-            service.getHome(callerId).orElse(null)));
+        return ApiResponse.ok(service.getMe(callerId, username, firstName, lastName));
     }
 
     private APIGatewayV2HTTPResponse setHome(APIGatewayV2HTTPEvent event) throws Exception {

@@ -6,9 +6,11 @@ import com.coolture.common.db.EventTime;
 import com.coolture.common.db.Friends;
 import com.coolture.common.db.ParamBinder;
 import com.coolture.common.db.TextSearch;
+import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.ProfileEventsDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.MediaStatus;
+import com.coolture.user.dto.HomeDto;
 
 import java.sql.Array;
 import java.sql.Connection;
@@ -76,10 +78,9 @@ public class UserRepository {
                     if (user.isPresent()) {
                         return user.get();
                     }
-                    String fallbackUsername = "user_" + id.toString().replace("-", "").substring(0, 12);
                     try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                         stmt.setObject(1, id);
-                        stmt.setString(2, fallbackUsername);
+                        stmt.setString(2, fallbackUsername(id));
                         stmt.setString(3, firstName);
                         stmt.setString(4, lastName);
                         stmt.executeUpdate();
@@ -91,6 +92,11 @@ public class UserRepository {
         }
         // Always return the current row (whether just inserted or already existed)
         return findById(id).orElseThrow(() -> new SQLException("Failed to create or find user " + id));
+    }
+
+    /** The username an account gets when the one its sign-in gives is taken or has nothing usable. */
+    public static String fallbackUsername(UUID id) {
+        return "user_" + id.toString().replace("-", "").substring(0, 12);
     }
 
     public Optional<UserEntity> findById(UUID id) throws SQLException {
@@ -121,9 +127,7 @@ public class UserRepository {
         }
     }
 
-    public record HomeRecord(String name, double latitude, double longitude) {}
-
-    public Optional<HomeRecord> findHome(UUID userId) throws SQLException {
+    public Optional<HomeDto> findHome(UUID userId) throws SQLException {
         String sql = """
             SELECT home_name, ST_Y(home_location::geometry) AS latitude, ST_X(home_location::geometry) AS longitude
             FROM users
@@ -137,7 +141,8 @@ public class UserRepository {
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    return Optional.of(new HomeRecord(rs.getString("home_name"), rs.getDouble("latitude"), rs.getDouble("longitude")));
+                    return Optional.of(new HomeDto(rs.getString("home_name"),
+                        new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude"))));
                 }
             }
         }
@@ -145,7 +150,7 @@ public class UserRepository {
     }
 
     /** Returns false when the user doesn't exist. */
-    public boolean setHome(UUID userId, HomeRecord home) throws SQLException {
+    public boolean setHome(UUID userId, HomeDto home) throws SQLException {
         String sql = """
             UPDATE users
             SET home_name = ?, home_location = ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography
@@ -156,8 +161,8 @@ public class UserRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             stmt.setString(1, home.name());
-            stmt.setDouble(2, home.longitude());
-            stmt.setDouble(3, home.latitude());
+            stmt.setDouble(2, home.coordinates().longitude());
+            stmt.setDouble(3, home.coordinates().latitude());
             stmt.setObject(4, userId);
             return stmt.executeUpdate() > 0;
         }

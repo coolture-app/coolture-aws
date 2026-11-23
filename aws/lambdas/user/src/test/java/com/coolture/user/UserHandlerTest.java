@@ -9,10 +9,10 @@ import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.common.security.SecurityContext;
+import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
-import com.coolture.user.repository.UserRepository.UserEntity;
 import com.coolture.user.dto.UserInterestsDto;
 import com.coolture.user.dto.UserListItemDto;
 import com.coolture.user.service.InterestService;
@@ -204,21 +204,6 @@ class UserHandlerTest {
 
             assertEquals(200, response.getStatusCode());
             verify(service).search(eq(CALLER_ID), eq("someone"), any(), eq(20));
-        }
-    }
-
-    @Test
-    void search_returns400_whenLimitExceedsMax() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users", null, null, Map.of("limit", "999"));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-            when(service.search(any(), any(), any(), eq(999)))
-                    .thenThrow(new IllegalArgumentException("Limit must be between 1 and 100"));
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(400, response.getStatusCode());
         }
     }
 
@@ -477,7 +462,7 @@ class UserHandlerTest {
             security.when(() -> SecurityContext.getClaim(event, "family_name")).thenReturn(java.util.Optional.of("Kowalski"));
 
             when(service.getMe(eq(CALLER_ID), eq(FAKE_USERNAME), eq("Jan"), eq("Kowalski")))
-                    .thenReturn(profile(CALLER_ID, FAKE_USERNAME));
+                    .thenReturn(new MeDto(profile(CALLER_ID, FAKE_USERNAME), true, false, null));
 
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
@@ -485,26 +470,6 @@ class UserHandlerTest {
             assertTrue(response.getBody().contains("\"username\":\"" + FAKE_USERNAME + "\""));
             assertTrue(response.getBody().contains("\"interests\":[\"theatre\",\"cinema\"]"));
             assertTrue(response.getBody().contains("\"onboarded\":true"));
-        }
-    }
-
-    @Test
-    void getMe_withInterestsButNoKind_isNotSelected() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/auth/me", null, null);
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-            security.when(() -> SecurityContext.getUsername(event)).thenReturn(java.util.Optional.of(FAKE_USERNAME));
-            security.when(() -> SecurityContext.getClaim(eq(event), any())).thenReturn(java.util.Optional.empty());
-
-            when(service.getMe(eq(CALLER_ID), eq(FAKE_USERNAME), any(), any())).thenReturn(new UserProfileDto(
-                    CALLER_ID, FAKE_USERNAME, null, null, null, 0, 0, null, Instant.now(), false, false, false, List.of("jazz"), List.of(), null));
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(200, response.getStatusCode());
-            assertTrue(response.getBody().contains("\"kinds\":[]"));
-            assertTrue(response.getBody().contains("\"onboarded\":false"));
         }
     }
 

@@ -18,6 +18,7 @@ import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.user.dto.HomeDto;
+import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.InterestCatalogDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.UserInterestsDto;
@@ -31,7 +32,6 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -116,12 +116,11 @@ class ContractTest {
 
     @Test
     void me_withAndWithoutAHome_matches() throws Exception {
-        when(users.getMe(any(), any(), any(), any())).thenReturn(fullProfile(CALLER));
-        when(users.getHome(CALLER)).thenReturn(Optional.of(new HomeDto("Gdynia", new GeoPointDto(54.52, 18.54))));
+        when(users.getMe(any(), any(), any(), any()))
+            .thenReturn(new MeDto(fullProfile(CALLER), true, true, new HomeDto("Gdynia", new GeoPointDto(54.52, 18.54))));
         assertMatches(report("/auth/me", Request.Method.GET, signedIn("GET", "/auth/me", null, null)));
 
-        when(users.getMe(any(), any(), any(), any())).thenReturn(minimalProfile(CALLER));
-        when(users.getHome(CALLER)).thenReturn(Optional.empty());
+        when(users.getMe(any(), any(), any(), any())).thenReturn(new MeDto(minimalProfile(CALLER), false, false, null));
         assertMatches(report("/auth/me", Request.Method.GET, signedIn("GET", "/auth/me", null, null)));
     }
 
