@@ -24,6 +24,7 @@ import requests
 
 from api import TIMEOUT_S, ApiError, CooltureApi, Outcome
 from images import Image, solid_png
+from posts import iso
 from scrape import DEFAULT_API_URL, http_session, utc_now
 from snapshot import DEFAULT_DIR, Entry, is_complete, load_images, read, sample
 from trojmiasto import WARSAW
@@ -157,16 +158,9 @@ def shift_days(starts: list[datetime], now: datetime, margin: timedelta = START_
     return days
 
 
-def _parse(moment: str) -> datetime:
-    return datetime.fromisoformat(moment.replace('Z', '+00:00'))
-
-
-def _iso(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
-
-
 def shifted(post: dict, days: int) -> dict:
-    return {**post, **{key: _iso(moved(_parse(post[key]), days)) for key in ('startsAt', 'endsAt') if key in post}}
+    return {**post, **{key: iso(moved(datetime.fromisoformat(post[key]), days))
+                       for key in ('startsAt', 'endsAt') if key in post}}
 
 
 def wait_for_api(base_url: str, timeout_s: float = API_WAIT_S, sleep: Callable[[float], None] = time.sleep,
@@ -203,7 +197,7 @@ def seed_events(directory: Path, base_url: str, workers: int = WORKERS, clock: C
     existing = new_api().existing_event_urls()
     todo = [entry for entry in entries if entry.post['eventUrl'] not in existing]
     # From the whole snapshot, so every size moves the dates alike and a later, bigger load fits the first.
-    days = shift_days([_parse(entry.post['startsAt']) for entry in snapshot], clock())
+    days = shift_days([datetime.fromisoformat(entry.post['startsAt']) for entry in snapshot], clock())
     log.info('Snapshot: %d events, %d already loaded, %d to load, dates moved %d days forward',
              len(entries), len(entries) - len(todo), len(todo), days)
 
@@ -251,14 +245,25 @@ def history(count: int) -> list[int]:
     return [first + round((last - first) * i / max(count - 1, 1)) for i in range(count)]
 
 
+def _sent(response: requests.Response, request: str, username: str) -> requests.Response:
+    if not response.ok:
+        raise SeedError(f'{request} as {username} returned {response.status_code}: {response.text[:300]}')
+    return response
+
+
+def _as_user(session_factory: Callable[[], requests.Session], user_id: str, username: str) -> requests.Session:
+    session = session_factory()
+    session.headers.update({'X-User-Id': user_id, 'X-User-Name': username})
+    return session
+
+
 def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
                    session_factory: Callable[[], requests.Session] = http_session, reset: bool = False) -> Counter:
     """With reset, first takes back every reaction and stance of the demo users, so their picks lead again after they
     change, at the cost of what was done as them in the app."""
     stats: Counter = Counter()
     for user_id, username in DEMO_USERS.items():
-        session = session_factory()
-        session.headers.update({'X-User-Id': user_id, 'X-User-Name': username})
+        session = _as_user(session_factory, user_id, username)
         if reset:
             for row in query(STANCES_SQL.format(user_id=user_id)):
                 path, post_id = row.split(',')
@@ -276,10 +281,8 @@ def seed_reactions(base_url: str, query: Callable[[str], list[str]] = psql,
                             '`make seed-events embed-interests embed-posts`.')
         chosen = picks(ranking)
         for post_id, path, kind in chosen:
-            response = session.put(f'{base_url}/posts/{post_id}/{path}', json={'type': kind}, timeout=TIMEOUT_S)
-            if not response.ok:
-                raise SeedError(f'PUT /posts/{post_id}/{path} as {username} returned {response.status_code}: '
-                                f'{response.text[:300]}')
+            _sent(session.put(f'{base_url}/posts/{post_id}/{path}', json={'type': kind}, timeout=TIMEOUT_S),
+                  f'PUT /posts/{post_id}/{path}', username)
             stats[kind.lower()] += 1
         query(''.join(DATED_SQL.format(table=path, days=days, user_id=user_id, post_id=post_id)
                       for (post_id, path, _), days in zip(chosen, history(len(chosen)))))
@@ -296,10 +299,6 @@ def friend_stances(post_ids: list[str]) -> list[tuple[str, str, str]]:
             for name in names]
 
 
-def _sent(response: requests.Response, request: str, username: str) -> requests.Response:
-    if not response.ok:
-        raise SeedError(f'{request} as {username} returned {response.status_code}: {response.text[:300]}')
-    return response
 
 
 def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
@@ -317,8 +316,7 @@ def seed_friends(base_url: str, query: Callable[[str], list[str]] = psql,
 
     def session(username: str) -> requests.Session:
         if username not in sessions:
-            sessions[username] = session_factory()
-            sessions[username].headers.update({'X-User-Id': FRIENDS[username], 'X-User-Name': username})
+            sessions[username] = _as_user(session_factory, FRIENDS[username], username)
         return sessions[username]
 
     stats: Counter = Counter()
@@ -377,8 +375,10 @@ def main() -> int:
         wait_for_api(base_url)
         if args.step == 'events':
             stats = seed_events(args.snapshot, base_url, args.workers, size=args.size)
+        elif args.step == 'reactions':
+            stats = seed_reactions(base_url, reset=args.reset)
         else:
-            stats = seed_reactions(base_url, reset=args.reset) if args.step == 'reactions' else seed_friends(base_url)
+            stats = seed_friends(base_url)
     except (SeedError, ApiError) as error:
         log.error('%s', error)
         return 1

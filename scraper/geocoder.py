@@ -59,20 +59,20 @@ class Geocoder:
         if trailing and not building_number:
             street, building_number = trailing['street'], trailing['number']
         if is_street(street):
-            query = {'street': street, 'city': city}
+            structured = {'street': street, 'city': city}
             number = HOUSE_NUMBER.match(building_number or '')
             if number:
-                query['housenumber'] = number.group()
+                structured['housenumber'] = number.group()
             # The structured search can answer with another street of a similar name ("pl. Kaszubski" gave Trasa
             # Kaszubska), where the free text finds the right one, so each answer must name the street asked for.
-            queries.append(('structured', query, street))
+            queries.append(('structured', structured, street))
             address = f'{street} {number.group()}' if number else street
             queries.append(('api', {'q': f'{address}, {city}', 'exclude': EXCLUDED}, street))
         if event.venue:
             queries.append(('api', {'q': f'{event.venue}, {city}', 'exclude': EXCLUDED}, None))
 
-        for path, query, street in queries:
-            place = self._search(path, query, exact=True, street=street)
+        for path, params, asked_street in queries:
+            place = self._search(path, params, exact=True, street=asked_street)
             if place is not None:
                 return place
         return self._search('api', {'q': city, 'layer': 'city'}, exact=False)

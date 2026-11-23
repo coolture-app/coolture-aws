@@ -42,7 +42,7 @@ def cut_description(text: str) -> str:
     return head[:end].rstrip() if end >= DESCRIPTION_MAX // 2 else cut(text, DESCRIPTION_MAX)
 
 
-def _iso(moment: datetime) -> str:
+def iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
@@ -69,11 +69,11 @@ def to_post(event: Event, place: Place | None) -> dict:
         'title': cut(event.title, TITLE_MAX),
         'description': cut_description(event.description),
         'eventUrl': event.url,
-        'startsAt': _iso(event.start),
+        'startsAt': iso(event.start),
         'type': 'ONLINE' if event.online else 'OFFLINE',
     }
     if event.end is not None:
-        post['endsAt'] = _iso(event.end)
+        post['endsAt'] = iso(event.end)
     if event.open_ended:
         post['openEnded'] = True
     if place is not None:

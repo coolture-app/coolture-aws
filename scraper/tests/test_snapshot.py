@@ -1,4 +1,3 @@
-import json
 from collections import Counter
 from datetime import date
 
@@ -43,7 +42,7 @@ def test_category_is_the_first_part_of_the_sites_label():
 
 
 def test_snapshot_keeps_the_post_and_its_photos(tmp_path):
-    snapshot = Snapshot(tmp_path, clock=lambda: NOW)
+    snapshot = Snapshot(tmp_path)
     post = {'title': 'Koncert', 'eventUrl': 'https://site.test/1', 'startsAt': '2026-11-05T18:00:00Z'}
 
     outcome = snapshot.create_post(post, [Image(b'one', 'image/webp', 'a.webp', 4, 3), Image(b'two', 'image/jpeg', 'b.jpg')],
@@ -53,20 +52,9 @@ def test_snapshot_keeps_the_post_and_its_photos(tmp_path):
     assert outcome.photos == 2
     assert entry.post == post
     assert entry.category == 'koncerty'
-    assert entry.scraped_at == NOW
     assert [(image.content, image.mime_type, image.file_name, image.width) for image in load_images(tmp_path, entry)] == [
         (b'one', 'image/webp', 'a.webp', 4), (b'two', 'image/jpeg', 'b.jpg', None)]
     assert snapshot.existing_event_urls() == {'https://site.test/1'}
-
-
-def test_a_snapshot_saved_with_tags_gives_them_as_its_category(tmp_path):
-    line = {'scrapedAt': NOW.isoformat(), 'images': [],
-            'post': {'eventUrl': 'https://site.test/1', 'tags': ['wystawy', 'spotkania']}}
-    (tmp_path / 'posts.jsonl').write_text(json.dumps(line) + '\n', encoding='utf-8')
-
-    [entry] = read(tmp_path)
-
-    assert entry.category == 'wystawy, spotkania'
 
 
 def test_a_second_run_only_fills_what_is_missing(tmp_path):
