@@ -1,22 +1,15 @@
 import json
 from collections import Counter
-from datetime import date, time
+from datetime import date
 
+from fakes import NOW, FakeGeocoder, FakeSite, listed
 from images import Image
 from scrape import run
 from snapshot import Snapshot, allocate, is_complete, load_images, read, sample, spread_over_dates, top_category
-from trojmiasto import ListingItem
-
-from test_scrape import NOW, FakeGeocoder, FakeSite
 
 # The listing on 2026-11-09.
 LISTING = {'koncerty': 121, 'spektakle': 79, 'imprezy rozrywkowe': 53, 'wystawy': 48, 'film': 35, 'sport': 32,
            'okolicznościowe': 15, 'targi': 9, 'kulinaria': 8}
-
-
-def listed(number, category='koncerty', day=date(2026, 11, 5)):
-    return ListingItem(f'https://site.test/{number}', f'Wydarzenie {number}', category, 'Gdańsk', 'Klub', day,
-                       time(19, 0))
 
 
 def test_allocation_follows_the_square_root_of_supply_and_adds_up():
@@ -38,8 +31,8 @@ def test_asking_for_more_than_the_listing_gives_everything():
 
 
 def test_spread_takes_one_event_of_each_day_before_a_second_of_any():
-    items = [listed(1, day=date(2026, 11, 5)), listed(2, day=date(2026, 11, 5)), listed(3, day=date(2026, 11, 6)),
-             listed(4, day=date(2026, 11, 7)), listed(5, day=None)]
+    items = [listed(1, start_date=date(2026, 11, 5)), listed(2, start_date=date(2026, 11, 5)), listed(3, start_date=date(2026, 11, 6)),
+             listed(4, start_date=date(2026, 11, 7)), listed(5, start_date=None)]
 
     assert [item.url[-1] for item in spread_over_dates(items)] == ['1', '3', '4', '5', '2']
 
@@ -77,7 +70,7 @@ def test_a_snapshot_saved_with_tags_gives_them_as_its_category(tmp_path):
 
 
 def test_a_second_run_only_fills_what_is_missing(tmp_path):
-    items = [listed(n, 'koncerty') for n in range(3)]
+    items = [listed(n) for n in range(3)]
     run(FakeSite(items[:2]), FakeGeocoder(), Snapshot(tmp_path), Counter(), None, clock=lambda: NOW)
     site = FakeSite(items)
 

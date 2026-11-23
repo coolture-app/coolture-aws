@@ -6,9 +6,10 @@ from pathlib import Path
 import pytest
 import requests
 
+from fakes import listed, read_page
 from images import Image
 from posts import cut_description
-from trojmiasto import WARSAW, EventPage, ListingItem, Site, clean_description, merge, parse_event_page, parse_listing
+from trojmiasto import WARSAW, Site, clean_description, merge, parse_event_page, parse_listing
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 
@@ -355,23 +356,11 @@ def test_a_days_page_of_earlier_days_events_still_leads_to_its_next_page():
     assert urls == ['1', '2', '3', '4']
     assert ('2026-11-29', 2) in session.requested
 
-def listed(**overrides):
-    fields = dict(url='https://www.trojmiasto.pl/imprezy/x-imp1.html', title='Koncert', category='koncerty',
-                  city='Gdańsk', venue=None, start_date=None, hour=time(19, 0))
-    return ListingItem(**{**fields, **overrides})
-
-
-def read_page(**overrides):
-    fields = dict(start_date=date(2026, 11, 5), end=None, online=False, description='Opis wydarzenia.',
-                  venue='Klub', street='Portowa', building_number='9', postal_code='81-350', hour=None)
-    return EventPage(**{**fields, **overrides})
-
-
 def test_merge_takes_the_address_from_the_page_and_the_rest_from_the_listing():
     event = merge(listed(), read_page())
 
-    assert (event.url, event.title, event.category, event.city) \
-        == ('https://www.trojmiasto.pl/imprezy/x-imp1.html', 'Koncert', 'koncerty', 'Gdańsk')
+    assert (event.url, event.title, event.category, event.city) == (
+        'https://site.test/1', 'Wydarzenie 1', 'koncerty', 'Gdańsk')
     assert (event.venue, event.street, event.building_number, event.postal_code) == ('Klub', 'Portowa', '9', '81-350')
     assert event.description == 'Opis wydarzenia.'
     assert event.online is False
@@ -439,7 +428,7 @@ def test_end_of_the_page_wins_over_the_end_hour_of_the_listing():
 
 
 def test_empty_description_is_built_from_the_facts():
-    assert merge(listed(), read_page(description='')).description == 'Koncerty: Koncert, Klub, Gdańsk.'
+    assert merge(listed(title='Koncert'), read_page(description='')).description == 'Koncerty: Koncert, Klub, Gdańsk.'
 
 
 def test_page_failure_gives_no_event():
