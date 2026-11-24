@@ -82,9 +82,21 @@ Resources:
       PackageType: Image
       MemorySize: 2048
       Timeout: 120
+      # The schedule's runs: one retry covers Aurora resuming from a pause, and the next run goes on anyway.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 1
       Policies:
         - !If [IsAWS, !ImportValue {'Fn::Sub': '${BackendStackName}-DbConnectPolicyArn'}, !Ref AWS::NoValue]
       Events:
+        # Repairs what a deploy's actions didn't do, such as when the deploy couldn't invoke the worker or only a
+        # migration changed the interests or kinds.
+        Reconcile:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: rate(6 hours)
+            Input: '{"action": "reconcile"}'
+            RetryPolicy:
+              MaximumRetryAttempts: 0
         PostEmbeddingMessages:
           Type: SQS
           Properties:

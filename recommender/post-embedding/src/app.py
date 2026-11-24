@@ -21,6 +21,7 @@ KEY_PREFIX = "posts/"
 EMBED_INTERESTS_ACTION = "embed-interests"
 DERIVE_KINDS_ACTION = "derive-kinds"
 EMBED_POSTS_ACTION = "embed-posts"
+RECONCILE_ACTION = "reconcile"
 EMBED_POSTS_BATCH = 8
 # embed-posts starts no batch with less time than this left, so the last batch, its writes and the reply fit.
 EMBED_POSTS_RESERVE_SECONDS = 30
@@ -225,18 +226,28 @@ def upsert_post_kinds(conn: psycopg.Connection, rows: list[tuple[UUID, list[str]
 
 def derive_all_kinds(conn: psycopg.Connection) -> int:
     """Every post with a vector of the current model, from that vector. Kinds of posts without one are removed."""
+    with conn.transaction():
+        derived = _derive_kinds(conn, "")
+        conn.execute("DELETE FROM rec_post_kinds WHERE model <> %s", (settings.embedding_model,))
+    return derived
+
+
+def derive_missing_kinds(conn: psycopg.Connection) -> int:
+    """Posts with a vector of the current model but no kinds of it, as when the kinds had no vectors at its save."""
+    return _derive_kinds(
+        conn, "AND NOT EXISTS (SELECT 1 FROM rec_post_kinds rk WHERE rk.post_id = pe.post_id AND rk.model = pe.model)"
+    )
+
+
+def _derive_kinds(conn: psycopg.Connection, and_where: str) -> int:
     kind_vectors = find_kind_vectors(conn)
     if kind_vectors is None:
         raise RuntimeError(f"kinds have no vectors for {settings.embedding_model}, run embed-interests first")
     posts = conn.execute(
-        "SELECT post_id, embedding::real[] FROM post_embeddings WHERE model = %s",
+        f"SELECT pe.post_id, pe.embedding::real[] FROM post_embeddings pe WHERE pe.model = %s {and_where}",
         (settings.embedding_model,),
     ).fetchall()
-    with conn.transaction():
-        upsert_post_kinds(
-            conn, [(post_id, kinds.derive(kinds.cosines(vector, kind_vectors))) for post_id, vector in posts]
-        )
-        conn.execute("DELETE FROM rec_post_kinds WHERE model <> %s", (settings.embedding_model,))
+    upsert_post_kinds(conn, [(post_id, kinds.derive(kinds.cosines(vector, kind_vectors))) for post_id, vector in posts])
     return len(posts)
 
 
@@ -296,6 +307,17 @@ def embed_interests(conn: psycopg.Connection) -> int:
     return len(rows)
 
 
+def reconcile(conn: psycopg.Connection, seconds_left: Callable[[], float]) -> dict[str, int]:
+    """The deploy's three actions in one, for the schedule, so data a deploy left behind is repaired without anyone
+    sending them. Every post's kinds are derived again only when a kind changed; a change to kinds.py alone needs
+    derive-kinds."""
+    interests = embed_interests(conn)
+    changed_kinds = embed_kinds(conn)
+    derived = derive_all_kinds(conn) if changed_kinds else derive_missing_kinds(conn)
+    posts = embed_pending_posts(conn, seconds_left)
+    return {"interests": interests, "kinds": changed_kinds, "derived": derived, **posts}
+
+
 def _process_records(conn: psycopg.Connection, records: list[dict[str, Any]]) -> dict[str, Any]:
     failures = []
     for record in records:
@@ -309,12 +331,15 @@ def _process_records(conn: psycopg.Connection, records: list[dict[str, Any]]) ->
     return {"batchItemFailures": failures}
 
 
+def _seconds_left(context: Any) -> Callable[[], float]:
+    return lambda: context.get_remaining_time_in_millis() / 1000
+
+
 ACTIONS: dict[str, Callable[[psycopg.Connection, Any], dict[str, int]]] = {
     EMBED_INTERESTS_ACTION: lambda conn, context: {"interests": embed_interests(conn), "kinds": embed_kinds(conn)},
     DERIVE_KINDS_ACTION: lambda conn, context: {"posts": derive_all_kinds(conn)},
-    EMBED_POSTS_ACTION: lambda conn, context: embed_pending_posts(
-        conn, lambda: context.get_remaining_time_in_millis() / 1000
-    ),
+    EMBED_POSTS_ACTION: lambda conn, context: embed_pending_posts(conn, _seconds_left(context)),
+    RECONCILE_ACTION: lambda conn, context: reconcile(conn, _seconds_left(context)),
 }
 
 

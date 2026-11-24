@@ -344,6 +344,70 @@ def test_should_stop_before_the_timeout_and_say_how_many_posts_are_left(model, d
     assert len(model.encode.call_args_list) == 1
 
 
+@pytest.fixture
+def steps(monkeypatch):
+    """Records which of reconcile's steps ran, in order. Each answers what `answers` holds when it runs."""
+    ran = []
+    answers = {"embed_interests": 2, "embed_kinds": 0, "derive_all_kinds": 30, "derive_missing_kinds": 1}
+
+    def step(name):
+        def run(conn):
+            ran.append(name)
+            return answers[name]
+        return run
+
+    def embed_pending_posts(conn, seconds_left):
+        ran.append(f"embed_pending_posts with {seconds_left():.0f} s left")
+        return {"posts": 3, "left": 0}
+
+    monkeypatch.setattr(app, "_connect", lambda: opened(MagicMock()))
+    for name in answers:
+        monkeypatch.setattr(app, name, step(name))
+    monkeypatch.setattr(app, "embed_pending_posts", embed_pending_posts)
+    return SimpleNamespace(ran=ran, answers=answers)
+
+
+def test_should_derive_only_missing_kinds_and_embed_pending_posts_when_reconciling_and_no_kind_changed(steps):
+    # when
+    result = app.lambda_handler({"action": "reconcile"}, time_left(100))
+
+    # then
+    assert result == {"interests": 2, "kinds": 0, "derived": 1, "posts": 3, "left": 0}
+    assert steps.ran == [
+        "embed_interests", "embed_kinds", "derive_missing_kinds", "embed_pending_posts with 100 s left",
+    ]
+
+
+def test_should_derive_every_posts_kinds_when_reconciling_embedded_a_changed_kind(steps):
+    # given
+    steps.answers["embed_kinds"] = 15
+
+    # when
+    result = app.lambda_handler({"action": "reconcile"}, time_left(100))
+
+    # then
+    assert result == {"interests": 2, "kinds": 15, "derived": 30, "posts": 3, "left": 0}
+    assert steps.ran == ["embed_interests", "embed_kinds", "derive_all_kinds", "embed_pending_posts with 100 s left"]
+
+
+def test_should_derive_missing_kinds_from_stored_vectors(monkeypatch):
+    # given
+    conn = MagicMock()
+    conn.execute.return_value.fetchall.side_effect = [KIND_ROWS, [(POST_ID, [0.0, 0.0, 1.0])]]
+    monkeypatch.setattr(app, "_connect", lambda: opened(conn))
+
+    # when
+    derived = app.derive_missing_kinds(conn)
+
+    # then
+    assert derived == 1
+    assert conn.cursor.return_value.__enter__.return_value.executemany.call_args_list == [
+        call(ANY, [(["stage"], MODEL, POST_ID)]),
+    ]
+    assert "NOT EXISTS" in conn.execute.call_args_list[1].args[0]
+    assert not any("DELETE" in c.args[0] for c in conn.execute.call_args_list)
+
+
 def test_should_open_one_connection_per_invocation_and_close_it(model, db):
     # when
     app.lambda_handler(sqs_event(s3_body(POST_KEY), s3_body(POST_KEY)), None)
