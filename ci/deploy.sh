@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 FRONTEND_REPOSITORY="${FRONTEND_REPOSITORY:-https://github.com/coolture-app/coolture-frontend.git}"
-FRONTEND_REF="${FRONTEND_REF:-dev}"
+FRONTEND_REF="${FRONTEND_REF:-recs/dev}"
 
 if [[ $# -eq 0 || " $* " == *" frontend "* ]]; then
     export FRONTEND_DIR="$PWD/.frontend"
