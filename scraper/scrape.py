@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from collections import Counter
 from collections.abc import Callable, Iterable
@@ -127,10 +128,19 @@ def import_item(item: ListingItem, site: Site, geocoder: Geocoder, sink: Cooltur
     return True
 
 
-def _failed_request(error: requests.RequestException) -> str:
+def failed_request(error: requests.RequestException) -> str:
     where = f'{error.request.method} {error.request.url}' if error.request else 'a request'
-    outcome = error.response.status_code if error.response is not None else type(error).__name__
-    return f'{where} failed: {outcome}'
+    response = error.response
+    if response is None:
+        return f'{where} failed: {type(error).__name__}'
+    details = ''
+    # Cloudflare's challenge or block, which trojmiasto.pl sends to some addresses, shows in these.
+    if 400 <= response.status_code < 500:
+        title = re.search(r'<title>([^<]*)', response.text or '')
+        found = {'server': response.headers.get('server'), 'cf-mitigated': response.headers.get('cf-mitigated'),
+                 'title': title.group(1).strip() if title else None}
+        details = ''.join(f' {name}={value!r}' for name, value in found.items() if value)
+    return f'{where} failed: {response.status_code}{details}'
 
 
 def main() -> int:
@@ -164,7 +174,7 @@ def main() -> int:
         log.error('Run stopped: %s', error)
         return 1
     except requests.RequestException as error:
-        log.error('Run stopped: %s', _failed_request(error))
+        log.error('Run stopped: %s', failed_request(error))
         return 1
     finally:
         log.info('Done: %s', dict(stats))

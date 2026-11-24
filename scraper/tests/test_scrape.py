@@ -307,6 +307,23 @@ def test_a_failed_status_is_named_too(monkeypatch, caplog, scraper_args):
     assert 'Run stopped: GET https://site.test/imprezy failed: 503' in caplog.text
 
 
+def test_a_refusal_says_whether_cloudflare_challenged_it(monkeypatch, caplog, scraper_args):
+    request = requests.Request('GET', 'https://site.test/imprezy').prepare()
+    response = requests.Response()
+    response.status_code = 403
+    response.headers.update({'Server': 'cloudflare', 'cf-mitigated': 'challenge'})
+    response._content = b'<html><head><title>Just a moment...</title></head></html>'
+
+    def fail(*_):
+        raise requests.HTTPError('403 Client Error', request=request, response=response)
+
+    monkeypatch.setattr('scrape.run', fail)
+
+    assert main() == 1
+    assert ("Run stopped: GET https://site.test/imprezy failed: 403 server='cloudflare' cf-mitigated='challenge' "
+            "title='Just a moment...'") in caplog.text
+
+
 def test_a_missing_identity_is_one_clear_error(monkeypatch, caplog, scraper_args):
     monkeypatch.delenv('SCRAPER_USER_ID')
 
