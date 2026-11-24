@@ -13,7 +13,9 @@ WorkingDirectory=/var/lib/coolture-scraper/coolture-aws
 # Each run takes the branch's latest commit, so the scraper matches the API that branch deploys.
 ExecStartPre=/usr/bin/git fetch --quiet --depth 1 origin ${SCRAPER_BRANCH}
 ExecStartPre=/usr/bin/git checkout --quiet --force --detach FETCH_HEAD
-ExecStart=/bin/sh scraper/systemd/run.sh
+# Installs only what the branch's requirements add, so most runs it changes nothing.
+ExecStartPre=%S/coolture-scraper/venv/bin/pip install --quiet --disable-pip-version-check -r scraper/requirements.txt
+ExecStart=%S/coolture-scraper/venv/bin/python scraper/remote.py
 # remote.py stops itself after 50 minutes; this ends a run that hangs.
 TimeoutStartSec=58min
 
