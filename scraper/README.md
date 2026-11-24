@@ -69,7 +69,7 @@ with a `409`, so a retried post or two runs at once can't import an event twice.
 trojmiasto.pl's Cloudflare answers every request from AWS's addresses with a challenge (`403`, `cf-mitigated:
 challenge`), so the scraper can't run on AWS. A computer outside it runs `remote.py` on a systemd timer instead, at a
 random moment in every 6 hours, with the site's pages a random 1 to 3 seconds apart. Each run imports what the app
-doesn't have yet, by event URL, and stops after 50 minutes, as the bot's token and the role's session last an hour. The
+doesn't have yet, by event URL, and stops after 50 minutes, as the bot's token lasts an hour. The
 next run goes on from there, so the first ones catch up on the whole listing.
 
 It calls API Gateway directly with the `X-Origin-Verify` secret, signs in as the bot with Cognito's admin flow, asks

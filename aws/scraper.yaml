@@ -1,11 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Coolture scraper - what scraper/remote.py uses to import trojmiasto.pl events from outside AWS, as the bot
 
-# trojmiasto.pl's Cloudflare challenges every request from AWS, so the scraper runs on a computer outside it, through
-# RunnerRole. The bot's password and the runner user's access key are set by hand: scraper/README.md, "On an always-on
-# computer".
+# The scraper runs on a computer outside AWS, through RunnerRole. The bot's password and the runner user's access key
+# are set by hand: scraper/README.md, "On an always-on computer".
 
-# remote.py reads every setting from this stack's outputs, so two of them pass on other stacks' exports.
+# Two outputs pass on other stacks' exports, so remote.py needs only this stack.
 Metadata:
   cfn-lint:
     config:
