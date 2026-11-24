@@ -66,3 +66,22 @@ def test_kinds_are_stored_for_the_posts_that_exist_and_a_missing_post_does_not_f
     stored = dict(conn.execute("SELECT post_id::text, kinds FROM rec_post_kinds WHERE post_id IN (%s, %s)",
                                (str(post_id), missing)).fetchall())
     assert stored == {str(post_id): ["stage"]}
+
+
+def test_missing_kinds_are_derived_for_posts_with_a_current_vector_and_no_kinds_of_it_only(conn):
+    no_kinds, other_models_kinds, current = [post_id for (post_id,) in conn.execute(
+        "SELECT post_id FROM post_embeddings WHERE model = %s ORDER BY post_id LIMIT 3",
+        (app.settings.embedding_model,))]
+    conn.execute("DELETE FROM rec_post_kinds WHERE post_id = %s", (no_kinds,))
+    conn.execute("UPDATE rec_post_kinds SET model = 'another-model' WHERE post_id = %s", (other_models_kinds,))
+    conn.execute("UPDATE rec_post_kinds SET kinds = '{concerts}', updated_at = '2026-01-01' WHERE post_id = %s",
+                 (current,))
+
+    derived = app.derive_missing_kinds(conn)
+
+    rows = {post_id: (model, kinds, str(updated_at.date())) for post_id, model, kinds, updated_at in conn.execute(
+        "SELECT post_id, model, kinds, updated_at FROM rec_post_kinds WHERE post_id = ANY(%s)",
+        ([no_kinds, other_models_kinds, current],))}
+    assert derived >= 2
+    assert {rows[no_kinds][0], rows[other_models_kinds][0]} == {app.settings.embedding_model}
+    assert rows[current] == (app.settings.embedding_model, ["concerts"], "2026-01-01")
