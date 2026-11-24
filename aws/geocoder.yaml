@@ -80,7 +80,7 @@ Resources:
           ToPort: 443
           CidrIp: 0.0.0.0/0
 
-  # The scheduled scraper runs outside the VPC to reach trojmiasto.pl, so it asks Photon through this.
+  # The scraper runs outside AWS, as trojmiasto.pl refuses AWS's addresses, so it asks Photon through this.
   ProxySecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
