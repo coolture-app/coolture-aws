@@ -7,17 +7,21 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.security.SecurityContext;
 import com.coolture.dto.CreatePostRequest;
+import com.coolture.repository.DuplicateEventException;
 import com.coolture.services.PostWriteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -74,18 +78,17 @@ class PostWriteHandlerTest {
                 "title": "Cool Event",
                 "description": "A very cool event",
                 "type": "ONLINE",
-                "visibility": "PUBLIC",
-                "startsAt": "2027-09-01T12:00:00Z"
+                "startsAt": "2030-09-01T12:00:00Z"
             }
         """;
 
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/posts", body, null);
 
         PostDetailDto createdPost = new PostDetailDto(
-            postId, null, null, "Cool Event", "A very cool event", null,
-            Instant.parse("2026-09-01T12:00:00Z"), null, List.of(), 0, 0, 0, 0,
-            PostType.ONLINE, PostStatus.ACTIVE, PostVisibility.PUBLIC,
-            Instant.now(), null, null, null, List.of(), null, null
+            postId, null, null, "Cool Event", "A very cool event", null, null,
+            Instant.parse("2026-09-01T12:00:00Z"), null, false, 0, 0, 0, 0, 0,
+            PostType.ONLINE, PostStatus.ACTIVE, null,
+            Instant.now(), null, null, null, List.of(), null, null, null
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
@@ -130,128 +133,26 @@ class PostWriteHandlerTest {
         }
     }
 
-    @Test
-    void upsertReaction_whenValidRequest_returns204() throws Exception {
+    @ParameterizedTest
+    @CsvSource(value = {"PUT|reaction|{\"type\":\"LIKE\"}", "DELETE|reaction|", "PUT|participation|{\"type\":\"INTERESTED\"}",
+        "DELETE|participation|"}, delimiter = '|')
+    void likesAndStances_return204_andReachTheirOwnCall(String method, String route, String body) throws Exception {
         UUID userId = UUID.randomUUID();
         UUID postId = UUID.randomUUID();
-        String body = "{\"type\":\"LIKE\"}";
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "PUT", "/posts/" + postId + "/reaction", body, Map.of("postId", postId.toString())
+            method, "/posts/" + postId + "/" + route, body, Map.of("postId", postId.toString())
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
 
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).upsertReaction(eq(postId), eq(userId), any());
-        }
-    }
-
-    @Test
-    void deleteReaction_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "DELETE", "/posts/" + postId + "/reaction", null, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).deleteReaction(eq(postId), eq(userId));
-        }
-    }
-
-    @Test
-    void upsertParticipation_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        String body = "{\"type\":\"INTERESTED\"}";
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "PUT", "/posts/" + postId + "/participation", body, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).upsertParticipation(eq(postId), eq(userId), any());
-        }
-    }
-
-    @Test
-    void deleteParticipation_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID postId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "DELETE", "/posts/" + postId + "/participation", null, Map.of("postId", postId.toString())
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).deleteParticipation(eq(postId), eq(userId));
-        }
-    }
-
-    @Test
-    void createCountryCode_whenValidRequest_returns201() throws Exception {
-        UUID userId = UUID.randomUUID();
-        String body = "{\"code\":\"POL\"}";
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/dicts/admin/country-codes", body, null);
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-            when(service.createCountryCode(any())).thenReturn(new com.coolture.common.dto.CountryCodeDto("POL"));
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(201, response.getStatusCode());
-            org.junit.jupiter.api.Assertions.assertTrue(response.getBody().contains("POL"));
-            verify(service).createCountryCode(any());
-        }
-    }
-
-    @Test
-    void updateCountryCode_whenValidRequest_returns200() throws Exception {
-        UUID userId = UUID.randomUUID();
-        String body = "{\"code\":\"POL\"}";
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("PUT", "/dicts/admin/country-codes/PLN", body, Map.of("code", "PLN"));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-            when(service.updateCountryCode(eq("PLN"), any())).thenReturn(new com.coolture.common.dto.CountryCodeDto("POL"));
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(200, response.getStatusCode());
-            org.junit.jupiter.api.Assertions.assertTrue(response.getBody().contains("POL"));
-            verify(service).updateCountryCode(eq("PLN"), any());
-        }
-    }
-
-    @Test
-    void deleteCountryCode_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("DELETE", "/dicts/admin/country-codes/PLN", null, Map.of("code", "PLN"));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).deleteCountryCode("PLN");
+            assertEquals(204, handler.handleRequest(event, lambdaContext).getStatusCode());
+            switch (method + " " + route) {
+                case "PUT reaction" -> verify(service).upsertReaction(eq(postId), eq(userId), any());
+                case "DELETE reaction" -> verify(service).deleteReaction(postId, userId);
+                case "PUT participation" -> verify(service).upsertParticipation(eq(postId), eq(userId), any());
+                default -> verify(service).deleteParticipation(postId, userId);
+            }
         }
     }
 
@@ -265,112 +166,105 @@ class PostWriteHandlerTest {
         );
 
         PostDetailDto updatedPost = new PostDetailDto(
-            postId, null, null, "Updated Title", "Desc", null,
-            Instant.parse("2026-09-01T12:00:00Z"), null, List.of(), 0, 0, 0, 0,
-            PostType.ONLINE, PostStatus.EDITED, PostVisibility.PUBLIC,
-            Instant.now(), Instant.now(), null, null, List.of(), null, null
+            postId, null, null, "Updated Title", "Desc", null, null,
+            Instant.parse("2026-09-01T12:00:00Z"), null, false, 0, 0, 0, 0, 0,
+            PostType.ONLINE, PostStatus.EDITED, null,
+            Instant.now(), Instant.now(), null, null, List.of(), null, null, null
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-            when(service.updatePost(eq(postId), eq(userId), any())).thenReturn(updatedPost);
+            when(service.updatePost(eq(postId), eq(userId), any(), any())).thenReturn(updatedPost);
 
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            verify(service).updatePost(eq(postId), eq(userId), any());
+            verify(service).updatePost(eq(postId), eq(userId), any(), eq(Set.of()));
         }
     }
 
     @Test
-    void createLocation_whenValidRequest_returns201() throws Exception {
+    void updatePost_tellsTheServiceWhichFieldsWereSentAsNull() throws Exception {
         UUID userId = UUID.randomUUID();
-        String body = """
-            {
-                "countryCode": "POL",
-                "venueName": "Opera",
-                "street": "Glowna",
-                "buildingNum": "10",
-                "postalCode": "80-001",
-                "city": "Gdansk",
-                "coordinates": {
-                    "latitude": 54.35,
-                    "longitude": 18.64
-                }
-            }
-        """;
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/event-locations", body, null);
-
-        var loc = new com.coolture.common.dto.EventLocationDto(
-            UUID.randomUUID(), "POL", "Opera", "10", "Glowna", "80-001", "Gdansk",
-            new com.coolture.common.dto.GeoPointDto(54.35, 18.64), Instant.now()
-        );
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-            when(service.createLocation(any())).thenReturn(loc);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(201, response.getStatusCode());
-            verify(service).createLocation(any());
-        }
-    }
-
-    @Test
-    void updateLocation_whenValidRequest_returns200() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID locId = UUID.randomUUID();
-        String body = """
-            {
-                "countryCode": "POL",
-                "venueName": "Teatr",
-                "street": "Morska",
-                "buildingNum": "5",
-                "postalCode": "81-001",
-                "city": "Gdynia",
-                "coordinates": {
-                    "latitude": 54.51,
-                    "longitude": 18.53
-                }
-            }
-        """;
+        UUID postId = UUID.randomUUID();
+        String body = "{\"title\":\"Updated Title\",\"endsAt\":null,\"eventUrl\":null,\"links\":null,\"description\":null}";
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "PATCH", "/event-locations/" + locId, body, Map.of("id", locId.toString())
-        );
-
-        var loc = new com.coolture.common.dto.EventLocationDto(
-            locId, "POL", "Teatr", "5", "Morska", "81-001", "Gdynia",
-            new com.coolture.common.dto.GeoPointDto(54.51, 18.53), Instant.now()
+            "PATCH", "/posts/" + postId, body, Map.of("id", postId.toString())
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
-            when(service.updateLocation(eq(locId), any())).thenReturn(loc);
 
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+            handler.handleRequest(event, lambdaContext);
 
-            assertEquals(200, response.getStatusCode());
-            verify(service).updateLocation(eq(locId), any());
+            verify(service).updatePost(eq(postId), eq(userId), any(), eq(Set.of("endsAt", "eventUrl", "links")));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"title\":\"   \"}", "{\"description\":\"\"}", "{\"description\":\" \\n \"}"})
+    void updatePost_whenATitleOrDescriptionIsBlank_returns400(String body) throws Exception {
+        UUID postId = UUID.randomUUID();
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+            "PATCH", "/posts/" + postId, body, Map.of("id", postId.toString())
+        );
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(UUID.randomUUID());
+
+            assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+            verify(service, never()).updatePost(any(), any(), any(), any());
         }
     }
 
     @Test
-    void deleteLocation_whenValidRequest_returns204() throws Exception {
-        UUID userId = UUID.randomUUID();
-        UUID locId = UUID.randomUUID();
+    void updatePost_whenADescriptionHasSeveralLines_isAccepted() throws Exception {
+        UUID postId = UUID.randomUUID();
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
-            "DELETE", "/event-locations/" + locId, null, Map.of("id", locId.toString())
+            "PATCH", "/posts/" + postId, "{\"description\":\"One\\nTwo\"}", Map.of("id", postId.toString())
         );
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(userId);
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(UUID.randomUUID());
 
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+            handler.handleRequest(event, lambdaContext);
 
-            assertEquals(204, response.getStatusCode());
-            verify(service).deleteLocation(locId);
+            verify(service).updatePost(any(), any(), any(), any());
         }
+    }
+
+    private APIGatewayV2HTTPResponse create(String links) {
+        String body = """
+            {"title": "Koncert", "description": "Opis", "type": "ONLINE", "startsAt": "2030-09-01T12:00:00Z", "links": %s}
+            """.formatted(links);
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/posts", body, null);
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(UUID.randomUUID());
+            return handler.handleRequest(event, lambdaContext);
+        }
+    }
+
+    @Test
+    void createPost_withMoreThanThreeLinks_returns400() {
+        String link = "{\"url\": \"https://a.example\"}";
+
+        assertEquals(400, create("[" + String.join(",", link, link, link, link) + "]").getStatusCode());
+    }
+
+    @Test
+    void createPost_withALinkThatIsNotHttp_returns400() {
+        assertEquals(400, create("[{\"url\": \"javascript:alert(1)\"}]").getStatusCode());
+    }
+
+    @Test
+    void createPost_withALabelOverFortyCharacters_returns400() {
+        assertEquals(400, create("[{\"url\": \"https://a.example\", \"label\": \"" + "x".repeat(41) + "\"}]").getStatusCode());
+    }
+
+    @Test
+    void createPost_aSecondPostFromTheSameEventPage_returns409() throws Exception {
+        when(service.createPost(any(), any())).thenThrow(new DuplicateEventException(null));
+
+        assertEquals(409, create("[]").getStatusCode());
     }
 }
-

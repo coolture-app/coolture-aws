@@ -10,7 +10,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,7 +32,9 @@ public class MediaRepository {
             Long sizeBytes,
             MediaStatus status,
             Instant createdAt,
-            Instant deletedAt
+            Instant deletedAt,
+            Integer width,
+            Integer height
     ) {
         public MediaResourceDto toDto(String url) {
             return new MediaResourceDto(
@@ -40,15 +45,18 @@ public class MediaRepository {
                     status,
                     url,
                     createdAt,
-                    deletedAt
+                    deletedAt,
+                    width,
+                    height
             );
         }
     }
 
     public void insert(MediaRecord record) throws SQLException {
         String sql = """
-            INSERT INTO media (id, owner_id, object_key, file_name, purpose, mime_type, size_bytes, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO media (id, owner_id, object_key, file_name, purpose, mime_type, size_bytes, status, created_at,
+                               width, height)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """;
 
         try (Connection conn = DatabaseConfig.getConnection();
@@ -63,6 +71,8 @@ public class MediaRepository {
             stmt.setObject(7, record.sizeBytes());
             stmt.setString(8, record.status() != null ? record.status().name() : null);
             stmt.setTimestamp(9, record.createdAt() != null ? Timestamp.from(record.createdAt()) : Timestamp.from(Instant.now()));
+            stmt.setObject(10, record.width(), Types.INTEGER);
+            stmt.setObject(11, record.height(), Types.INTEGER);
 
             stmt.executeUpdate();
         }
@@ -70,7 +80,8 @@ public class MediaRepository {
 
     public Optional<MediaRecord> findById(UUID id) throws SQLException {
         String sql = """
-            SELECT id, owner_id, object_key, file_name, purpose, mime_type, size_bytes, status, created_at, deleted_at
+            SELECT id, owner_id, object_key, file_name, purpose, mime_type, size_bytes, status, created_at, deleted_at,
+                   width, height
             FROM media
             WHERE id = ?
         """;
@@ -91,7 +102,8 @@ public class MediaRepository {
 
     public Optional<MediaRecord> findByIdAndOwnerId(UUID id, UUID ownerId) throws SQLException {
         String sql = """
-            SELECT id, owner_id, object_key, file_name, purpose, mime_type, size_bytes, status, created_at, deleted_at
+            SELECT id, owner_id, object_key, file_name, purpose, mime_type, size_bytes, status, created_at, deleted_at,
+                   width, height
             FROM media
             WHERE id = ? AND owner_id = ?
         """;
@@ -152,6 +164,37 @@ public class MediaRepository {
         }
     }
 
+    public record AbandonedMedia(UUID id, String objectKey) {}
+
+    /** Event photos uploaded before the cutoff that no post holds. Profile images are kept by other rules. */
+    public List<AbandonedMedia> findAbandoned(Instant cutoff, int limit) throws SQLException {
+        String sql = """
+            SELECT m.id, m.object_key
+            FROM media m
+            WHERE m.purpose = 'EVENT_MEDIA'
+              AND m.status IN ('PENDING', 'UPLOADED')
+              AND m.created_at < ?
+              AND NOT EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = m.id)
+            ORDER BY m.created_at ASC
+            LIMIT ?
+        """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setTimestamp(1, Timestamp.from(cutoff));
+            stmt.setInt(2, limit);
+
+            List<AbandonedMedia> found = new ArrayList<>();
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    found.add(new AbandonedMedia((UUID) rs.getObject("id"), rs.getString("object_key")));
+                }
+            }
+            return found;
+        }
+    }
+
     public boolean isMediaInUse(UUID id) throws SQLException {
         String postMediaSql = "SELECT 1 FROM post_media WHERE media_id = ? LIMIT 1";
         try (Connection conn = DatabaseConfig.getConnection();
@@ -186,7 +229,9 @@ public class MediaRepository {
                 rs.getObject("size_bytes") != null ? rs.getLong("size_bytes") : null,
                 mapEnum(rs, "status", MediaStatus.class),
                 mapInstant(rs, "created_at"),
-                mapInstant(rs, "deleted_at")
+                mapInstant(rs, "deleted_at"),
+                rs.getObject("width") != null ? rs.getInt("width") : null,
+                rs.getObject("height") != null ? rs.getInt("height") : null
         );
     }
 }

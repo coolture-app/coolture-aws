@@ -1,547 +1,224 @@
-# Coolture AWS Infrastructure
+# Coolture backend
 
-NOTE: The docker image of the database was changed to match the image used in coolture-core (with postgis installed). The migration V1 file was changed in order to verify, if postgis is installed.
+The API, database, photo storage, recommender and event scraper of Coolture: Java Lambdas behind API Gateway, PostgreSQL
+(Aurora on AWS), S3, and Python functions that embed posts and interests and score events with PageRank for the feed. The web app is
+[coolture-frontend](https://github.com/coolture-app/coolture-frontend).
 
-## Project Structure
+## Run locally
+
+The whole app on your machine, with a sample of the events trojmiasto.pl lists for the next 30 days, twelve demo users
+with their own tastes, and a guest. It works on Windows (Git Bash or PowerShell), WSL, Linux and macOS.
+
+### 1. Install the tools, once
+
+| Tool | Windows | Linux, WSL, macOS |
+|---|---|---|
+| Docker | [Docker Desktop](https://docs.docker.com/desktop/) | Docker Engine with the compose plugin, or Docker Desktop |
+| Git | `winget install Git.Git` (the Makefile runs its recipes in Git's bash) | package manager |
+| make | `winget install ezwinports.make` | package manager (`build-essential` on Ubuntu) |
+| [mise](https://mise.jdx.dev) | `winget install jdx.mise` | `curl https://mise.run` piped to `sh` |
+
+Then, in this folder and in `../coolture-frontend`:
+
+```bash
+mise trust && mise install    # Java 21 (sets JAVA_HOME), Maven, Python, the SAM CLI, Node 24, Hurl
+make doctor                   # checks the tools, Docker, ports and disk, and says what to fix
+```
+
+mise is optional: tools installed another way at the versions in `mise.toml` pass `make doctor` too. On WSL, keep the
+repositories on WSL's own disk (`~/...`), not under `/mnt/c`, or builds are slow.
+
+### 2. Start it
+
+```bash
+make geo-index                # once, first: the geocoder's index of Poland, about 40 minutes and 4 GB of memory
+make dev                      # terminal 1: database, storage, migrations, build, then the API on :3000
+make seed                     # terminal 2: realistic data. It waits for the API, so start it right away
+cd ../coolture-frontend && npm install && npm start    # terminal 3: http://localhost:4200
+```
+
+`make seed` skips whatever is already done. It scrapes a snapshot of trojmiasto.pl once (a teammate's copied into the
+gitignored `scraper/snapshot/` skips that), loads a sample of it through the API as `coolture_bot`, embeds interests and
+posts, derives their kinds, has the demo users and their friends react to and mark posts, and scores every user's events
+with personalised PageRank. The first run is long, mostly the scrape and the embedding image's build; later runs add
+only what's missing. How the snapshot is picked and loaded is in [scraper/README.md](scraper/README.md#snapshot-and-seed).
+
+**The geocoder**, Photon with an index of Poland, serves the post form's place search and locates the scraper's
+events. `make geo-index` builds it once, with 3 GB of disk, alone because of the memory. Then `make up` starts it on
+`:2322` with the AWS instance's 1 GB, and `ng serve` sends the app's `/geo` to it, as CloudFront does on AWS. Without it
+the form works with no suggestions, and the scraper stops and says so. `make geo-index` again refreshes the data.
+
+### 3. Act as someone
+
+The frontend's development build has a **DEV** pill at the bottom left:
+
+| Who | What for |
+|---|---|
+| Gość (default) | A visitor with no account |
+| Anna, Jan, Ola | Regular users with different interests: concerts and clubs; theatre and film; art, running and food |
+| Kasia, Piotr, Ewa, Tomek, Zofia, Marek, Magda | Friends of all three, whose stances fill the cards' friends line. Bartek is a friend who doesn't share his stances, and Iza follows them without being followed back |
+| Bot | The author of the imported events |
+| local_dev | The admin |
+
+Outside the browser, the same users are a header away, see [Who you are](#who-you-are).
+
+### Stop, restart, start over
+
+| Command | Does |
+|---|---|
+| Ctrl+C in terminal 1 | Stops the API. If its containers stay behind, as happens on Windows, `make stop-lambdas` |
+| `make local` | Rebuilds and restarts only the API, after a code change |
+| `make local API_PORT=3100 FRONTEND_PORT=4300 WARM=LAZY` | A second API beside another clone's or worktree's, on its own port, for an `ng serve --port 4300` pointed at it, starting each function on first use. `make stop-lambdas` and the commands that call it remove only their own checkout's containers |
+| `make stop` | Stops everything. Data stays |
+| `make reset-db` | Deletes the database and the stored photos. Then `make up && make seed`, about 5 minutes. Keeps the geocoder's index |
+| `make clean-all` | Removes all containers, data, the geocoder's index, images, builds and `.venv`. Keeps the snapshot |
+
+Seeded events turn into past events over the following weeks. `make reset-db && make up && make seed` moves them ahead
+again. Delete `scraper/snapshot/` first for fresh events.
+
+### When something fails
+
+Run `make doctor` first. Then:
+
+| Symptom | Fix |
+|---|---|
+| `make up`: "... was changed after it was applied" | A migration was edited, or this branch has different ones: `make reset-db && make up` |
+| `make up`: a container name "is already in use" | Containers of an older copy of the stack. `make doctor` names the command that stops them |
+| `make build`: "invalid target release: 21" | Java isn't 21. `mise install`, or point `JAVA_HOME` at a JDK 21 |
+| `make` from PowerShell: "'grep' is not recognized" | Git for Windows is missing |
+| Photos or uploads fail with 403 | The API was started without the Garage keys. Use `make local`, not `sam local` by hand |
+| `make seed` waits for the API | Start `make dev` or `make local`. It waits up to 15 minutes |
+
+## Working with the API
+
+Locally the API is on `http://localhost:3000`. On AWS the same routes are behind `/api`, which CloudFront strips.
+
+### Who you are
+
+On AWS, a Cognito token says who you are. Most routes need one, and the public ones (lists, posts, profiles) take it if
+it's there. Locally there's no login, and headers say who you are instead. AWS ignores them.
+
+| Headers | Locally you are |
+|---|---|
+| none | `local_dev`, an admin |
+| `X-User-Id: <uuid>`, `X-User-Name: <username>` | That user, a regular one. `GET /auth/me` creates a user it doesn't know yet |
+| the above and `X-User-Role: COOLTURE_ADMIN` | That user, as an admin |
+| `X-Anonymous: true` | A guest |
+
+The seed users' ids are in [`api/local.env`](api/local.env).
+
+### Contracts, docs and examples
+
+| | What | Where |
+|---|---|---|
+| **Contract** | Shapes, parameters and examples (OpenAPI), and the rules a schema can't say | `aws/lambdas/<area>/contracts/`. Today: [post-read](aws/lambdas/post-read/contracts/README.md), the feed, lists and map; [user](aws/lambdas/user/contracts/users-api.yaml), accounts, profiles, interests, follows and blocks |
+| **Docs** | Every contract in the browser, with a client to try requests | `make api-docs`, then http://localhost:8081. Add an `X-User-Id` header to act as someone |
+| **Flows** | Runnable examples of how the API is used: who may do what, uploading a photo, a post's life | [`api/`](api/README.md). `make api-test` runs them all as a smoke test |
+
+A contract changes first, in its own small pull request, and `ContractTest` checks that responses still match it. The
+frontend generates its types from it with `npm run api-types`. Endpoints without a contract yet get one when they're next
+changed.
+
+## Repository
 
 ```
 aws/
-├── auth.yaml               # Cognito User Pool and JWT configuration
-├── backend.yaml            # API Gateway, Java Lambdas, Aurora, S3 media bucket, embedding queue + requests bucket
-├── frontend.yaml           # SSR Lambda, S3 static hosting, CloudFront CDN
-├── lambdas/
-│   ├── common/             # Shared Maven module (DB pool, DTOs, security, S3 storage, pagination, validation etc.)
-│   ├── media/              # Media upload lifecycle (init, complete, get, delete via presigned S3 URLs)
-│   ├── post-write/         # Handles all post & event-location write operations (POST, PATCH, DELETE)
-│   ├── post-read/          # Handles all post & event-location read operations (GET)
-│   ├── comment-write/      # Handles comment write operations (POST, PATCH, DELETE)
-│   ├── comment-read/       # Handles comment read operations (GET)
-│   ├── user/               # User profiles, avatar, relations (follow/block)
-│   └── ssr/                # Angular SSR Lambda
-embedding-workers/          # Independent stack: Python embedding Lambdas (own template.yaml)
-├── template.yaml           # Imports network from mgmt-stack-networking[-<env>], queue ARN + DB endpoint from backend
-├── post-embedding/         # Container image: SQS → all-mpnet-base-v2 → post_embeddings
-└── user-embedding/         # Zip: every 30 min, weighted avg of post embeddings → user_embeddings
-migrations/                 # PostgreSQL schema migrations
-scripts/                    # Local helpers (embed-posts.sh)
-samconfig.toml              # SAM deployment configuration
+├── auth.yaml, backend.yaml,    # Stacks: Cognito; API Gateway, Lambdas, Aurora, media bucket, embedding queues;
+│   geocoder.yaml,              #   the Photon instance and its proxy; the scheduled scraper;
+│   scraper.yaml,               #   SSR Lambda, static files, CloudFront; the IP allow-list in front of CloudFront
+│   frontend.yaml, waf.yaml
+└── lambdas/
+    ├── common/                 # Shared Maven module in every Java Lambda: DB pool, DTOs, security, S3, paging
+    ├── post-read/, post-write/ # Posts, the feed, the map, event locations. post-read holds their contract
+    ├── user/                   # Accounts, profiles, the home area, interests, follows, blocks. Holds its contract
+    ├── comment-read/, comment-write/, media/
+    ├── authorizer/             # Python: lets a route take a Cognito token optionally
+    ├── geo-proxy/              # Python: lets the scheduled scraper, outside the VPC, ask Photon inside it
+    ├── migrations/             # Python: applies migrations/ on AWS, and locally in make up
+    └── ssr/                    # Server rendering of the frontend
+api/                            # Request flows (Hurl) and the seed users' ids
+db/                             # Local Postgres image (PostGIS, pgvector) and the local seed
+garage/                         # Local S3 storage
+geocoder/                       # Photon's image and photon.sh, run the same locally and on the AWS instance
+migrations/                     # SQL migrations, including the recommender's rec_ tables
+recommender/                    # Embedding workers and the recommender, see its README
+scraper/                        # trojmiasto.pl scraper, snapshot and seed, see its README
+scripts/                        # deploy.sh, doctor.sh, embed-posts.sh, geo-publish.sh
 ```
 
-## Prerequisites in the AWS account
+`make build` builds and installs `common` before the Lambdas, and rebuilds every Lambda when `common` changes.
+`db/local-dev-seed.sql` runs only locally: migrations never hold users or demo data.
 
-The account-level stacks live in the separate management stack (`~/Projects/aws/management-stack`), not here:
+## Tests
 
-- `mgmt-stack-networking[-<env>]`: VPC, private subnets, route table and S3 gateway endpoint. Coolture imports it through
-  `BaseStackName=mgmt-stack-networking[-<env>]`, so it must exist before `backend` / `embeddings` and be deleted after them.
-- `account`: IAM roles (`admin`, `deployer`, `developer`, `cloudformation-execution`) and groups. Deploy Coolture as an
-  owner with `AWS_PROFILE=deployer CFN_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/cloudformation-execution scripts/deploy.sh dev`.
+| Command | Runs |
+|---|---|
+| `mvn test -f aws/lambdas/<module>/pom.xml` | A Java module's unit tests, after `make build-common`. `make build` runs them too |
+| `make test-db` | The database tests of posts, comments, users and PageRank, against `make up` |
+| `make test-python` | Every Python project: embedding worker, PageRank, migrations, authorizer, geocoder proxy, scraper |
+| `make api-test` | The request flows in `api/`, against `make dev` and `make seed` |
 
-## Stacks & Deployment
+## Deploying to AWS
 
-Deploy order (later stacks import earlier stacks' exports), after `mgmt-stack-networking[-<env>]` exists: `make deploy-auth` →
-`make deploy-backend` → `make deploy-embeddings` → `make deploy-waf` → `make deploy-frontend` (or `make deploy-all`).
-Delete in reverse order.
+Account-level stacks live in the separate management stack (`~/Projects/aws/management-stack`):
+
+- `mgmt-stack-networking[-<env>]`: VPC, private subnets, route table and S3 gateway endpoint. Coolture imports it, so it
+  must exist before `backend` and `embeddings`, and be deleted after them.
+- `account`: IAM roles and groups. Deploy as `AWS_PROFILE=deployer CFN_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/cloudformation-execution scripts/deploy.sh dev`.
+
+Deploy in this order, because later stacks import earlier ones' exports, and delete in reverse:
+`make deploy-auth` → `make deploy-backend` → `make deploy-embeddings` → `make deploy-geocoder` → `make deploy-scraper` →
+`make deploy-waf` → `make deploy-frontend`, or `make deploy-all`.
 
 | Stack | Template | Imports from |
 |---|---|---|
-| `coolture-auth-<env>` | `aws/auth.yaml` | - |
-| `coolture-backend-<env>` | `aws/backend.yaml` | mgmt-stack-networking[-<env>] (VPC, subnets), auth (authorizers, Cognito) |
-| `coolture-embeddings-<env>` | `embedding-workers/template.yaml` | mgmt-stack-networking[-<env>], backend (queue ARN, DB endpoint/port, security group) |
-| `coolture-waf-<env>` (us-east-1) | `aws/waf.yaml` | - |
-| `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API domain), waf (web ACL ARN, passed by deploy.sh) |
+| `coolture-auth-<env>` | `aws/auth.yaml` | |
+| `coolture-backend-<env>` | `aws/backend.yaml` | networking (VPC, subnets), auth (authorizers, Cognito) |
+| `coolture-embeddings-<env>` | `recommender/template.yaml` | networking, backend (queue ARN, DB endpoint, security group) |
+| `coolture-geocoder-<env>` | `aws/geocoder.yaml` | networking (VPC, subnets) |
+| `coolture-scraper-<env>` | `aws/scraper.yaml` | backend (API domain), geocoder (proxy URL), auth (pool and client ids, passed by `deploy.sh`) |
+| `coolture-waf-<env>` (us-east-1) | `aws/waf.yaml` | |
+| `coolture-frontend-<env>` | `aws/frontend.yaml` | backend (API domain), geocoder (VPC origin, if deployed), waf (web ACL ARN, passed by `deploy.sh`) |
 
-### Restricting the site to specific IPs
+**Only listed IP addresses can reach the site.** The WAF owns two IP sets, `coolture-<env>-allowed-ipv4` and `-ipv6`,
+created empty. Add addresses in the AWS console under WAF & Shield → IP sets (region "Global (CloudFront)"), as CIDRs such
+as `203.0.113.7/32`, before testing a fresh deploy. The addresses never live in code.
 
-The CloudFront WAF (`aws/waf.yaml`) owns two IP sets, `coolture-<env>-allowed-ipv4` and `-ipv6`, created empty. The
-addresses never live in code: manage them in the AWS console under WAF & Shield → IP sets (region "Global
-(CloudFront)"), entering CIDRs such as `203.0.113.7/32`. The restriction is always on: only listed addresses can open
-the site or call `/api`, and right after the first deploy the sets are empty, so add your address before testing.
+**The network has no internet access,** to keep the fixed cost at zero: private subnets only, no NAT and no interface
+endpoints. VPC Lambdas reach Aurora and S3 (a free gateway endpoint) and nothing else, so anything needing the internet
+or another AWS API runs outside the VPC. Embedding requests go through S3 for that reason, see
+[recommender/README.md](recommender/README.md#embeddings).
 
-The network stack is built for minimum fixed cost: private subnets only, no Internet Gateway, no NAT, no interface
-endpoints. VPC Lambdas can reach Aurora and S3 (free gateway endpoint) and nothing else.
-Anything that needs the internet or another AWS API has to run outside the VPC.
+### The geocoder
 
-## Embedding Pipeline (recommendations)
+The post form's place search calls `/geo` on the site. CloudFront strips `/geo` and sends it through a
+[VPC origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html) to
+Photon on a small instance (the stack's `InstanceType`) in a private subnet. The instance has no public address and
+only CloudFront reaches it. It gets everything from the stack's bucket through the S3 gateway endpoint.
 
-Port of `coolture-core/{post,user}-embedding-worker` with SQS instead of RabbitMQ:
+Before the first deploy, **attach an internet gateway to the VPC** in the networking stack (an `InternetGateway` and a
+`VPCGatewayAttachment`). CloudFront requires one for a VPC origin, though no route uses it, so nothing in the VPC gains
+internet access. It costs nothing. The instance also installs Java from Amazon Linux's package mirror, an S3 bucket, so
+if the S3 gateway endpoint's policy is ever narrowed, it must still allow `al2023-repos-<region>-de612dc2` and the
+geocoder's bucket.
 
-```
-post-write (create, or update that changes title/description/tags)
-   └─► PutObject s3://coolture-<env>-embedding-requests-<account>/posts/<postId>   (empty object)
-          └─ S3 ObjectCreated notification ─► SQS coolture-<env>-post-embedding ─► PostEmbeddingFunction
-                                                 └─ after 3 failed receives ─► ...-post-embedding-dlq (14 days)
-PostEmbeddingFunction: SELECT title/description/tags FROM posts → all-mpnet-base-v2 → post_embeddings
-
-EventBridge rate(30 minutes) ──► UserEmbeddingFunction ──► user_embeddings
-```
-
-- Split: queue, DLQ, requests bucket and the publisher live in `backend.yaml` / `post-write`; the two Python
-  workers are the separate `embedding-workers/` stack and can be deployed, rebuilt or removed on their own.
-- Why S3 in the middle: VPC Lambdas have no internet. Reaching SQS would need a paid interface endpoint
-  (~$9/month) or NAT; the S3 **gateway** endpoint is free and S3 → SQS notifications are free.
-  The gateway endpoint and its route on the private route table belong to the base stack.
-- `post-write` writes after the DB commit; a failed write is only logged (same as the Spring publisher).
-  With `Environment=local` the bucket env var is empty and publishing is skipped.
-- The consumer reads the post from the DB at processing time, so duplicated/out-of-order S3 events still
-  end with the latest content embedded. Deleted posts and `s3:TestEvent` are skipped. Objects expire after 1 day.
-- `PostEmbeddingFunction` is a container image with CPU-only torch and the model baked in (needs Docker to build).
-- `sam build` for `UserEmbeddingFunction` needs `python3.13` with `pip` on PATH (e.g. run it inside a 3.13 venv) or `--use-container`.
-
-Locally, `sam local` emulates neither S3 notifications nor SQS triggers (and post-write skips the S3 write),
-so embeddings are computed on demand against the docker Postgres (`make up`, `make migrate`, `make build-embeddings` first):
+Then:
 
 ```bash
-make embed-posts                     # posts with no embedding, or edited since it was computed
-make embed-posts POST_ID=<uuid>      # one post
-make embed-posts ALL=1               # every non-deleted post (e.g. after changing the model)
-make embed-posts DRY_RUN=1           # print the generated SQS/S3 events, don't invoke
-make embed-users                     # what the 30-min schedule does in AWS
+make deploy-geocoder          # the instance, its bucket and the VPC origin. The VPC origin takes up to 15 minutes
+make geo-index                # once, locally, if not done yet: the index of Poland
+make geo-publish ENV=dev      # uploads Photon and the index, then reboots the instance, which loads them
+make deploy-frontend          # adds /geo to CloudFront, now that the geocoder stack exists
 ```
 
-`embed-posts` (`scripts/embed-posts.sh`) builds the same SQS-wrapped S3 events AWS delivers and runs
-`sam local invoke PostEmbeddingFunction`, 50 posts per invocation (`BATCH_SIZE=`), and exits non-zero if any post fails.
+To refresh the data, run `make geo-index` and `make geo-publish` again, every few months or before a release. The instance
+loads a new index on reboot and keeps its ARN, which the VPC origin points at. To remove the geocoder, remove what
+imports it first: `make delete-scraper` and `NO_GEOCODER=1 make deploy-frontend`, then `make delete-geocoder`.
 
-Unit tests: `pip install -r embedding-workers/<worker>/requirements-dev.txt` then `make test-python`.
+A proxy Lambda inside the VPC, behind an IAM-signed function URL, lets the scheduled scraper ask Photon too.
 
-## Shared Common Module (`com.coolture:common:1.0.0`)
+### The scheduled scraper
 
-The `common` module (`aws/lambdas/common/`) is a shared Maven library that eliminates code duplication across all Lambdas by providing central domain DTOs, database connection pooling (HikariCP), JWT security helpers, and pagination utilities. It is not a standalone Lambda; instead, it is packaged directly into each Lambda's shaded uber-jar at build time via Maven dependency:
-
-```xml
-<dependency>
-    <groupId>com.coolture</groupId>
-    <artifactId>common</artifactId>
-    <version>1.0.0</version>
-</dependency>
-```
-
-You can build and install it locally using `make build-common` (note that `make build` automatically builds `common` first before building all backend Lambdas).
-
-## Authentication & Authorization
-
-The architecture uses a dual-mode authorization model: strictly enforced Cognito JWT in AWS, and frictionless header-based mocking locally.
-
-### 1. Cloud (AWS) – Amazon Cognito
-- **API Gateway Enforcement**: `aws/backend.yaml` configures `CognitoAuthorizer` as the `DefaultAuthorizer` on `HttpApi` (backed by the Cognito User Pool defined in `aws/auth.yaml`).
-- **Protected Routes**: Require `Authorization: Bearer <jwt_token>`. API Gateway validates signatures, issuers, and expiry before invoking the Lambda.
-- **Public Routes**: Explicitly set to `Auth: { Authorizer: NONE }` (e.g., `GET /posts`, `GET /users`, `GET /media/{id}`, `GET /actuator/health`).
-- **Identity Extraction**: Lambdas use [`SecurityContext.from(event)`](aws/lambdas/common/src/main/java/com/coolture/common/security/SecurityContext.java) to parse user ID (`sub`) and claims from `event.requestContext.authorizer.jwt.claims`.
-
-### 2. Local Development – Frictionless Mocking
-When `ENVIRONMENT=local` (set automatically in `make local`):
-- **Zero-Config Auth**: If no auth headers are provided, requests automatically resolve to the default mock user `local_dev` (`00000000-0000-0000-0000-000000000001`). You can curl protected endpoints without tokens.
-- **Switch Users**: Pass `-H "X-User-Id: <uuid>"` to simulate requests from any specific user ID.
-- **Anonymous Access**: Pass `-H "X-Anonymous: true"` to test guest mode.
-- *(Security: In AWS environments, `X-User-Id` and `X-Anonymous` headers are strictly ignored and fallback is disabled).*
-
-### 3. Database Isolation (Local vs. AWS)
-- **Production Migrations** (`migrations/*.sql`): Strictly schema DDL (tables, indexes, extensions). No mock users are present, ensuring clean AWS deployments.
-- **Local Dev Seed** (`db/local-dev-seed.sql`): Creates the `local_dev` user only in local Docker Postgres via `docker-compose.yml` and `make migrate`.
-
-## Prerequisites
-
-- AWS SAM CLI
-- Docker
-- Maven 3.x
-- Java 21
-- PostgreSQL client (optional, for running migrations)
-
-## Local Development
-
-### Setup
-
-Start local PostgreSQL and local S3 (Garage):
-
-```bash
-make up
-```
-
-> `make up` automatically runs PostgreSQL (port `5430`), S3 Garage (port `3900`), and `s3-init` which provisions the `coolture-bucket` with CORS enabled for direct browser uploads.
-
-Build Lambda functions:
-
-```bash
-make build
-```
-
-Run database migrations and local dev seed:
-
-```bash
-make migrate
-```
-
-### Running Local API
-
-Start API Gateway locally on port 3000:
-
-```bash
-make local
-```
-
-The API will use these default connection parameters:
-
-- Host: `host.docker.internal`
-- Port: `5430`
-- Database: `coolture`
-- User: `coolture_admin`
-- Password: `admin`
-
-### Testing the API
-
-#### Using SAM CLI
-
-Invoke functions directly:
-
-```bash
-sam local invoke UserFunction --template-file .aws-sam/build/template.yaml
-
-sam local invoke PostReadFunction --template-file .aws-sam/build/template.yaml
-```
-
-Generate test events:
-
-```bash
-sam local generate-event apigateway http-api-proxy > events/test-event.json
-```
-
-#### User Operations (`user`)
-
-##### 1. Search Users (with cursor pagination and avatars)
-
-```bash
-curl "http://localhost:3000/users?q=john&limit=20" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000001"
-```
-
-##### 2. Create User (provisioned on first `GET /auth/me`)
-
-Users are never created directly. The first authenticated `GET /auth/me` creates the profile from the token claims
-(`sub`, username, `given_name`, `family_name`). Locally the claims come from the `X-User-*` headers:
-
-```bash
-curl http://localhost:3000/auth/me \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000002" \
-  -H "X-User-Name: johndoe"
-```
-
-##### 3. Get User Profile by ID
-
-```bash
-curl "http://localhost:3000/users/00000000-0000-0000-0000-000000000001" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000002"
-```
-
-##### 4. Get User Profile by Username
-
-```bash
-curl "http://localhost:3000/users/by-username/johndoe"
-```
-
-##### 5. Update Profile (PATCH - Caller must be owner)
-
-```bash
-curl -X PATCH "http://localhost:3000/users/00000000-0000-0000-0000-000000000001" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000001" \
-  -d '{
-    "firstName": "Johnny",
-    "bio": "Updated bio"
-  }'
-```
-
-##### 6. Set Profile Image (PUT - Caller must own both media files)
-
-```bash
-curl -X PUT "http://localhost:3000/users/00000000-0000-0000-0000-000000000001/profile-image" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000001" \
-  -d '{
-    "fullMediaId": "11111111-1111-1111-1111-111111111111",
-    "thumbnailMediaId": "22222222-2222-2222-2222-222222222222"
-  }'
-```
-
-##### 7. Remove Profile Image (DELETE)
-
-```bash
-curl -X DELETE "http://localhost:3000/users/00000000-0000-0000-0000-000000000001/profile-image" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000001"
-```
-
----
-
-### Posts - Read Operations (`post-read`)
-
-#### 1. Get Feed (with filters & cursor pagination)
-
-Basic feed:
-
-```bash
-curl "http://localhost:3000/posts"
-```
-
-Feed with filters (text query, tags, sorting, radius):
-
-```bash
-curl "http://localhost:3000/posts?q=festiwal&tags=muzyka,koncert&type=OFFLINE&sortBy=POPULAR&limit=10"
-```
-
-Feed with geo-radius filter (latitude, longitude, radius in km):
-
-```bash
-curl "http://localhost:3000/posts?latitude=52.2297&longitude=21.0122&radiusKm=25.0"
-```
-
-Feed with cursor pagination:
-
-```bash
-curl "http://localhost:3000/posts?cursor=eyJpZCI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMCIsImNyZWF0ZWRBdCI6IjIwMjYtMDgtMjRUMTI6MDA6MDBaIn0&limit=20"
-```
-
-#### 2. Get Post Details
-
-```bash
-curl "http://localhost:3000/posts/11111111-1111-1111-1111-111111111111"
-```
-
-#### 3. Get Map Marks (Bounding Box)
-
-```bash
-curl "http://localhost:3000/posts/map?leftUpper.latitude=52.3&leftUpper.longitude=20.9&rightBottom.latitude=52.1&rightBottom.longitude=21.2"
-```
-
-#### 4. Get Recommendations (Requires Cognito JWT)
-
-```bash
-curl "http://localhost:3000/posts/recommendations?limit=10" \
-  -H "Authorization: Bearer <COGNITO_JWT_TOKEN>"
-```
-
-#### 5. List Event Locations
-
-```bash
-curl "http://localhost:3000/event-locations?limit=20"
-```
-
----
-
-### Posts - Write Operations (`post-write`)
-
-> **Authentication**: On AWS Cloud, endpoints extract the user ID from the Cognito JWT token (`Authorization: Bearer <TOKEN>`). For **local development and testing**, you can pass `-H "X-User-Id: <USER_UUID>"` (e.g. the ID you provisioned via `GET /auth/me`).
-
-#### 1. Create Post (ONLINE)
-
-```bash
-curl -X POST "http://localhost:3000/posts" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000001" \
-  -d '{
-    "title": "Warsztaty programowania online",
-    "description": "Otwarte warsztaty z technologii chmurowych i AWS Serverless.",
-    "eventUrl": "https://meet.google.com/abc-defg-hij",
-    "startsAt": "2026-09-01T18:00:00Z",
-    "endsAt": "2026-09-01T20:00:00Z",
-    "tags": ["it", "aws", "serverless"],
-    "type": "ONLINE",
-    "visibility": "PUBLIC"
-  }'
-```
-
-#### 2. Create Post (OFFLINE with Location & Media)
-
-```bash
-curl -X POST "http://localhost:3000/posts" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <COGNITO_JWT_TOKEN>" \
-  -d '{
-    "title": "Wystawa sztuki nowoczesnej",
-    "description": "Wernisaż lokalnych artystów połączony z degustacją kawy.",
-    "startsAt": "2026-09-15T19:00:00Z",
-    "endsAt": "2026-09-15T22:00:00Z",
-    "tags": ["sztuka", "wernisaz", "kultura"],
-    "type": "OFFLINE",
-    "visibility": "PUBLIC",
-    "location": {
-      "countryCode": "POL",
-      "venueName": "Galeria Sztuki",
-      "buildingNum": "12A",
-      "street": "ul. Marszałkowska",
-      "postalCode": "00-001",
-      "city": "Warszawa",
-      "coordinates": {
-        "latitude": 52.2297,
-        "longitude": 21.0122
-      }
-    },
-    "mediaIds": ["22222222-2222-2222-2222-222222222222"],
-    "coverMediaId": "22222222-2222-2222-2222-222222222222"
-  }'
-```
-
-#### 3. Update Post (PATCH)
-
-```bash
-curl -X PATCH "http://localhost:3000/posts/11111111-1111-1111-1111-111111111111" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <COGNITO_JWT_TOKEN>" \
-  -d '{
-    "title": "Zaktualizowany tytuł wystawy",
-    "description": "Nowy zaktualizowany opis wydarzenia.",
-    "tags": ["sztuka", "premiera"]
-  }'
-```
-
-#### 4. Delete Post (DELETE - Soft Delete)
-
-```bash
-curl -X DELETE "http://localhost:3000/posts/11111111-1111-1111-1111-111111111111" \
-  -H "Authorization: Bearer <COGNITO_JWT_TOKEN>"
-```
-
----
-
-### Event Locations - Direct Management (`post-write`)
-
-#### 1. Create Standalone Event Location
-
-```bash
-curl -X POST "http://localhost:3000/event-locations" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <COGNITO_JWT_TOKEN>" \
-  -d '{
-    "countryCode": "POL",
-    "venueName": "Klub Muzyczny Stodoła",
-    "buildingNum": "10",
-    "street": "ul. Batorego",
-    "postalCode": "02-591",
-    "city": "Warszawa",
-    "coordinates": {
-      "latitude": 52.2156,
-      "longitude": 21.0089
-    }
-  }'
-```
-
-#### 2. Update Event Location
-
-```bash
-curl -X PATCH "http://localhost:3000/event-locations/33333333-3333-3333-3333-333333333333" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <COGNITO_JWT_TOKEN>" \
-  -d '{
-    "venueName": "Nowa Nazwa Klubu",
-    "street": "ul. Stefana Batorego 10"
-  }'
-```
-
-#### 3. Delete Event Location
-
-```bash
-curl -X DELETE "http://localhost:3000/event-locations/33333333-3333-3333-3333-333333333333" \
-  -H "Authorization: Bearer <COGNITO_JWT_TOKEN>"
-```
-
----
-
-### Media Upload & S3 Storage (`media`)
-
-The media module provides a high-performance presigned URL upload flow:
-
-1. **Client** requests upload initiation via `POST /media/uploads/init`.
-2. **Backend** validates metadata, records `PENDING` state in PostgreSQL, and generates an AWS S3 presigned `PUT` URL (15-min expiry) with locked `Content-Type`.
-3. **Client** uploads file binary directly to S3/Garage using `PUT <uploadUrl>` with required headers.
-4. **Client** notifies backend via `POST /media/uploads/{mediaId}/complete` to transition status to `UPLOADED`.
-5. **Client** requests media via `GET /media/{mediaId}` to obtain a time-limited presigned `GET` URL (1-hour expiry).
-
-#### Switching Storage: Local Garage vs AWS S3
-
-Switching between local testing and actual AWS S3 is fully controlled by environment variables:
-
-| Environment Variable       | Local Testing (Default)                                            | AWS Cloud (Dev/Staging/Prod)                          |
-| -------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------- |
-| `MEDIA_BUCKET_NAME`        | `coolture-bucket` (or set by `s3-init`)                            | `coolture-${Environment}-media` (from `backend.yaml`) |
-| `S3_ENDPOINT_URL`          | `http://localhost:3900`                                            | _Unset_ (SDK automatically targets native AWS S3)     |
-| `S3_PUBLIC_ENDPOINT_URL`   | `http://localhost:3900` (browser-reachable URL)                    | _Unset_ (defaults to AWS S3)                          |
-| `AWS_REGION`               | `garage`                                                           | `eu-north-1` (or Lambda execution region)           |
-| `GARAGE_ACCESS_KEY_ID`     | `GK9f23fc115cfabe3da0a5bcb5`                                       | _Unset_ (Lambda IAM execution role is used)           |
-| `GARAGE_ACCESS_KEY_SECRET` | `8fa745da69f465aff2fafb09ab290c6358e6e58c0ec3d3fc174d27f300688111` | _Unset_ (Lambda IAM execution role is used)           |
-
-- **Local S3 Garage**: Run `make up`. Garage runs on port `3900`, web UI on port `3920`. `s3-init` creates the bucket and configures CORS.
-- **Native AWS S3**: Deploy with `make deploy-backend`. `backend.yaml` provisions `MediaBucket` (`coolture-${Environment}-media`) with CORS and attaches `S3CrudPolicy` to `MediaFunction`.
-
-#### Media Endpoints (curl examples)
-
-##### 1. Initiate Upload
-
-```bash
-curl -X POST "http://localhost:3000/media/uploads/init" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000001" \
-  -d '{
-    "purpose": "EVENT_COVER",
-    "mimeType": "image/jpeg",
-    "sizeBytes": 204800,
-    "fileName": "poster.jpg"
-  }'
-```
-
-Response (`201 Created`):
-
-```json
-{
-  "mediaId": "d3b07384-d113-4f90-a5a6-98124d9c4e23",
-  "objectKey": "EVENT_COVER/00000000-0000-0000-0000-000000000001/a34ef124-....jpg",
-  "uploadUrl": "http://localhost:3900/coolture-bucket/EVENT_COVER/...?X-Amz-Signature=...",
-  "httpMethod": "PUT",
-  "expiresAt": "2026-10-13T10:45:00Z",
-  "requiredHeaders": {
-    "Content-Type": "image/jpeg"
-  }
-}
-```
-
-##### 2. Upload Binary directly to S3 / Garage
-
-```bash
-curl -X PUT "<uploadUrl>" \
-  -H "Content-Type: image/jpeg" \
-  --data-binary "@/path/to/local/poster.jpg"
-```
-
-##### 3. Complete Upload
-
-```bash
-curl -X POST "http://localhost:3000/media/uploads/d3b07384-d113-4f90-a5a6-98124d9c4e23/complete" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000001" \
-  -d '{}'
-```
-
-Response (`200 OK`):
-
-```json
-{
-  "id": "d3b07384-d113-4f90-a5a6-98124d9c4e23",
-  "purpose": "EVENT_COVER",
-  "mimeType": "image/jpeg",
-  "sizeBytes": 204800,
-  "status": "UPLOADED",
-  "url": "http://localhost:3900/coolture-bucket/EVENT_COVER/...?X-Amz-Signature=...",
-  "createdAt": "2026-10-13T10:30:00Z"
-}
-```
-
-##### 4. Get Media by ID
-
-```bash
-curl "http://localhost:3000/media/d3b07384-d113-4f90-a5a6-98124d9c4e23"
-```
-
-##### 5. Delete Media (Owned by caller)
-
-```bash
-curl -X DELETE "http://localhost:3000/media/d3b07384-d113-4f90-a5a6-98124d9c4e23" \
-  -H "X-User-Id: 00000000-0000-0000-0000-000000000001"
-```
-
-Response (`204 No Content`). Removes object from S3 and marks record `DELETED`.
+`make deploy-scraper` adds a Lambda outside the VPC that imports new trojmiasto.pl events as the bot at a random moment
+in every 6 hours, with its schedule off until the bot has a password. Turning it on is in
+[scraper/README.md](scraper/README.md#on-a-schedule).

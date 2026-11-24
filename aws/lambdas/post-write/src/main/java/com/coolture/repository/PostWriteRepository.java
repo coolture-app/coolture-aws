@@ -1,23 +1,17 @@
 package com.coolture.repository;
 
 import com.coolture.common.db.DatabaseConfig;
-import com.coolture.common.db.PostQueries;
 import com.coolture.common.db.MediaQueries;
 import com.coolture.common.db.ParamBinder;
-import com.coolture.common.dto.CountryCodeDto;
+import com.coolture.common.db.PostSelect;
+import com.coolture.common.json.JsonUtils;
 import com.coolture.common.dto.EventLocationDto;
-import com.coolture.common.dto.GeoPointDto;
-import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostDetailDto;
-import com.coolture.common.dto.PostMediaDto;
+import com.coolture.common.dto.PostLinkDto;
+import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.dto.CreatePostRequest;
-import com.coolture.dto.UpdatePostRequest;
-
-import com.coolture.common.dto.enums.ParticipationType;
-import com.coolture.common.dto.enums.ReactionType;
 
 import java.sql.Array;
 import java.sql.Connection;
@@ -26,11 +20,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static com.coolture.common.db.ResultSetMappers.*;
+import static com.coolture.repository.Transactions.inTransaction;
 
 public class PostWriteRepository {
 
@@ -41,12 +38,12 @@ public class PostWriteRepository {
         String title,
         String description,
         String eventUrl,
+        List<PostLinkDto> links,
         Instant startsAt,
         Instant endsAt,
-        List<String> tags,
+        boolean openEnded,
         PostType type,
         PostStatus status,
-        PostVisibility visibility,
         Instant createdAt,
         Instant lastModifiedAt,
         Instant deletedAt,
@@ -55,8 +52,8 @@ public class PostWriteRepository {
 
     public Optional<ExistingPost> findById(UUID postId) throws SQLException {
         String sql = """
-            SELECT p.id, p.author_id, p.event_location_id, p.title, p.description, p.event_url,
-                   p.starts_at, p.ends_at, p.tags, p.type, p.status, p.visibility,
+            SELECT p.id, p.author_id, p.event_location_id, p.title, p.description, p.event_url, p.links,
+                   p.starts_at, p.ends_at, p.open_ended, p.type, p.status,
                    p.created_at, p.last_modified_at, p.deleted_at,
                    el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
                    el.street, el.postal_code, el.city,
@@ -79,12 +76,12 @@ public class PostWriteRepository {
                         rs.getString("title"),
                         rs.getString("description"),
                         rs.getString("event_url"),
+                        mapLinks(rs),
                         mapInstant(rs, "starts_at"),
                         mapInstant(rs, "ends_at"),
-                        mapTags(rs),
+                        rs.getBoolean("open_ended"),
                         mapEnum(rs, "type", PostType.class),
                         mapEnum(rs, "status", PostStatus.class),
-                        mapEnum(rs, "visibility", PostVisibility.class),
                         mapInstant(rs, "created_at"),
                         mapInstant(rs, "last_modified_at"),
                         mapInstant(rs, "deleted_at"),
@@ -96,17 +93,18 @@ public class PostWriteRepository {
         return Optional.empty();
     }
 
-    public void validateMediaOwnership(UUID callerId, List<UUID> mediaIds) throws SQLException {
-        if (mediaIds == null || mediaIds.isEmpty()) return;
+    /** Checks the caller owns each media and none is deleted, and gives each one's purpose. */
+    public Map<UUID, MediaPurpose> validateMediaOwnership(UUID callerId, List<UUID> mediaIds) throws SQLException {
+        if (mediaIds == null || mediaIds.isEmpty()) return Map.of();
 
-        String sql = "SELECT id, owner_id, status FROM media WHERE id = ANY(?)";
+        String sql = "SELECT id, owner_id, status, purpose FROM media WHERE id = ANY(?)";
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             Array array = conn.createArrayOf("uuid", mediaIds.toArray());
             stmt.setArray(1, array);
 
             try (ResultSet rs = stmt.executeQuery()) {
-                List<UUID> foundIds = new java.util.ArrayList<>();
+                Map<UUID, MediaPurpose> purposes = new HashMap<>();
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject("id");
                     UUID ownerId = (UUID) rs.getObject("owner_id");
@@ -118,43 +116,37 @@ public class PostWriteRepository {
                     if (!callerId.equals(ownerId)) {
                         throw new SecurityException("You do not own media " + id);
                     }
-                    foundIds.add(id);
+                    String purpose = rs.getString("purpose");
+                    purposes.put(id, purpose == null ? null : MediaPurpose.valueOf(purpose));
                 }
 
                 for (UUID requestedId : mediaIds) {
-                    if (!foundIds.contains(requestedId)) {
+                    if (!purposes.containsKey(requestedId)) {
                         throw new IllegalArgumentException("Media not found: " + requestedId);
                     }
                 }
+                return purposes;
             }
         }
     }
 
     public PostDetailDto createPost(UUID authorId, CreatePostRequest req) throws SQLException {
         UUID postId = UUID.randomUUID();
-        UUID locationId = null;
         Instant now = Instant.now();
-
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                // 1. Insert EventLocation if OFFLINE
-                if (req.type() == PostType.OFFLINE && req.location() != null) {
-                    locationId = insertLocation(conn, req.location(), now);
-                }
-
-                // 2. Insert Post
+        try {
+            return inTransaction(conn -> {
+                UUID locationId = req.location() == null ? null : insertLocation(conn, req.location(), now);
                 String postSql = """
                     INSERT INTO posts (
-                        id, author_id, event_location_id, title, description, event_url,
-                        tags, type, status, visibility,
-                        positive_reaction_count, negative_reaction_count, participant_count, comments_count,
-                        starts_at, ends_at, created_at
+                        id, author_id, event_location_id, title, description, event_url, links,
+                        type, status,
+                        positive_reaction_count, participant_count, comments_count,
+                        starts_at, ends_at, open_ended, created_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?,
-                        0, 0, 0, 0,
-                        ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?::jsonb,
+                        ?, ?,
+                        0, 0, 0,
+                        ?, ?, ?, ?
                     )
                 """;
                 try (PreparedStatement stmt = conn.prepareStatement(postSql)) {
@@ -164,316 +156,147 @@ public class PostWriteRepository {
                      .bindObject(locationId)
                      .bindString(req.title())
                      .bindString(req.description())
-                     .bindString(req.eventUrl());
-
-                    if (req.tags() != null && !req.tags().isEmpty()) {
-                        b.bindVarcharArray(req.tags().toArray(new String[0]));
-                    } else {
-                        b.bindVarcharArray(null);
-                    }
-
-                    b.bindString(req.type().name())
+                     .bindString(req.eventUrl())
+                     .bindString(linksJson(req.links()))
+                     .bindString(req.type().name())
                      .bindString(PostStatus.ACTIVE.name())
-                     .bindString((req.visibility() != null ? req.visibility() : PostVisibility.PUBLIC).name())
                      .bindTimestamp(req.startsAt())
                      .bindTimestamp(req.endsAt())
+                     .bindBoolean(Boolean.TRUE.equals(req.openEnded()))
                      .bindTimestamp(now);
                     stmt.executeUpdate();
                 }
-
-                // 3. Attach Media
-                attachMedia(conn, postId, req.mediaIds(), req.coverMediaId());
-
-                PostDetailDto created = getPostDetail(conn, postId);
-                conn.commit();
-                return created;
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            }
+                attachMedia(conn, postId, req.mediaIds());
+                if (req.coverMediaId() != null) {
+                    moveToFront(conn, postId, req.coverMediaId());
+                }
+                return getPostDetail(conn, postId);
+            });
+        } catch (SQLException e) {
+            refuseDuplicateEvent(e);
+            throw e;
         }
     }
 
-    public PostDetailDto updatePost(UUID postId, UUID callerId, ExistingPost existing, UpdatePostRequest req) throws SQLException {
-        Instant now = Instant.now();
-        PostType newType = req.type() != null ? req.type() : existing.type();
-        UUID effectiveLocationId = existing.eventLocationId();
+    /** The unique index on a post's author and event_url. */
+    private static final String EVENT_URL_INDEX = "posts_author_event_url_key";
 
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                // 1. Handle Location updates
-                if (newType == PostType.ONLINE) {
-                    effectiveLocationId = null;
-                } else if (req.location() != null) {
-                    if (existing.eventLocationId() == null) {
-                        effectiveLocationId = insertLocation(conn, req.location(), now);
-                    } else {
-                        updateLocationInline(conn, existing.eventLocationId(), req.location());
-                    }
+    private static void refuseDuplicateEvent(SQLException e) {
+        if ("23505".equals(e.getSQLState()) && e.getMessage() != null && e.getMessage().contains(EVENT_URL_INDEX)) {
+            throw new DuplicateEventException(e);
+        }
+    }
+
+    private static String linksJson(List<PostLinkDto> links) {
+        return JsonUtils.toJson(links == null ? List.of() : links);
+    }
+
+    /**
+     * A post's fields after an edit, as the service resolved them from the request and the saved post. location is
+     * null for an online post. Null mediaIds keep the photos, and a null coverMediaId keeps their order.
+     */
+    public record Fields(String title, String description, String eventUrl, List<PostLinkDto> links, PostType type,
+                         Instant startsAt, Instant endsAt, boolean openEnded, EventLocationDto location,
+                         List<UUID> mediaIds, UUID coverMediaId) {}
+
+    public PostDetailDto updatePost(UUID postId, UUID savedLocationId, Fields fields) throws SQLException {
+        Instant now = Instant.now();
+        try {
+            return inTransaction(conn -> {
+                UUID locationId = savedLocationId;
+                if (fields.location() == null) {
+                    locationId = null;
+                } else if (savedLocationId == null) {
+                    locationId = insertLocation(conn, fields.location(), now);
+                } else {
+                    updateLocationInline(conn, savedLocationId, fields.location());
                 }
 
-                // 2. Handle Media updates
-                if (req.mediaIds() != null) {
+                if (fields.mediaIds() != null) {
                     try (PreparedStatement delStmt = conn.prepareStatement("DELETE FROM post_media WHERE post_id = ?")) {
                         delStmt.setObject(1, postId);
                         delStmt.executeUpdate();
                     }
-                    attachMedia(conn, postId, req.mediaIds(), req.coverMediaId());
-                } else if (req.coverMediaId() != null) {
-                    String updateCoverSql = "UPDATE post_media SET is_cover = (media_id = ?) WHERE post_id = ?";
-                    try (PreparedStatement stmt = conn.prepareStatement(updateCoverSql)) {
-                        stmt.setObject(1, req.coverMediaId());
-                        stmt.setObject(2, postId);
-                        int affected = stmt.executeUpdate();
-                        if (affected == 0) {
-                            throw new IllegalArgumentException("coverMediaId is not attached to this post");
-                        }
-                    }
+                    attachMedia(conn, postId, fields.mediaIds());
+                }
+                if (fields.coverMediaId() != null) {
+                    moveToFront(conn, postId, fields.coverMediaId());
                 }
 
-                // 3. Update Post row
                 String updatePostSql = """
                     UPDATE posts SET
                         title = ?,
                         description = ?,
                         event_url = ?,
-                        tags = ?,
+                        links = ?::jsonb,
                         type = ?,
-                        visibility = ?,
                         event_location_id = ?,
                         starts_at = ?,
                         ends_at = ?,
+                        open_ended = ?,
                         status = 'EDITED',
                         last_modified_at = ?
                     WHERE id = ?
                 """;
                 try (PreparedStatement stmt = conn.prepareStatement(updatePostSql)) {
                     ParamBinder b = new ParamBinder(stmt, conn);
-                    b.bindString(req.title() != null ? req.title() : existing.title())
-                     .bindString(req.description() != null ? req.description() : existing.description())
-                     .bindString(req.eventUrl() != null ? req.eventUrl() : existing.eventUrl());
-
-                    List<String> effectiveTags = req.tags() != null ? req.tags() : existing.tags();
-                    if (effectiveTags != null && !effectiveTags.isEmpty()) {
-                        b.bindVarcharArray(effectiveTags.toArray(new String[0]));
-                    } else {
-                        b.bindVarcharArray(null);
-                    }
-
-                    b.bindString(newType.name())
-                     .bindString((req.visibility() != null ? req.visibility() : existing.visibility()).name())
-                     .bindObject(effectiveLocationId)
-                     .bindTimestamp(req.startsAt() != null ? req.startsAt() : existing.startsAt())
-                     .bindTimestamp(req.endsAt() != null ? req.endsAt() : existing.endsAt())
+                    b.bindString(fields.title())
+                     .bindString(fields.description())
+                     .bindString(fields.eventUrl())
+                     .bindString(linksJson(fields.links()))
+                     .bindString(fields.type().name())
+                     .bindObject(locationId)
+                     .bindTimestamp(fields.startsAt())
+                     .bindTimestamp(fields.endsAt())
+                     .bindBoolean(fields.openEnded())
                      .bindTimestamp(now)
                      .bindUUID(postId);
                     stmt.executeUpdate();
                 }
 
-                PostDetailDto updated = getPostDetail(conn, postId);
-                conn.commit();
-                return updated;
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            }
+                // Each post has its own row, so a post gone online leaves nothing pointing at it.
+                if (locationId == null && savedLocationId != null) {
+                    String deleteSql = "DELETE FROM event_locations WHERE id = ?";
+                    try (PreparedStatement delStmt = conn.prepareStatement(deleteSql)) {
+                        delStmt.setObject(1, savedLocationId);
+                        delStmt.executeUpdate();
+                    }
+                }
+                return getPostDetail(conn, postId);
+            });
+        } catch (SQLException e) {
+            refuseDuplicateEvent(e);
+            throw e;
         }
     }
 
     public void softDeletePost(UUID postId) throws SQLException {
         Instant now = Instant.now();
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM comments WHERE post_id = ?")) {
-                    stmt.setObject(1, postId);
-                    stmt.executeUpdate();
-                }
-
-                String sql = "UPDATE posts SET status = 'DELETED', deleted_at = ? WHERE id = ?";
-                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setTimestamp(1, Timestamp.from(now));
-                    stmt.setObject(2, postId);
-                    stmt.executeUpdate();
-                }
-
-                conn.commit();
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
+        inTransaction(conn -> {
+            try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM comments WHERE post_id = ?")) {
+                stmt.setObject(1, postId);
+                stmt.executeUpdate();
             }
-        }
-    }
 
-    public PostDetailDto getPostDetail(UUID postId) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            return getPostDetail(conn, postId);
-        }
+            String sql = "UPDATE posts SET status = 'DELETED', deleted_at = ? WHERE id = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setTimestamp(1, Timestamp.from(now));
+                stmt.setObject(2, postId);
+                stmt.executeUpdate();
+            }
+        });
     }
 
     private PostDetailDto getPostDetail(Connection conn, UUID postId) throws SQLException {
-        String sql = """
-            SELECT p.id, p.title, p.description, p.event_url, p.tags, p.type, p.status, p.visibility,
-                   p.positive_reaction_count, p.negative_reaction_count, p.participant_count, p.comments_count,
-                   p.starts_at, p.ends_at, p.created_at, p.last_modified_at, p.deleted_at,
-                   u.id AS author_id, u.username, u.first_name, u.last_name, u.created_at AS user_created_at,
-                   avatar_m.id AS avatar_id, avatar_m.purpose AS avatar_purpose, avatar_m.mime_type AS avatar_mime_type,
-                   avatar_m.size_bytes AS avatar_size_bytes, avatar_m.status AS avatar_status,
-                   avatar_m.created_at AS avatar_created_at, avatar_m.deleted_at AS avatar_deleted_at, avatar_m.object_key AS avatar_object_key,
-                   el.id AS loc_id, el.country_code, el.venue_name, el.building_num,
-                   el.street, el.postal_code, el.city,
-                   ST_Y(el.coordinates::geometry) AS latitude,
-                   ST_X(el.coordinates::geometry) AS longitude
-            FROM posts p
-            JOIN users u ON u.id = p.author_id
-            LEFT JOIN profile_images pi ON pi.user_id = u.id AND pi.is_active = true
-            LEFT JOIN media avatar_m ON avatar_m.id = pi.thumbnail_media_id
-            LEFT JOIN event_locations el ON el.id = p.event_location_id
-            WHERE p.id = ?
-        """;
-
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
+        try (PreparedStatement stmt = conn.prepareStatement(PostSelect.DETAIL + "WHERE p.id = ?")) {
+            ParamBinder b = new ParamBinder(stmt, conn);
+            PostSelect.bindViewer(b, null);
+            b.bindUUID(postId);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (!rs.next()) {
                     throw new IllegalArgumentException("Post not found: " + postId);
                 }
-
-                List<PostMediaDto> mediaList = MediaQueries.getPostMediaList(conn, postId);
-                MediaResourceDto coverMedia = mediaList.stream()
-                    .filter(PostMediaDto::isCover)
-                    .map(PostMediaDto::media)
-                    .findFirst()
-                    .orElse(null);
-
-                return new PostDetailDto(
-                    (UUID) rs.getObject("id"),
-                    mapUserSummary(rs),
-                    mapEventLocation(rs),
-                    rs.getString("title"),
-                    rs.getString("description"),
-                    rs.getString("event_url"),
-                    mapInstant(rs, "starts_at"),
-                    mapInstant(rs, "ends_at"),
-                    mapTags(rs),
-                    rs.getInt("positive_reaction_count"),
-                    rs.getInt("negative_reaction_count"),
-                    rs.getInt("participant_count"),
-                    rs.getInt("comments_count"),
-                    mapEnum(rs, "type", PostType.class),
-                    mapEnum(rs, "status", PostStatus.class),
-                    mapEnum(rs, "visibility", PostVisibility.class),
-                    mapInstant(rs, "created_at"),
-                    mapInstant(rs, "last_modified_at"),
-                    mapInstant(rs, "deleted_at"),
-                    coverMedia,
-                    mediaList,
-                    null,
-                    null
-                );
-            }
-        }
-    }
-
-    public EventLocationDto createLocation(EventLocationDto req) throws SQLException {
-        UUID id = UUID.randomUUID();
-        Instant now = Instant.now();
-        String sql = """
-            INSERT INTO event_locations (
-                id, country_code, venue_name, building_num, street, postal_code, city,
-                coordinates, created_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?,
-                ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
-                ?
-            )
-            RETURNING id, country_code, venue_name, building_num, street, postal_code, city,
-                      ST_Y(coordinates::geometry) AS latitude,
-                      ST_X(coordinates::geometry) AS longitude,
-                      created_at
-        """;
-
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            bindLocationParams(new ParamBinder(stmt, conn), id, req, now);
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return mapLocationFromReturning(rs);
-                }
-            }
-        }
-        throw new SQLException("Failed to create event location");
-    }
-
-    public EventLocationDto updateLocation(UUID locationId, EventLocationDto req) throws SQLException {
-        String sql = """
-            UPDATE event_locations SET
-                country_code = COALESCE(?, country_code),
-                venue_name = COALESCE(?, venue_name),
-                building_num = COALESCE(?, building_num),
-                street = COALESCE(?, street),
-                postal_code = COALESCE(?, postal_code),
-                city = COALESCE(?, city),
-                coordinates = CASE WHEN ? IS NOT NULL AND ? IS NOT NULL THEN ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography ELSE coordinates END
-            WHERE id = ?
-            RETURNING id, country_code, venue_name, building_num, street, postal_code, city,
-                      ST_Y(coordinates::geometry) AS latitude,
-                      ST_X(coordinates::geometry) AS longitude,
-                      created_at
-        """;
-
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            ParamBinder b = new ParamBinder(stmt, conn);
-            b.bindString(req.countryCode())
-             .bindString(req.venueName())
-             .bindString(req.buildingNum())
-             .bindString(req.street())
-             .bindString(req.postalCode())
-             .bindString(req.city());
-
-            if (req.coordinates() != null) {
-                b.bindDouble(req.coordinates().longitude())
-                 .bindDouble(req.coordinates().latitude())
-                 .bindDouble(req.coordinates().longitude())
-                 .bindDouble(req.coordinates().latitude());
-            } else {
-                b.bindDouble(null).bindDouble(null)
-                 .bindDouble(null).bindDouble(null);
-            }
-            b.bindUUID(locationId);
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return mapLocationFromReturning(rs);
-                }
-            }
-        }
-        throw new IllegalArgumentException("EventLocation not found: " + locationId);
-    }
-
-    public void deleteLocation(UUID locationId) throws SQLException {
-        String checkSql = "SELECT 1 FROM posts WHERE event_location_id = ? AND deleted_at IS NULL LIMIT 1";
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
-                checkStmt.setObject(1, locationId);
-                try (ResultSet rs = checkStmt.executeQuery()) {
-                    if (rs.next()) {
-                        throw new IllegalStateException("Event location is referenced by one or more posts");
-                    }
-                }
-            }
-
-            try (PreparedStatement delStmt = conn.prepareStatement("DELETE FROM event_locations WHERE id = ?")) {
-                delStmt.setObject(1, locationId);
-                int affected = delStmt.executeUpdate();
-                if (affected == 0) {
-                    throw new IllegalArgumentException("EventLocation not found: " + locationId);
-                }
+                return mapPostDetail(rs, MediaQueries.getPostMediaList(conn, postId), null);
             }
         }
     }
@@ -493,7 +316,17 @@ public class PostWriteRepository {
             )
         """;
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            bindLocationParams(new ParamBinder(stmt, conn), locationId, loc, now);
+            new ParamBinder(stmt, conn)
+                .bindUUID(locationId)
+                .bindString(loc.countryCode())
+                .bindString(loc.venueName())
+                .bindString(loc.buildingNum())
+                .bindString(loc.street())
+                .bindString(loc.postalCode())
+                .bindString(loc.city())
+                .bindDouble(loc.coordinates().longitude())
+                .bindDouble(loc.coordinates().latitude())
+                .bindTimestamp(now);
             stmt.executeUpdate();
         }
         return locationId;
@@ -522,328 +355,47 @@ public class PostWriteRepository {
         }
     }
 
-    private void attachMedia(Connection conn, UUID postId, List<UUID> mediaIds, UUID coverMediaId) throws SQLException {
+    /** The cover is the post's first photo, so naming a new one moves it there and the others keep their order. */
+    private void moveToFront(Connection conn, UUID postId, UUID mediaId) throws SQLException {
+        String sql = """
+            UPDATE post_media pm
+            SET position = ordered.new_position
+            FROM (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY (media_id = ?) DESC, position ASC, id ASC) - 1 AS new_position,
+                       BOOL_OR(media_id = ?) OVER () AS attached
+                FROM post_media
+                WHERE post_id = ?
+            ) ordered
+            WHERE pm.id = ordered.id AND ordered.attached
+        """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setObject(1, mediaId);
+            stmt.setObject(2, mediaId);
+            stmt.setObject(3, postId);
+            if (stmt.executeUpdate() == 0) {
+                throw new IllegalArgumentException("coverMediaId is not attached to this post");
+            }
+        }
+    }
+
+    private void attachMedia(Connection conn, UUID postId, List<UUID> mediaIds) throws SQLException {
         if (mediaIds == null || mediaIds.isEmpty()) return;
 
         String sql = """
-            INSERT INTO post_media (id, post_id, media_id, position, is_cover)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO post_media (id, post_id, media_id, position)
+            VALUES (?, ?, ?, ?)
         """;
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             for (int i = 0; i < mediaIds.size(); i++) {
                 UUID mid = mediaIds.get(i);
-                boolean isCover = mid.equals(coverMediaId) || (coverMediaId == null && i == 0);
                 ParamBinder b = new ParamBinder(stmt, conn);
                 b.bindUUID(UUID.randomUUID())
                  .bindUUID(postId)
                  .bindUUID(mid)
-                 .bindInt(i)
-                 .bindBoolean(isCover);
+                 .bindInt(i);
                 stmt.addBatch();
             }
             stmt.executeBatch();
-        }
-    }
-
-    private void bindLocationParams(ParamBinder b, UUID id, EventLocationDto loc, Instant now) throws SQLException {
-        b.bindUUID(id)
-         .bindString(loc.countryCode())
-         .bindString(loc.venueName())
-         .bindString(loc.buildingNum())
-         .bindString(loc.street())
-         .bindString(loc.postalCode())
-         .bindString(loc.city())
-         .bindDouble(loc.coordinates().longitude())
-         .bindDouble(loc.coordinates().latitude())
-         .bindTimestamp(now);
-    }
-
-    private EventLocationDto mapLocationFromReturning(ResultSet rs) throws SQLException {
-        return new EventLocationDto(
-            (UUID) rs.getObject("id"),
-            rs.getString("country_code"),
-            rs.getString("venue_name"),
-            rs.getString("building_num"),
-            rs.getString("street"),
-            rs.getString("postal_code"),
-            rs.getString("city"),
-            new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude")),
-            rs.getTimestamp("created_at").toInstant()
-        );
-    }
-
-    public void upsertReaction(UUID postId, UUID userId, ReactionType newType) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                if (!PostQueries.isPostVisible(conn, postId, userId)) {
-                    throw new IllegalArgumentException("Post not found: " + postId);
-                }
-                Optional<ReactionType> oldTypeOpt = findReaction(conn, postId, userId);
-                if (oldTypeOpt.isPresent()) {
-                    ReactionType oldType = oldTypeOpt.get();
-                    if (oldType != newType) {
-                        decrementReactionCount(conn, postId, oldType);
-                        incrementReactionCount(conn, postId, newType);
-                        updateReaction(conn, postId, userId, newType);
-                    }
-                } else {
-                    insertReaction(conn, postId, userId, newType);
-                    incrementReactionCount(conn, postId, newType);
-                }
-                conn.commit();
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            }
-        }
-    }
-
-    public void deleteReaction(UUID postId, UUID userId) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                if (!PostQueries.isPostVisible(conn, postId, userId)) {
-                    throw new IllegalArgumentException("Post not found: " + postId);
-                }
-                Optional<ReactionType> oldTypeOpt = findReaction(conn, postId, userId);
-                if (oldTypeOpt.isPresent()) {
-                    deleteReactionRow(conn, postId, userId);
-                    decrementReactionCount(conn, postId, oldTypeOpt.get());
-                }
-                conn.commit();
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            }
-        }
-    }
-
-    public void upsertParticipation(UUID postId, UUID userId, ParticipationType newType) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                if (!PostQueries.isPostVisible(conn, postId, userId)) {
-                    throw new IllegalArgumentException("Post not found: " + postId);
-                }
-                Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
-                if (oldTypeOpt.isPresent()) {
-                    if (oldTypeOpt.get() != newType) {
-                        updateParticipation(conn, postId, userId, newType);
-                    }
-                } else {
-                    insertParticipation(conn, postId, userId, newType);
-                    incrementParticipantCount(conn, postId);
-                }
-                conn.commit();
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            }
-        }
-    }
-
-    public void deleteParticipation(UUID postId, UUID userId) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                if (!PostQueries.isPostVisible(conn, postId, userId)) {
-                    throw new IllegalArgumentException("Post not found: " + postId);
-                }
-                Optional<ParticipationType> oldTypeOpt = findParticipation(conn, postId, userId);
-                if (oldTypeOpt.isPresent()) {
-                    deleteParticipationRow(conn, postId, userId);
-                    decrementParticipantCount(conn, postId);
-                }
-                conn.commit();
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            }
-        }
-    }
-
-    private Optional<ReactionType> findReaction(Connection conn, UUID postId, UUID userId) throws SQLException {
-        String sql = "SELECT type FROM post_reactions WHERE post_id = ? AND user_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.setObject(2, userId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return Optional.of(ReactionType.valueOf(rs.getString("type")));
-                }
-            }
-        }
-        return Optional.empty();
-    }
-
-    private void insertReaction(Connection conn, UUID postId, UUID userId, ReactionType type) throws SQLException {
-        String sql = "INSERT INTO post_reactions (post_id, user_id, type, created_at) VALUES (?, ?, ?, now())";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.setObject(2, userId);
-            stmt.setString(3, type.name());
-            stmt.executeUpdate();
-        }
-    }
-
-    private void updateReaction(Connection conn, UUID postId, UUID userId, ReactionType type) throws SQLException {
-        String sql = "UPDATE post_reactions SET type = ? WHERE post_id = ? AND user_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, type.name());
-            stmt.setObject(2, postId);
-            stmt.setObject(3, userId);
-            stmt.executeUpdate();
-        }
-    }
-
-    private void deleteReactionRow(Connection conn, UUID postId, UUID userId) throws SQLException {
-        String sql = "DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.setObject(2, userId);
-            stmt.executeUpdate();
-        }
-    }
-
-    private void incrementReactionCount(Connection conn, UUID postId, ReactionType type) throws SQLException {
-        String col = (type == ReactionType.LIKE) ? "positive_reaction_count" : "negative_reaction_count";
-        String sql = "UPDATE posts SET " + col + " = " + col + " + 1 WHERE id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.executeUpdate();
-        }
-    }
-
-    private void decrementReactionCount(Connection conn, UUID postId, ReactionType type) throws SQLException {
-        String col = (type == ReactionType.LIKE) ? "positive_reaction_count" : "negative_reaction_count";
-        String sql = "UPDATE posts SET " + col + " = GREATEST(0, " + col + " - 1) WHERE id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.executeUpdate();
-        }
-    }
-
-    private Optional<ParticipationType> findParticipation(Connection conn, UUID postId, UUID userId) throws SQLException {
-        String sql = "SELECT type FROM post_participations WHERE post_id = ? AND user_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.setObject(2, userId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return Optional.of(ParticipationType.valueOf(rs.getString("type")));
-                }
-            }
-        }
-        return Optional.empty();
-    }
-
-    private void insertParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type) throws SQLException {
-        String sql = "INSERT INTO post_participations (post_id, user_id, type, created_at) VALUES (?, ?, ?, now())";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.setObject(2, userId);
-            stmt.setString(3, type.name());
-            stmt.executeUpdate();
-        }
-    }
-
-    private void updateParticipation(Connection conn, UUID postId, UUID userId, ParticipationType type) throws SQLException {
-        String sql = "UPDATE post_participations SET type = ? WHERE post_id = ? AND user_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, type.name());
-            stmt.setObject(2, postId);
-            stmt.setObject(3, userId);
-            stmt.executeUpdate();
-        }
-    }
-
-    private void deleteParticipationRow(Connection conn, UUID postId, UUID userId) throws SQLException {
-        String sql = "DELETE FROM post_participations WHERE post_id = ? AND user_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.setObject(2, userId);
-            stmt.executeUpdate();
-        }
-    }
-
-    private void incrementParticipantCount(Connection conn, UUID postId) throws SQLException {
-        String sql = "UPDATE posts SET participant_count = participant_count + 1 WHERE id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.executeUpdate();
-        }
-    }
-
-    private void decrementParticipantCount(Connection conn, UUID postId) throws SQLException {
-        String sql = "UPDATE posts SET participant_count = GREATEST(0, participant_count - 1) WHERE id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, postId);
-            stmt.executeUpdate();
-        }
-    }
-
-    public CountryCodeDto createCountryCode(String code) throws SQLException {
-        String sql = "INSERT INTO country_codes (code) VALUES (?) RETURNING code";
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, code);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return new CountryCodeDto(rs.getString("code"));
-                }
-            }
-        }
-        throw new SQLException("Failed to create country code");
-    }
-
-    public CountryCodeDto updateCountryCode(String oldCode, String newCode) throws SQLException {
-        try (Connection conn = DatabaseConfig.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                String checkSql = "SELECT 1 FROM country_codes WHERE code = ?";
-                try (PreparedStatement stmt = conn.prepareStatement(checkSql)) {
-                    stmt.setString(1, oldCode);
-                    try (ResultSet rs = stmt.executeQuery()) {
-                        if (!rs.next()) {
-                            throw new IllegalArgumentException("Country code not found: " + oldCode);
-                        }
-                    }
-                }
-                String insertSql = "INSERT INTO country_codes (code) VALUES (?) ON CONFLICT (code) DO NOTHING";
-                try (PreparedStatement stmt = conn.prepareStatement(insertSql)) {
-                    stmt.setString(1, newCode);
-                    stmt.executeUpdate();
-                }
-                String updateRefsSql = "UPDATE event_locations SET country_code = ? WHERE country_code = ?";
-                try (PreparedStatement stmt = conn.prepareStatement(updateRefsSql)) {
-                    stmt.setString(1, newCode);
-                    stmt.setString(2, oldCode);
-                    stmt.executeUpdate();
-                }
-                String deleteSql = "DELETE FROM country_codes WHERE code = ?";
-                try (PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
-                    stmt.setString(1, oldCode);
-                    stmt.executeUpdate();
-                }
-                conn.commit();
-                return new CountryCodeDto(newCode);
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            }
-        }
-    }
-
-    public void deleteCountryCode(String code) throws SQLException {
-        String sql = "DELETE FROM country_codes WHERE code = ?";
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, code);
-            int deleted = stmt.executeUpdate();
-            if (deleted == 0) {
-                throw new IllegalArgumentException("Country code not found: " + code);
-            }
         }
     }
 }

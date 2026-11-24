@@ -29,6 +29,9 @@ public class CommentWriteService {
         CommentWriteRepository.ExistingComment parent = null;
         if (req.parentCommentId() != null) {
             parent = findActiveOrThrow(req.parentCommentId());
+            if (!repository.isCommentVisible(parent.id(), callerId)) {
+                throw new IllegalArgumentException("Comment with id '" + parent.id() + "' was not found");
+            }
             if (!parent.postId().equals(postId)) {
                 throw new SecurityException("Parent comment belongs to a different post");
             }

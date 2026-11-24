@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -65,6 +66,7 @@ class CommentWriteServiceTest {
         UUID rootId = UUID.randomUUID();
         when(repository.findExistingComment(parentId)).thenReturn(Optional.of(
             existing(parentId, postId, UUID.randomUUID(), rootId, rootId, new UUID[]{rootId}, "ACTIVE")));
+        when(repository.isCommentVisible(parentId, callerId)).thenReturn(true);
         when(repository.createComment(eq(postId), eq(callerId), eq("reply"),
             eq(rootId), eq(parentId), any(UUID[].class)))
             .thenReturn(dto(UUID.randomUUID(), postId));
@@ -82,6 +84,7 @@ class CommentWriteServiceTest {
         when(repository.findExistingComment(parentId)).thenReturn(Optional.of(
             existing(parentId, postId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 new UUID[]{UUID.randomUUID(), UUID.randomUUID()}, "ACTIVE")));
+        when(repository.isCommentVisible(eq(parentId), any())).thenReturn(true);
 
         SecurityException ex = assertThrows(SecurityException.class, () ->
             service.create(postId, UUID.randomUUID(), new CommentCreateRequest("x", parentId)));
@@ -95,9 +98,26 @@ class CommentWriteServiceTest {
         UUID parentId = UUID.randomUUID();
         when(repository.findExistingComment(parentId)).thenReturn(Optional.of(
             existing(parentId, UUID.randomUUID(), UUID.randomUUID(), null, null, new UUID[0], "ACTIVE")));
+        when(repository.isCommentVisible(eq(parentId), any())).thenReturn(true);
 
         assertThrows(SecurityException.class, () ->
             service.create(postId, UUID.randomUUID(), new CommentCreateRequest("x", parentId)));
+    }
+
+    @Test
+    void create_whenParentHiddenFromTheCaller_throwsNotFound() throws Exception {
+        UUID postId = UUID.randomUUID();
+        UUID parentId = UUID.randomUUID();
+        UUID callerId = UUID.randomUUID();
+        when(repository.findExistingComment(parentId)).thenReturn(Optional.of(
+            existing(parentId, postId, UUID.randomUUID(), null, null, new UUID[0], "ACTIVE")));
+        when(repository.isCommentVisible(parentId, callerId)).thenReturn(false);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+            service.create(postId, callerId, new CommentCreateRequest("x", parentId)));
+
+        assertTrue(ex.getMessage().toLowerCase().contains("not found"));
+        verify(repository, never()).createComment(any(), any(), any(), any(), any(), any());
     }
 
     @Test

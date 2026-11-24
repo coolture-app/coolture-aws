@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ALL_STACKS=(auth backend embeddings waf frontend)
+ALL_STACKS=(auth backend embeddings geocoder scraper waf frontend)
 WAF_REGION=us-east-1
+WORKER_MAX_ATTEMPTS=3
 
 usage() {
     cat <<EOF
 Usage: $0 [dev|staging|prod] [stack...]
 
 Builds and deploys the stacks in dependency order. Stacks: ${ALL_STACKS[*]} (default: all)
-Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url), USER_EMBEDDING_SCHEDULE=true,
-  FRONTEND_DIR (default ../coolture-frontend)
+Optional env: CFN_ROLE_ARN, CORS_ALLOWED_ORIGINS (default: localhost for dev + the CloudFront url),
+  FRONTEND_DIR (default ../coolture-frontend), NO_GEOCODER=1 (frontend without /geo, as before deleting the geocoder stack),
+  SCRAPER_SCHEDULE=true|false and SCRAPER_END_DATE=2027-06-30T00:00:00Z (both keep their deployed values when unset),
+  PPR_SCHEDULE=true|false (PageRank's schedule; keeps its deployed value when unset),
+  GEOCODER_IMAGE_ID=ami-... (the geocoder's AMI; keeps the running instance's when unset, and a new one replaces the instance),
+  FEED_WEIGHTS=default|ppr=0|... (the feed's weights, FeedConfig; keeps its deployed value when unset)
 EOF
 }
 
@@ -52,7 +57,9 @@ template_for() {
     case "$1" in
         auth) echo aws/auth.yaml ;;
         backend) echo aws/backend.yaml ;;
-        embeddings) echo embedding-workers/template.yaml ;;
+        embeddings) echo recommender/template.yaml ;;
+        geocoder) echo aws/geocoder.yaml ;;
+        scraper) echo aws/scraper.yaml ;;
         waf) echo aws/waf.yaml ;;
         frontend) echo aws/frontend.yaml ;;
     esac
@@ -65,6 +72,32 @@ region_for() {
 stack_output() {
     aws cloudformation describe-stacks --stack-name "$1" --region "${3:-$AWS_DEFAULT_REGION}" \
         --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" --output text
+}
+
+cloudfront_prefix_list() {
+    aws ec2 describe-managed-prefix-lists --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing \
+        --query 'PrefixLists[0].PrefixListId' --output text
+}
+
+# The running instance's AMI, or the latest on the first deploy. GEOCODER_IMAGE_ID takes a newer one on purpose.
+geocoder_image() {
+    local instance
+    [[ -n "${GEOCODER_IMAGE_ID:-}" ]] && { echo "$GEOCODER_IMAGE_ID"; return 0; }
+    instance="$(stack_output "coolture-geocoder-$ENVIRONMENT" InstanceId 2> /dev/null | tr -d '\r')" || instance=""
+    if [[ -n "$instance" && "$instance" != None ]]; then
+        aws ec2 describe-instances --instance-ids "$instance" --query 'Reservations[0].Instances[0].ImageId' --output text | tr -d '\r'
+    else
+        aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 \
+            --query Parameter.Value --output text | tr -d '\r'
+    fi
+}
+
+geocoder_stack() {
+    local name="coolture-geocoder-$ENVIRONMENT" origin
+    [[ "${NO_GEOCODER:-}" == 1 ]] && return 0
+    origin="$(stack_output "$name" VpcOriginId 2> /dev/null)" || return 0
+    [[ -n "$origin" && "$origin" != None ]] && echo "$name"
+    return 0
 }
 
 frontend_url() {
@@ -88,17 +121,30 @@ overrides_for() {
             echo "Environment=$ENVIRONMENT FrontendUrl=\"$(frontend_url)\""
             ;;
         backend)
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\""
+            local weights
+            weights="${FEED_WEIGHTS:-$(stack_param backend FeedWeights 2> /dev/null || true)}"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK AuthStackName=coolture-auth-$ENVIRONMENT CorsAllowedOrigins=\"$(cors_origins)\" FeedWeights=\"${weights:-default}\""
             ;;
         embeddings)
-            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT UserEmbeddingScheduleEnabled=${USER_EMBEDDING_SCHEDULE:-false}"
+            local enabled
+            enabled="${PPR_SCHEDULE:-$(stack_param embeddings PprScheduleEnabled 2> /dev/null || true)}"
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK BackendStackName=coolture-backend-$ENVIRONMENT PprScheduleEnabled=${enabled:-false}"
+            ;;
+        geocoder)
+            echo "Environment=$ENVIRONMENT BaseStackName=$NETWORK_STACK CloudFrontPrefixListId=$(cloudfront_prefix_list) ImageId=$(geocoder_image)"
+            ;;
+        scraper)
+            local auth="coolture-auth-$ENVIRONMENT" enabled end_date
+            enabled="${SCRAPER_SCHEDULE:-$(stack_param scraper ScheduleEnabled 2> /dev/null || true)}"
+            end_date="${SCRAPER_END_DATE-$(stack_param scraper EndDate 2> /dev/null || true)}"
+            echo "Environment=$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT GeocoderStackName=coolture-geocoder-$ENVIRONMENT UserPoolId=$(stack_output "$auth" UserPoolId) UserPoolClientId=$(stack_output "$auth" UserPoolClientId) ScheduleEnabled=${enabled:-false} EndDate=\"$end_date\""
             ;;
         frontend)
             local web_acl
             web_acl="$(stack_output "coolture-waf-$ENVIRONMENT" WebAclArn "$WAF_REGION" 2> /dev/null)" || web_acl=""
             [[ "$web_acl" == None ]] && web_acl=""
             [[ -z "$web_acl" ]] && echo "WARNING: no coolture-waf-$ENVIRONMENT stack in $WAF_REGION - frontend deploys without WAF" >&2
-            echo "Environment=$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT WebAclArn=\"$web_acl\""
+            echo "Environment=$ENVIRONMENT BackendStackName=coolture-backend-$ENVIRONMENT WebAclArn=\"$web_acl\" GeocoderStackName=\"$(geocoder_stack)\""
             ;;
     esac
 }
@@ -185,6 +231,54 @@ deploy_stack() {
     [[ "$stack" == embeddings ]] && deploy_args+=(--resolve-image-repos)
     [[ -n "$overrides" ]] && deploy_args+=(--parameter-overrides "$overrides")
     sam deploy "${deploy_args[@]}"
+
+    if [[ "$stack" == embeddings ]]; then
+        # Without kinds derived, every post would have none until edited.
+        invoke_worker embed-interests "selections will not reach recommendations"
+        invoke_worker derive-kinds "posts have no kinds"
+        embed_posts
+    fi
+    if [[ "$stack" == geocoder ]] && ! aws s3api head-object \
+        --bucket "$(stack_output "coolture-geocoder-$ENVIRONMENT" IndexBucketName)" --key photon/index.tar.gz > /dev/null 2>&1; then
+        echo "The geocoder has no index yet: make geo-index, then make geo-publish ENV=$ENVIRONMENT"
+    fi
+    if [[ "$stack" == scraper ]] && ! aws secretsmanager get-secret-value \
+        --secret-id "coolture-$ENVIRONMENT-scraper-bot" --query VersionId --output text > /dev/null 2>&1; then
+        echo "The scraper's bot has no password yet, so keep its schedule off. See \"On a schedule\" in scraper/README.md"
+    fi
+}
+
+# Leaves the worker's reply in WORKER_REPLY, empty when every attempt failed.
+invoke_worker() {
+    local action="$1" consequence="$2" response function_error attempt
+    response="$(mktemp)"
+    echo "==> [embeddings] $action"
+    for ((attempt = 1; attempt <= WORKER_MAX_ATTEMPTS; attempt++)); do
+        function_error="$(aws lambda invoke --function-name "coolture-$ENVIRONMENT-post-embedding" \
+            --region "$AWS_DEFAULT_REGION" --cli-binary-format raw-in-base64-out --cli-read-timeout 150 \
+            --query FunctionError --output text --payload "{\"action\":\"$action\"}" "$response")" || function_error=Failed
+        WORKER_REPLY="$(cat "$response")"
+        echo "$WORKER_REPLY"
+        [[ "$function_error" == None ]] && return 0
+    done
+    WORKER_REPLY=""
+    # A warning, not a stop: the actions can be sent again, and waf and frontend still need deploying.
+    echo "Warning: the worker's $action failed: $consequence. Send {\"action\":\"$action\"} to coolture-$ENVIRONMENT-post-embedding again by hand." >&2
+}
+
+# One run stops before the worker's timeout and says how many posts are left.
+embed_posts() {
+    local embedded left
+    while :; do
+        invoke_worker embed-posts "posts without a current vector are neutral in the feed and have no kinds"
+        embedded="$(sed -n 's/.*"posts": *\([0-9]*\).*/\1/p' <<< "$WORKER_REPLY")"
+        left="$(sed -n 's/.*"left": *\([0-9]*\).*/\1/p' <<< "$WORKER_REPLY")"
+        [[ "${left:-0}" -gt 0 ]] || return 0
+        if [[ "${embedded:-0}" -eq 0 ]]; then
+            echo "Warning: embed-posts embedded nothing and $left post(s) are left. Check the worker's log, then send {\"action\":\"embed-posts\"} again by hand." >&2
+            return 0
+        fi
+    done
 }
 
 stack_param() {

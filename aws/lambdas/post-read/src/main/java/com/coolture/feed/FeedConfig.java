@@ -1,0 +1,114 @@
+package com.coolture.feed;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Every value the feed depends on. Only the weights can be overridden, with FEED_WEIGHTS, for example
+ * "affinity=0.4,jitter=0". A weight of 0 switches that signal off. FEED_WEIGHTS is never a request parameter.
+ * notForMe is how much affinity a post loses at most for being like what the viewer marked "Nie dla mnie" (FeedScorer).
+ */
+public record FeedConfig(double affinity, double proximity, double time, double popularity, double jitter,
+                         double notForMe, double ppr) {
+
+    public static final FeedConfig DEFAULTS = new FeedConfig(0.65, 0.15, 0.10, 0.10, 0.10, 0.5, 0.10);
+
+    /**
+     * Used for a signal that is missing. When the viewer is the one missing it, it's the same for every post, so it
+     * can't change the order.
+     */
+    public static final double NEUTRAL = 0.5;
+    /**
+     * The part of the cosine between the viewer's vector and a post, both with their averages taken out (UserVector),
+     * that affinity spreads over 0 to 1. That cosine is 0 for a typical post, so NEUTRAL stays a typical post, and with
+     * sdadas/mmlw-roberta-base it rarely leaves ±0.3 for anyone. A narrower band lets several good fits reach 1, where
+     * jitter picks between them.
+     */
+    public static final double AFFINITY_LOW = -0.45;
+    public static final double AFFINITY_HIGH = 0.45;
+    /**
+     * A post starts losing affinity for "Nie dla mnie" once its cosine to a marked post, both with the post average
+     * taken out, passes this: the p95 between two posts with this model, so only a post closer than nearly every pair
+     * counts as like the marked one.
+     */
+    public static final double NOT_FOR_ME_FROM = 0.206;
+    /** How many of the viewer's newest marks a post is compared with, which bounds the query. */
+    public static final int NOT_FOR_ME_MARKS = 100;
+    /**
+     * The model the constants above were measured with, so measure them again if it changes. The viewer's vector is
+     * built from this model's vectors only.
+     */
+    public static final String EMBEDDING_MODEL = "sdadas/mmlw-roberta-base";
+
+    /**
+     * How the viewer's vector is built (UserVector). Starting values, for the evaluation to tune. Only the stances
+     * named here count, so "Nie dla mnie" stays out of the vector.
+     */
+    public static final Map<String, Double> STANCE_WEIGHTS = Map.of("LIKE", 1.0, "INTERESTED", 1.5, "TAKES_PART", 2.0);
+    public static final double INTEREST_CATEGORY_WEIGHT = 0.25;
+    /** A picked kind of event, beside a picked interest's 1. */
+    public static final double KIND_WEIGHT = 1.0;
+    public static final double INTEREST_SHARE_MIN = 0.2;
+    public static final double INTEREST_DECAY = 5;
+    /** A stance this many days old counts half, in the vector, in engagement and as a mark, so recent taste leads. */
+    public static final double STANCE_HALF_LIFE_DAYS = 14;
+    public static final int STANCE_MAX_AGE_DAYS = 112;
+    public static final double PROXIMITY_SCALE_METERS = 20_000;
+    public static final double TIME_SCALE_DAYS = 30;
+    /**
+     * The most time can give a standing event (EventTime.isStanding), so a permanent exhibition can't rank like
+     * tonight's concert for months. A cap, not a penalty: a strong match still comes first.
+     */
+    public static final double STANDING_TIME_CAP = 0.3;
+    public static final int POPULARITY_CAP = 100;
+
+    public static final int QUERY_TIMEOUT_SECONDS = 5;
+    /**
+     * A PageRank run counts for a session once it finished this long before asOf: clock skew between this Lambda and
+     * the database, and the commit after a run is stamped finished.
+     */
+    public static final int PPR_RUN_MARGIN_SECONDS = 60;
+    /**
+     * An older run counts as none, and every post gets NEUTRAL for PageRank: its scores may still carry friendships,
+     * blocks and sharing people have changed since. Long enough to outlast a few failed scheduled runs.
+     */
+    public static final int PPR_RUN_MAX_AGE_HOURS = 24;
+
+    public static FeedConfig fromEnvironment() {
+        return parse(System.getenv("FEED_WEIGHTS"));
+    }
+
+    static FeedConfig parse(String raw) {
+        // sam local can only override declared variables, so the template declares "default".
+        if (raw == null || raw.isBlank() || "default".equalsIgnoreCase(raw.trim())) {
+            return DEFAULTS;
+        }
+        try {
+            Map<String, Double> weights = new HashMap<>(Map.of(
+                "affinity", DEFAULTS.affinity,
+                "proximity", DEFAULTS.proximity,
+                "time", DEFAULTS.time,
+                "popularity", DEFAULTS.popularity,
+                "jitter", DEFAULTS.jitter,
+                "notForMe", DEFAULTS.notForMe,
+                "ppr", DEFAULTS.ppr));
+            for (String entry : raw.split(",")) {
+                String[] pair = entry.split("=", 2);
+                String name = pair[0].trim();
+                if (pair.length != 2 || !weights.containsKey(name)) {
+                    throw new IllegalArgumentException("unknown weight '" + entry + "'");
+                }
+                double value = Double.parseDouble(pair[1].trim());
+                if (!(value >= 0) || Double.isInfinite(value)) {
+                    throw new IllegalArgumentException("bad weight '" + entry + "'");
+                }
+                weights.put(name, value);
+            }
+            return new FeedConfig(weights.get("affinity"), weights.get("proximity"), weights.get("time"),
+                weights.get("popularity"), weights.get("jitter"), weights.get("notForMe"), weights.get("ppr"));
+        } catch (RuntimeException e) {
+            System.err.println("Invalid FEED_WEIGHTS, using the defaults: " + e.getMessage());
+            return DEFAULTS;
+        }
+    }
+}

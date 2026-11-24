@@ -3,7 +3,6 @@ package com.coolture.common.dto;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -18,22 +17,28 @@ public record PostDetailDto(
     EventLocationDto location,
     String title,
     String description,
+    /** The page the scraper imported the post from. Not for display: the app shows links. */
     String eventUrl,
+    /** Null when the post has none. */
+    List<PostLinkDto> links,
     Instant startsAt,
     Instant endsAt,
-    List<String> tags,
+    boolean openEnded,
     int positiveReactionCount,
-    int negativeReactionCount,
     int participantCount,
+    int interestedCount,
+    int goingCount,
     int commentsCount,
     PostType type,
     PostStatus status,
-    PostVisibility visibility,
+    /** Kinds of event, best first. Null until derived. */
+    List<String> kinds,
     Instant createdAt,
     Instant lastModifiedAt,
     Instant deletedAt,
     MediaResourceDto coverMedia,
     List<PostMediaDto> media,
     ReactionType myReaction,
-    ParticipationType myParticipation
+    ParticipationType myParticipation,
+    FriendStancesDto friendStances
 ) {}

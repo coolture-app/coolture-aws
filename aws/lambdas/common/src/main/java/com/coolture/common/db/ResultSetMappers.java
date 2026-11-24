@@ -2,9 +2,12 @@ package com.coolture.common.db;
 
 import com.coolture.common.dto.CommentSummaryDto;
 import com.coolture.common.dto.EventLocationDto;
+import com.coolture.common.dto.FriendStancesDto;
 import com.coolture.common.dto.GeoPointDto;
 import com.coolture.common.dto.MediaResourceDto;
 import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostDetailDto;
+import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.PostMediaDto;
 import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.dto.enums.CommentStatus;
@@ -13,16 +16,17 @@ import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.json.JsonUtils;
 import com.coolture.common.storage.MediaUrls;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,16 +42,23 @@ public final class ResultSetMappers {
         return ts != null ? ts.toInstant() : null;
     }
 
+    /** A post's links column, null when it has none. */
+    public static List<PostLinkDto> mapLinks(ResultSet rs) throws SQLException {
+        String json = rs.getString("links");
+        if (json == null) {
+            return null;
+        }
+        try {
+            List<PostLinkDto> links = JsonUtils.mapper().readValue(json, new TypeReference<>() {});
+            return links.isEmpty() ? null : links;
+        } catch (JsonProcessingException e) {
+            throw new SQLException("Unreadable links: " + json, e);
+        }
+    }
+
     public static <T extends Enum<T>> T mapEnum(ResultSet rs, String column, Class<T> enumClass) throws SQLException {
         String value = rs.getString(column);
         return value != null ? Enum.valueOf(enumClass, value) : null;
-    }
-
-    public static List<String> mapTags(ResultSet rs) throws SQLException {
-        Array tagsArray = rs.getArray("tags");
-        return tagsArray != null
-            ? List.of((String[]) tagsArray.getArray())
-            : Collections.emptyList();
     }
 
     /**
@@ -84,26 +95,6 @@ public final class ResultSetMappers {
     }
 
     /**
-     * Maps cover media from ResultSet if present.
-     * Expects cover columns: cover_id, cover_purpose, cover_mime_type, cover_size_bytes, cover_status, cover_created_at, cover_deleted_at
-     */
-    public static MediaResourceDto mapCoverMedia(ResultSet rs) throws SQLException {
-        UUID coverId = (UUID) rs.getObject("cover_id");
-        if (coverId == null) return null;
-
-        return new MediaResourceDto(
-            coverId,
-            mapEnum(rs, "cover_purpose", MediaPurpose.class),
-            rs.getString("cover_mime_type"),
-            rs.getObject("cover_size_bytes") != null ? rs.getLong("cover_size_bytes") : null,
-            mapEnum(rs, "cover_status", MediaStatus.class),
-            MediaUrls.presign(rs.getString("cover_object_key")),
-            mapInstant(rs, "cover_created_at"),
-            mapInstant(rs, "cover_deleted_at")
-        );
-    }
-
-    /**
      * Maps a ResultSet row to EventLocationDto.
      * Expects columns: loc_id, country_code, venue_name, building_num, street, postal_code, city, latitude, longitude.
      */
@@ -112,7 +103,6 @@ public final class ResultSetMappers {
         if (locId == null) return null;
 
         return new EventLocationDto(
-            locId,
             rs.getString("country_code"),
             rs.getString("venue_name"),
             rs.getString("building_num"),
@@ -122,8 +112,7 @@ public final class ResultSetMappers {
             new GeoPointDto(
                 rs.getDouble("latitude"),
                 rs.getDouble("longitude")
-            ),
-            null
+            )
         );
     }
 
@@ -142,8 +131,15 @@ public final class ResultSetMappers {
             mapEnum(rs, "status", MediaStatus.class),
             MediaUrls.presign(rs.getString("object_key")),
             mapInstant(rs, "created_at"),
-            mapInstant(rs, "deleted_at")
+            mapInstant(rs, "deleted_at"),
+            mapInteger(rs, "width"),
+            mapInteger(rs, "height")
         );
+    }
+
+    private static Integer mapInteger(ResultSet rs, String column) throws SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
     }
 
     /**
@@ -152,8 +148,7 @@ public final class ResultSetMappers {
     public static PostMediaDto mapPostMedia(ResultSet rs) throws SQLException {
         return new PostMediaDto(
             mapMediaResource(rs, "media_id"),
-            rs.getInt("position"),
-            rs.getBoolean("is_cover")
+            rs.getInt("position")
         );
     }
 
@@ -163,6 +158,12 @@ public final class ResultSetMappers {
 
     public static ParticipationType mapMyParticipation(ResultSet rs) throws SQLException {
         return mapEnum(rs, "my_participation", ParticipationType.class);
+    }
+
+    /** A text array as a list, null when SQL NULL. */
+    public static java.util.List<String> mapStringList(ResultSet rs, String column) throws SQLException {
+        Array array = rs.getArray(column);
+        return array == null ? null : java.util.List.of((String[]) array.getArray());
     }
 
     /**
@@ -217,9 +218,16 @@ public final class ResultSetMappers {
         );
     }
 
-    /**
-     * Maps a full PostCardDto directly from a single ResultSet row.
-     */
+    /** Every row left, as cards. */
+    public static List<PostCardDto> mapPostCards(ResultSet rs) throws SQLException {
+        List<PostCardDto> cards = new java.util.ArrayList<>();
+        while (rs.next()) {
+            cards.add(mapPostCard(rs));
+        }
+        return cards;
+    }
+
+    /** A card with no photos yet: PostCardDto.withPhotos adds them and the cover. */
     public static PostCardDto mapPostCard(ResultSet rs) throws SQLException {
         return new PostCardDto(
             (UUID) rs.getObject("id"),
@@ -228,22 +236,58 @@ public final class ResultSetMappers {
             rs.getString("title"),
             rs.getString("description"),
             rs.getString("event_url"),
+            mapLinks(rs),
             mapInstant(rs, "starts_at"),
             mapInstant(rs, "ends_at"),
-            mapTags(rs),
+            rs.getBoolean("open_ended"),
             rs.getInt("positive_reaction_count"),
-            rs.getInt("negative_reaction_count"),
             rs.getInt("participant_count"),
+            rs.getInt("interested_count"),
+            rs.getInt("going_count"),
             rs.getInt("comments_count"),
             mapEnum(rs, "type", PostType.class),
             mapEnum(rs, "status", PostStatus.class),
-            mapEnum(rs, "visibility", PostVisibility.class),
             mapInstant(rs, "created_at"),
             mapInstant(rs, "last_modified_at"),
             mapInstant(rs, "deleted_at"),
-            mapCoverMedia(rs),
+            null,
             mapMyReaction(rs),
-            mapMyParticipation(rs)
+            mapMyParticipation(rs),
+            null,
+            null
+        );
+    }
+
+    /** The cover is the first photo. */
+    public static PostDetailDto mapPostDetail(ResultSet rs, List<PostMediaDto> photos, FriendStancesDto friendStances)
+            throws SQLException {
+        return new PostDetailDto(
+            (UUID) rs.getObject("id"),
+            mapUserSummary(rs),
+            mapEventLocation(rs),
+            rs.getString("title"),
+            rs.getString("description"),
+            rs.getString("event_url"),
+            mapLinks(rs),
+            mapInstant(rs, "starts_at"),
+            mapInstant(rs, "ends_at"),
+            rs.getBoolean("open_ended"),
+            rs.getInt("positive_reaction_count"),
+            rs.getInt("participant_count"),
+            rs.getInt("interested_count"),
+            rs.getInt("going_count"),
+            rs.getInt("comments_count"),
+            mapEnum(rs, "type", PostType.class),
+            mapEnum(rs, "status", PostStatus.class),
+            mapStringList(rs, "kinds"),
+            mapInstant(rs, "created_at"),
+            mapInstant(rs, "last_modified_at"),
+            mapInstant(rs, "deleted_at"),
+            photos.isEmpty() ? null : photos.get(0).media(),
+            photos,
+            mapMyReaction(rs),
+            mapMyParticipation(rs),
+            friendStances
         );
     }
 }

@@ -3,6 +3,7 @@ set -euo pipefail
 
 TEMPLATE="${TEMPLATE:-.aws-sam/embeddings/template.yaml}"
 BATCH_SIZE="${BATCH_SIZE:-50}"
+DOCKERFILE=recommender/post-embedding/Dockerfile
 
 psql_query() {
     docker compose exec -T postgres psql -U coolture_admin -d coolture -At -v ON_ERROR_STOP=1 -c "$1"
@@ -11,14 +12,19 @@ psql_query() {
 if [[ -n "${POST_ID:-}" ]]; then
     post_ids=("$POST_ID")
 else
-    stale_filter="AND (pe.post_id IS NULL OR p.last_modified_at > pe.updated_at)"
+    # The image labels its vectors with this value, so a post with any other label, or none, holds no current vector.
+    model="$(sed -n 's/^ARG EMBEDDING_MODEL=//p' "$DOCKERFILE")"
+    [[ -n "$model" ]] || { echo "No EMBEDDING_MODEL in $DOCKERFILE." >&2; exit 1; }
+    stale_filter="AND (pe.model IS DISTINCT FROM '$model' OR p.last_modified_at > pe.updated_at)"
     [[ -n "${ALL:-}" ]] && stale_filter=""
-    mapfile -t post_ids < <(psql_query "
+    # Assigned first, because set -e can't see a command that fails inside <(...).
+    stale_posts="$(psql_query "
         SELECT p.id
         FROM posts p
         LEFT JOIN post_embeddings pe ON pe.post_id = p.id
         WHERE p.status <> 'DELETED' AND p.deleted_at IS NULL $stale_filter
-        ORDER BY p.created_at")
+        ORDER BY p.created_at")"
+    mapfile -t post_ids < <(printf '%s' "$stale_posts")
 fi
 
 if [[ ${#post_ids[@]} -eq 0 ]]; then
@@ -53,14 +59,14 @@ for ((i = 0; i < ${#post_ids[@]}; i += BATCH_SIZE)); do
         continue
     fi
 
-    result="$(sam local invoke PostEmbeddingFunction --template-file "$TEMPLATE" --event "$event_file")"
+    result="$(sam local invoke PostEmbeddingFunction --template-file "$TEMPLATE" --add-host host.docker.internal:host-gateway --event "$event_file")"
     echo "$result"
-    if grep -q '"itemIdentifier"' <<< "$result"; then
+    if grep -qE '"itemIdentifier"|"errorMessage"' <<< "$result"; then
         failed=1
     fi
 done
 
 if [[ $failed -ne 0 ]]; then
-    echo "Some posts failed to embed (see itemIdentifier above)." >&2
+    echo "Some posts failed to embed (see itemIdentifier or errorMessage above)." >&2
     exit 1
 fi

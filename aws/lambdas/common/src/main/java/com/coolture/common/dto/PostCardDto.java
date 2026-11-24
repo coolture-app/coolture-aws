@@ -3,7 +3,6 @@ package com.coolture.common.dto;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -18,21 +17,43 @@ public record PostCardDto(
     EventLocationDto location,
     String title,
     String description,
+    /** The page the scraper imported the post from. Not for display: the app shows links. */
     String eventUrl,
+    /** Null when the post has none. */
+    List<PostLinkDto> links,
     Instant startsAt,
     Instant endsAt,
-    List<String> tags,
+    /** No end date: endsAt is null and the event never ends (EventTime). */
+    boolean openEnded,
     int positiveReactionCount,
-    int negativeReactionCount,
     int participantCount,
+    int interestedCount,
+    int goingCount,
     int commentsCount,
     PostType type,
     PostStatus status,
-    PostVisibility visibility,
     Instant createdAt,
     Instant lastModifiedAt,
     Instant deletedAt,
+    /** The first of photos. */
     MediaResourceDto coverMedia,
     ReactionType myReaction,
-    ParticipationType myParticipation
-) {}
+    ParticipationType myParticipation,
+    /** Every photo, cover first, at most PostLimits.MAX_PHOTOS. Null when the post has none. */
+    List<MediaResourceDto> photos,
+    FriendStancesDto friendStances
+) {
+    public PostCardDto withPhotos(List<MediaResourceDto> newPhotos) {
+        List<MediaResourceDto> all = newPhotos == null || newPhotos.isEmpty() ? null : newPhotos;
+        return new PostCardDto(id, author, location, title, description, eventUrl, links, startsAt, endsAt, openEnded,
+            positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status,
+            createdAt, lastModifiedAt, deletedAt, all == null ? null : all.getFirst(), myReaction, myParticipation,
+            all, friendStances);
+    }
+
+    public PostCardDto withFriendStances(FriendStancesDto stances) {
+        return new PostCardDto(id, author, location, title, description, eventUrl, links, startsAt, endsAt, openEnded,
+            positiveReactionCount, participantCount, interestedCount, goingCount, commentsCount, type, status,
+            createdAt, lastModifiedAt, deletedAt, coverMedia, myReaction, myParticipation, photos, stances);
+    }
+}

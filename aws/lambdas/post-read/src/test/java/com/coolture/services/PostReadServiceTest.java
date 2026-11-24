@@ -1,13 +1,29 @@
 package com.coolture.services;
 
+import static com.coolture.feed.FeedRequests.page;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import com.coolture.repository.Upcoming;
+
+import com.coolture.common.dto.PostCardDto;
 import com.coolture.common.dto.PostFeedFilters;
+import com.coolture.common.pagination.CursorCodec;
+import com.coolture.common.pagination.CursorPage;
+import com.coolture.common.pagination.CursorPayload;
 import com.coolture.repository.PostReadRepository;
+import com.coolture.repository.PostSort;
+import com.coolture.repository.PostsCursor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,63 +43,45 @@ class PostReadServiceTest {
     }
 
     @Test
-    void getRecommendations_whenCallerIdNull_throwsSecurityException() {
-        assertThrows(SecurityException.class, () -> service.getRecommendations(null, null, 20));
-    }
-
-    @Test
-    void getRecommendations_whenValid_callsRepository() throws SQLException {
-        UUID callerId = UUID.randomUUID();
-        when(repository.findRecommendations(eq(callerId), isNull(), isNull(), eq(21)))
-            .thenReturn(List.of());
-
-        var result = service.getRecommendations(callerId, null, 20);
-
-        assertNotNull(result);
-        assertTrue(result.items().isEmpty());
-        verify(repository).findRecommendations(eq(callerId), isNull(), isNull(), eq(21));
-    }
-
-    @Test
     void getFeed_whenParticipationFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
-            List.of("INTERESTED"), null, null, 20, null
+            null, null, null, null, null, null, null, null, null, null,
+            List.of("INTERESTED"), null, null, 20, null, false, null, false, null
         );
 
-        assertThrows(SecurityException.class, () -> service.getFeed(null, filters, null, 20));
+        assertThrows(SecurityException.class, () -> service.getFeed(null, page(filters, null, 20)));
     }
 
     @Test
     void getFeed_whenInvalidParticipationType_throwsIllegalArgumentException() {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
-            List.of("INVALID_TYPE"), null, null, 20, null
+            null, null, null, null, null, null, null, null, null, null,
+            List.of("INVALID_TYPE"), null, null, 20, null, false, null, false, null
         );
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, filters, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, page(filters, null, 20)));
     }
 
     @Test
     void getFeed_whenReactionFilterWithoutCallerId_throwsSecurityException() {
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
-            null, "LIKE", null, 20, null
+            null, null, null, null, null, null, null, null, null, null,
+            null, "LIKE", null, 20, null, false, null, false, null
         );
 
-        assertThrows(SecurityException.class, () -> service.getFeed(null, filters, null, 20));
+        assertThrows(SecurityException.class, () -> service.getFeed(null, page(filters, null, 20)));
     }
 
     @Test
     void getFeed_whenInvalidReactionType_throwsIllegalArgumentException() {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
-            null, "SUPER_LIKE", null, 20, null
+            null, null, null, null, null, null, null, null, null, null,
+            null, "SUPER_LIKE", null, 20, null, false, null, false, null
         );
 
-        assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, filters, null, 20));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(callerId, page(filters, null, 20)));
     }
 
     @Test
@@ -100,88 +98,206 @@ class PostReadServiceTest {
     void getFeed_whenLimitNonPositive_clampsTo20(int limit) throws SQLException {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
-            null, null, null, limit, null
+            null, null, null, null, null, null, null, null, null, null,
+            null, null, null, limit, null, false, null, false, null
         );
 
         when(repository.findFeed(any(), any(), any(), any(), eq(21)))
             .thenReturn(List.of());
 
-        service.getFeed(callerId, filters, null, limit);
+        service.getFeed(callerId, page(filters, null, limit));
 
-        verify(repository).findFeed(eq(filters), eq(callerId), isNull(), isNull(), eq(21));
+        verify(repository).findFeed(eq(filters), eq(PostSort.RECENT), eq(callerId), isNull(), eq(21));
     }
 
     @Test
     void getFeed_whenLimitExceeds100_clampsTo100() throws SQLException {
         UUID callerId = UUID.randomUUID();
         PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 500, null
+            null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 500, null, false, null, false, null
         );
 
         when(repository.findFeed(any(), any(), any(), any(), eq(101)))
             .thenReturn(List.of());
 
-        service.getFeed(callerId, filters, null, 500);
+        service.getFeed(callerId, page(filters, null, 500));
 
-        verify(repository).findFeed(eq(filters), eq(callerId), isNull(), isNull(), eq(101));
+        verify(repository).findFeed(eq(filters), eq(PostSort.RECENT), eq(callerId), isNull(), eq(101));
     }
 
-    @Test
-    void listCountryCodes_callsRepository() throws SQLException {
-        when(repository.findAllCountryCodes()).thenReturn(List.of(new com.coolture.common.dto.CountryCodeDto("POL")));
-
-        var result = service.listCountryCodes();
-
-        assertEquals(1, result.size());
-        assertEquals("POL", result.get(0).code());
-        verify(repository).findAllCountryCodes();
-    }
-
-    @Test
-    void getById_whenFound_returnsDetail() throws SQLException {
-        UUID postId = UUID.randomUUID();
-        UUID callerId = UUID.randomUUID();
-        var detail = mock(com.coolture.common.dto.PostDetailDto.class);
-        when(repository.findById(postId, callerId)).thenReturn(Optional.of(detail));
-
-        var result = service.getById(postId, callerId);
-
-        assertNotNull(result);
-        assertEquals(detail, result);
-        verify(repository).findById(postId, callerId);
-    }
-
-    @Test
-    void getMapMarks_whenValid_callsRepository() throws SQLException {
-        UUID callerId = UUID.randomUUID();
-        PostFeedFilters filters = new PostFeedFilters(
-            null, null, null, null, null, null, null, null, null, null, null,
-            null, null, null, 20, null
+    /** NEAREST gets a position and STANCE_NEWEST a participation filter, which they need. */
+    private static PostFeedFilters sortedBy(String sortBy) {
+        boolean nearest = "NEAREST".equals(sortBy);
+        boolean stances = "STANCE_NEWEST".equals(sortBy);
+        return new PostFeedFilters(
+            null, null, null, null, null, null, null, nearest ? 54.35 : null, nearest ? 18.65 : null, null,
+            stances ? List.of("NOT_INTERESTED") : null, null, null, 20, sortBy, false, null, false, null
         );
-        var bounds = new com.coolture.common.dto.MapBoundsDto(
-            new com.coolture.common.dto.GeoPointDto(54.5, 18.0),
-            new com.coolture.common.dto.GeoPointDto(54.0, 19.0)
-        );
-        when(repository.findPostMarks(filters, bounds, callerId)).thenReturn(List.of());
-
-        var result = service.getMapMarks(callerId, filters, bounds);
-
-        assertNotNull(result);
-        verify(repository).findPostMarks(filters, bounds, callerId);
     }
 
     @Test
-    void listEventLocations_callsRepository() throws SQLException {
-        when(repository.findEventLocations(isNull(), isNull(), eq(21)))
-            .thenReturn(List.of());
+    void getFeed_whenStanceNewestHasNoParticipationTypes_throws() {
+        PostFeedFilters noStances = new PostFeedFilters(
+            null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, "STANCE_NEWEST", false, null, false, null
+        );
 
-        var result = service.listEventLocations(null, 20);
-
-        assertNotNull(result);
-        assertTrue(result.items().isEmpty());
-        verify(repository).findEventLocations(isNull(), isNull(), eq(21));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(noStances, null, 20)));
     }
+
+    @Test
+    void someoneElsesStances_goWithNeitherAReactionNorStanceNewest_onTheListOrTheMap() {
+        UUID friend = UUID.randomUUID();
+        PostFeedFilters withReaction = ofParticipant(friend, "RECENT", "LIKE");
+        PostFeedFilters newest = ofParticipant(friend, "STANCE_NEWEST", null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(withReaction, null, 20)));
+        assertThrows(IllegalArgumentException.class, () -> service.getMapMarks(UUID.randomUUID(), withReaction, null, false));
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(newest, null, 20)));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void ownStances_byParticipantId_sortByStanceNewest() throws SQLException {
+        UUID me = UUID.randomUUID();
+        PostFeedFilters filters = ofParticipant(me, "STANCE_NEWEST", null);
+        when(repository.findFeed(any(), any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        service.getFeed(me, page(filters, null, 20));
+
+        verify(repository).findFeed(eq(filters), eq(PostSort.STANCE_NEWEST), eq(me), isNull(), eq(21));
+    }
+
+    private static PostFeedFilters ofParticipant(UUID participant, String sortBy, String reaction) {
+        return new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            List.of("TAKES_PART"), reaction, null, 20, sortBy, false, null, false, participant);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"interested", "takes_part", "not_interested", "OTHER"})
+    void getFeed_whenAParticipationTypeIsNotInUppercase_throws(String type) {
+        PostFeedFilters filters = new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            List.of(type), null, null, 20, "RECENT", false, null, false, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(filters, null, 20)));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void getFeed_whenAReactionTypeIsNotInUppercase_throws() {
+        PostFeedFilters filters = new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            null, "like", null, 20, "RECENT", false, null, false, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(UUID.randomUUID(), page(filters, null, 20)));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void getFeed_whenNearestHasNoPosition_throws() {
+        PostFeedFilters noPosition = new PostFeedFilters(
+            null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, "NEAREST", false, null, false, null
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(noPosition, null, 20)));
+    }
+
+    private static PostCardDto card(int likes) {
+        Instant now = Instant.parse("2026-11-02T12:00:00.123456Z");
+        return new PostCardDto(UUID.randomUUID(), null, null, "t", null, null, null, now.plusSeconds(60), null, false,
+            likes, 0, 0, 0, 0, null, null, now, null, null, null, null, null, null, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"RECOMMENDED", "NONSENSE"})
+    void getFeed_whenSortIsUnknown_throws(String sortBy) {
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(sortedBy(sortBy), null, 20)));
+    }
+
+    @Test
+    void getFeed_whenCursorIsUnreadable_throws() {
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(sortedBy(null), "garbage", 20)));
+    }
+
+    @Test
+    void getFeed_whenCursorIsFromAnotherSort_throws() {
+        String popularCursor = PostsCursor.after(PostSort.POPULAR, card(3));
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(sortedBy("RECENT"), popularCursor, 20)));
+    }
+
+    @Test
+    void getFeed_whenCursorIsTheOldFormat_throws() {
+        String old = CursorCodec.encode(new CursorPayload(UUID.randomUUID(), Instant.now()));
+
+        assertThrows(IllegalArgumentException.class, () -> service.getFeed(null, page(sortedBy("RECENT"), old, 20)));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PostSort.class, mode = EnumSource.Mode.EXCLUDE, names = "UPCOMING")
+    void getFeed_nextCursorContinuesTheSameSortFromTheLastItem(PostSort sort) throws SQLException {
+        PostFeedFilters filters = sortedBy(sort.name());
+        List<PostCardDto> rows = List.of(card(9), card(5), card(1));
+        when(repository.findFeed(any(), eq(sort), any(), isNull(), eq(3))).thenReturn(rows);
+
+        UUID caller = UUID.randomUUID();
+        CursorPage<PostCardDto> page = service.getFeed(caller, page(filters, null, 2));
+
+        assertEquals(rows.subList(0, 2), page.items());
+        assertTrue(page.page().hasMore());
+
+        service.getFeed(caller, page(filters, page.page().nextCursor(), 2));
+
+        ArgumentCaptor<PostsCursor> cursor = ArgumentCaptor.forClass(PostsCursor.class);
+        verify(repository, times(2)).findFeed(any(), eq(sort), any(), cursor.capture(), eq(3));
+        PostCardDto last = rows.get(1);
+        assertEquals(new PostsCursor(sort, last.id(), sort == PostSort.RECENT ? last.createdAt() : null, null),
+            cursor.getValue());
+    }
+
+    /** A Popularne cursor from before Popularne counted stances held the like count too. */
+    @Test
+    void getFeed_popular_aCursorWithTheOldLikeCount_continuesFromItsPost() throws SQLException {
+        UUID last = UUID.randomUUID();
+        String old = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            ("{\"sort\":\"POPULAR\",\"id\":\"" + last + "\",\"likes\":4}").getBytes(StandardCharsets.UTF_8));
+
+        service.getFeed(null, page(sortedBy("POPULAR"), old, 20));
+
+        verify(repository).findFeed(any(), eq(PostSort.POPULAR), any(), eq(new PostsCursor(PostSort.POPULAR, last, null, null)), eq(21));
+    }
+
+    @Test
+    void getFeed_upcoming_continuesFromThePositionTheMergeReturned() throws SQLException {
+        PostFeedFilters filters = sortedBy("UPCOMING");
+        Upcoming.Position next = new Upcoming.Position(Instant.parse("2026-11-02T12:00:00Z"),
+            Instant.parse("2026-11-03T19:00:00Z"), UUID.randomUUID(), null, UUID.randomUUID(), 2);
+        when(repository.findUpcoming(any(), any(), any(), eq(2)))
+            .thenReturn(new Upcoming.Page(List.of(card(1), card(2)), true, next));
+
+        CursorPage<PostCardDto> page = service.getFeed(null, page(filters, null, 2));
+        assertTrue(page.page().hasMore());
+        service.getFeed(null, page(filters, page.page().nextCursor(), 2));
+
+        ArgumentCaptor<Upcoming.Position> at = ArgumentCaptor.forClass(Upcoming.Position.class);
+        verify(repository, times(2)).findUpcoming(any(), any(), at.capture(), eq(2));
+        assertEquals(0, at.getAllValues().getFirst().count());
+        assertNull(at.getAllValues().getFirst().datedId());
+        assertEquals(next, at.getAllValues().getLast());
+    }
+
+    @Test
+    void showsAllPastEvents_whenOptedInOrADateIsChosen() {
+        Instant date = Instant.parse("2026-11-02T12:00:00Z");
+        assertFalse(sortedBy(null).showsAllPastEvents());
+        assertTrue(new PostFeedFilters(null, null, null, null, null, null, null, null, null, null,
+            null, null, null, 20, null, true, null, false, null).showsAllPastEvents());
+        assertTrue(new PostFeedFilters(null, null, null, null, null, date, null, null, null, null,
+            null, null, null, 20, null, false, null, false, null).showsAllPastEvents());
+        assertTrue(new PostFeedFilters(null, null, null, null, null, null, date, null, null, null,
+            null, null, null, 20, null, false, null, false, null).showsAllPastEvents());
+    }
+
 }
 

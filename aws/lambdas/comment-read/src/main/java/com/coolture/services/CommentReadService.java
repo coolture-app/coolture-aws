@@ -34,15 +34,16 @@ public class CommentReadService {
 
         int effectiveLimit = clampLimit(limit);
         List<CommentSummaryDto> rows = (parentCommentId == null)
-            ? repository.findRootCommentsForPost(postId, cursorCreatedAt, cursorId, effectiveLimit + 1)
-            : findRepliesValidated(postId, parentCommentId, cursorCreatedAt, cursorId, effectiveLimit + 1);
+            ? repository.findRootCommentsForPost(postId, callerId, cursorCreatedAt, cursorId, effectiveLimit + 1)
+            : findRepliesValidated(postId, callerId, parentCommentId, cursorCreatedAt, cursorId, effectiveLimit + 1);
 
         return CursorPage.of(rows, effectiveLimit, CommentSummaryDto::id, CommentSummaryDto::createdAt);
     }
 
     private List<CommentSummaryDto> findRepliesValidated(
-            UUID postId, UUID parentId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
-        CommentReadRepository.CommentHeader parent = repository.findCommentHeader(parentId)
+            UUID postId, UUID callerId, UUID parentId, Instant cursorCreatedAt, UUID cursorId, int limit)
+                    throws SQLException {
+        CommentReadRepository.CommentHeader parent = repository.findCommentHeader(parentId, callerId)
             .orElseThrow(() -> new IllegalArgumentException(
                 "Comment with id '" + parentId + "' was not found"));
 
@@ -50,7 +51,7 @@ public class CommentReadService {
             throw new IllegalArgumentException(
                 "Comment with id '" + parentId + "' was not found");
         }
-        return repository.findRepliesForParent(parentId, cursorCreatedAt, cursorId, limit);
+        return repository.findRepliesForParent(parentId, callerId, cursorCreatedAt, cursorId, limit);
     }
 
     private int clampLimit(int limit) {

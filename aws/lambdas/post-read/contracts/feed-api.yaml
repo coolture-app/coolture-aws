@@ -1,0 +1,548 @@
+openapi: 3.0.3
+info:
+  title: Coolture feed and post lists
+  version: 1.0.0
+  description: >
+    Shapes of the home feed and the post lists. Behaviour that a schema can't express (feed rules, paging, past events,
+    errors) is in README.md next to this file. Read both. Change this file first, in its own pull request.
+servers:
+  - url: http://localhost:3000
+    description: Local stack. On AWS, the same paths are behind /api.
+security:
+  - {}
+  - bearerAuth: []
+tags:
+  - name: Lists
+paths:
+  /feed:
+    get:
+      tags: [Lists]
+      operationId: getFeed
+      summary: Home feed for guests and signed-in users
+      description: >
+        The first request starts a session and may send a location. Every later request sends the cursor, the limit and
+        the same filters again. The filters narrow which posts are ranked, with the same meaning as on /posts.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Latitude'
+        - $ref: '#/components/parameters/Longitude'
+        - $ref: '#/components/parameters/IncludePast'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/AuthorId'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Followed'
+        - $ref: '#/components/parameters/Kinds'
+        - $ref: '#/components/parameters/Kids'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/RadiusKm'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedPage'
+              examples:
+                ranked:
+                  summary: Ranked page with more to come
+                  value:
+                    mode: RANKED
+                    items: []
+                    page: {limit: 20, hasMore: true, nextCursor: eyJ2IjoxLCJrIjoiUiJ9}
+                fallback:
+                  summary: Ranking failed, upcoming order, last page
+                  value:
+                    mode: UPCOMING
+                    items: []
+                    page: {limit: 20, hasMore: false}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /posts:
+    get:
+      tags: [Lists]
+      operationId: getPosts
+      summary: Search, filters and sorted lists
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [RECENT, POPULAR, UPCOMING, PAST, NEAREST, STANCE_NEWEST]
+            default: RECENT
+          description: >
+            NEAREST needs latitude and longitude, and shows only posts with a place. STANCE_NEWEST needs participationTypes
+            and puts the viewer's newest of those stances first. The orders are in README.md.
+        - $ref: '#/components/parameters/IncludePast'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/AuthorId'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Followed'
+        - $ref: '#/components/parameters/Kinds'
+        - $ref: '#/components/parameters/Kids'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Latitude'
+        - $ref: '#/components/parameters/Longitude'
+        - $ref: '#/components/parameters/RadiusKm'
+        - {name: participationTypes, in: query, description: "Signed-in only. The viewer's own stances, or participantId's; NOT_INTERESTED (Nie dla mnie) is never shown to anyone else.", schema: {type: array, items: {$ref: '#/components/schemas/ParticipationType'}}, style: form, explode: true}
+        - name: participantId
+          in: query
+          schema: {type: string, format: uuid}
+          description: >
+            Signed-in only. Whose stances participationTypes reads, the viewer when left out. Someone else's need
+            participationTypes of INTERESTED or TAKES_PART only, and no reactionType or STANCE_NEWEST, else 400. They're
+            an empty list unless that person is the viewer's friend and shares their stances, as on cards.
+        - {name: reactionType, in: query, description: Signed-in only., schema: {$ref: '#/components/schemas/ReactionType'}}
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /posts/map:
+    get:
+      tags: [Lists]
+      operationId: getPostMarks
+      summary: Map markers. Takes the same filters as /posts, plus the map bounds. Only the parameters beyond /posts's are listed here.
+      parameters:
+        - {name: leftUpper.latitude, in: query, required: true, description: The view's north edge., schema: {type: number, format: double, minimum: -90, maximum: 90}}
+        - {name: leftUpper.longitude, in: query, required: true, description: The view's west edge., schema: {type: number, format: double, minimum: -180, maximum: 180}}
+        - {name: rightBottom.latitude, in: query, required: true, description: The view's south edge., schema: {type: number, format: double, minimum: -90, maximum: 90}}
+        - {name: rightBottom.longitude, in: query, required: true, description: The view's east edge., schema: {type: number, format: double, minimum: -180, maximum: 180}}
+        - $ref: '#/components/parameters/IncludePast'
+        - $ref: '#/components/parameters/RadiusKm'
+        - $ref: '#/components/parameters/Followed'
+        - $ref: '#/components/parameters/Kinds'
+        - $ref: '#/components/parameters/Kids'
+        - name: excludeMine
+          in: query
+          description: >
+            Signed-in only. Leaves out what the feed leaves out for this viewer: their own posts, and posts they reacted
+            to or take part in, so the map of the feed's tab matches its list.
+          schema: {type: boolean, default: false}
+      responses:
+        '200':
+          description: All markers inside the bounds, without paging.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PostMark'}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /posts/{id}:
+    get:
+      tags: [Lists]
+      operationId: getPost
+      summary: One post, with all its photos and kinds, for its page and its edit form
+      description: >
+        A deleted post is a 404, and so is a post whose author and viewer blocked one another. post-write's POST and
+        PATCH answer the same shape.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: The post.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PostDetail'}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /posts/{postId}/friends:
+    get:
+      tags: [Lists]
+      operationId: getPostFriends
+      summary: Every friend of the viewer who marked this post, for the list behind a card's friends line
+      description: >
+        The same friends as the post's friendStances, without the limit on names: mutual follows who marked the post
+        Biorę udział (going) or Interesuje mnie (interested) and share their stances. Newest stance first. Empty lists for
+        a guest. 404 for a deleted post, or when the viewer and the author blocked one another.
+      parameters:
+        - {name: postId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Both lists, each possibly empty.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PostFriends'}
+              example:
+                going:
+                  - {id: 00000000-0000-0000-0000-000000000002, username: anna_demo, firstName: Anna, lastName: Demo}
+                interested: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: The Cognito id token. No token means guest. A rejected token gets 401 or 403 from the gateway, never the guest view.
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: The nextCursor of the previous page, unchanged. Opaque, don't parse it. Unreadable values return 400.
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      description: Page size. Values above 100 are capped. Non-numeric values return 400.
+      schema: {type: integer, minimum: 1, default: 20}
+    Latitude:
+      name: latitude
+      in: query
+      description: >
+        Send together with longitude, rounded to 2 decimals. The centre of radiusKm and of NEAREST, and on /feed of
+        proximity (README.md).
+      schema: {type: number, format: double, minimum: -90, maximum: 90}
+    Longitude:
+      name: longitude
+      in: query
+      description: Send together with latitude. See latitude.
+      schema: {type: number, format: double, minimum: -180, maximum: 180}
+    RadiusKm:
+      name: radiusKm
+      in: query
+      description: Only posts with a place within this many km of latitude and longitude. Ignored without them.
+      schema: {type: number}
+    Q:
+      name: q
+      in: query
+      description: Words separated by spaces; any after the 8th are ignored. Every word must appear in the title, the
+        description, the city or the place's name, in any order, ignoring case and diacritics. A word of 5 or more letters
+        also matches its other Polish forms ("koncertu" finds "koncert").
+      schema: {type: string}
+    AuthorId:
+      name: authorId
+      in: query
+      schema: {type: string, format: uuid}
+    Status:
+      name: status
+      in: query
+      schema: {$ref: '#/components/schemas/PostStatus'}
+    Followed:
+      name: followed
+      in: query
+      description: >
+        Only posts by people the viewer follows, and posts a friend (a mutual follow) marked Interesuje mnie or Biorę
+        udział, unless that friend stopped sharing their stances. Nothing for a guest.
+      schema: {type: boolean, default: false}
+    Kinds:
+      name: kinds
+      in: query
+      description: >
+        Kinds of event as comma-separated keys from /dicts/interests (kinds=concerts,stage); a post matches any of them.
+        A post's kinds are derived from its text after it's saved, so for a few seconds a new post has none and matches
+        no kind. A key no post has matches nothing; a key that isn't lowercase letters and underscores is a 400.
+      schema: {type: string, pattern: '^[a-z_]{1,64}(,[a-z_]{1,64}){0,31}$'}
+    Kids:
+      name: kids
+      in: query
+      description: Only posts for children, whatever their other kinds, so kinds=concerts&kids=true gives kids' concerts.
+      schema: {type: boolean, default: false}
+    Type:
+      name: type
+      in: query
+      schema: {$ref: '#/components/schemas/PostType'}
+    From:
+      name: from
+      in: query
+      description: >
+        Only events running at some moment from this time on: their end is at or after it. Setting this turns the
+        past-events window off.
+      schema: {type: string, format: date-time}
+    To:
+      name: to
+      in: query
+      description: >
+        Only events running at some moment up to this time: their start is at or before it. Setting this turns the
+        past-events window off.
+      schema: {type: string, format: date-time}
+    IncludePast:
+      name: includePast
+      in: query
+      description: When false, ended events are hidden. UPCOMING puts them after every event to come.
+      schema: {type: boolean, default: false}
+  responses:
+    BadRequest:
+      description: Invalid input, including an unreadable cursor. The frontend restarts the list once.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: No such post, or it was deleted.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    ServerError:
+      description: The database or the Lambda failed. The frontend keeps what is shown and offers a retry.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    FeedMode:
+      type: string
+      description: >
+        How this page was ordered (README.md).
+      enum: [RANKED, UPCOMING]
+    FeedPage:
+      type: object
+      additionalProperties: false
+      required: [mode, items, page]
+      properties:
+        mode: {$ref: '#/components/schemas/FeedMode'}
+        items: {type: array, items: {$ref: '#/components/schemas/PostCard'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    PostPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/PostCard'}}
+        page: {$ref: '#/components/schemas/PageInfo'}
+    PageInfo:
+      type: object
+      additionalProperties: false
+      required: [limit, hasMore]
+      properties:
+        limit: {type: integer}
+        hasMore: {type: boolean, description: The only signal for the end of a list.}
+        nextCursor: {type: string, description: Present only when hasMore is true.}
+    PostCard:
+      type: object
+      additionalProperties: false
+      description: Fields without a value are left out of the JSON, not sent as null.
+      required:
+        - id
+        - author
+        - title
+        - startsAt
+        - openEnded
+        - positiveReactionCount
+        - participantCount
+        - interestedCount
+        - goingCount
+        - commentsCount
+        - type
+        - status
+        - createdAt
+      properties:
+        id: {type: string, format: uuid}
+        author: {$ref: '#/components/schemas/UserSummary'}
+        location: {$ref: '#/components/schemas/EventLocation'}
+        title: {type: string}
+        description: {type: string}
+        eventUrl: {type: string, description: "The page the scraper imported the post from, unique per author. Not for display."}
+        links:
+          type: array
+          description: >-
+            Links under the description, in the author's order (PostLimits.MAX_LINKS). Left out when the post has
+            none.
+          maxItems: 3
+          items: {$ref: '#/components/schemas/PostLink'}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        openEnded: {type: boolean, description: No end date. Such a post never has endsAt and never ends.}
+        positiveReactionCount: {type: integer}
+        participantCount: {type: integer, description: interestedCount and goingCount together.}
+        interestedCount: {type: integer, description: People who marked it Interesuje mnie.}
+        goingCount: {type: integer, description: People who marked it Biorę udział.}
+        commentsCount: {type: integer}
+        type: {$ref: '#/components/schemas/PostType'}
+        status: {$ref: '#/components/schemas/PostStatus'}
+        createdAt: {type: string, format: date-time}
+        lastModifiedAt: {type: string, format: date-time}
+        deletedAt: {type: string, format: date-time}
+        coverMedia: {$ref: '#/components/schemas/MediaResource'}
+        myReaction: {$ref: '#/components/schemas/ReactionType'}
+        myParticipation: {$ref: '#/components/schemas/ParticipationType'}
+        photos:
+          type: array
+          description: >
+            Every photo of the post, cover first, then in the post's order. At most 8, the limit a post can have
+            (PostLimits.MAX_PHOTOS). Left out when the post has none.
+          maxItems: 8
+          items: {$ref: '#/components/schemas/MediaResource'}
+        friendStances: {$ref: '#/components/schemas/FriendStances'}
+    PostDetail:
+      description: A card's fields, with every photo and its position in place of photos, and the kinds.
+      allOf:
+        - $ref: '#/components/schemas/PostCard'
+        - type: object
+          required: [media]
+          properties:
+            media:
+              type: array
+              description: In the post's order. Empty when it has none.
+              maxItems: 8
+              items: {$ref: '#/components/schemas/PostMedia'}
+            kinds:
+              type: array
+              description: Kinds of event, best first. Left out until derived.
+              items: {type: string}
+    PostMedia:
+      type: object
+      additionalProperties: false
+      required: [media, position]
+      properties:
+        media: {$ref: '#/components/schemas/MediaResource'}
+        position: {type: integer, minimum: 0}
+    PostMark:
+      type: object
+      additionalProperties: false
+      description: >
+        What a pin and its preview need. Only the description's start: the map loads every post in view at once, and
+        whole descriptions were over half of the answer. The viewer's own reaction and stance are left out for a guest
+        or when there's none.
+      required: [id, title, startsAt, openEnded, positiveReactionCount, interestedCount, goingCount, coordinates]
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        openEnded: {type: boolean, description: No end date. Such a post never has endsAt and never ends.}
+        coverMediaUrl: {type: string}
+        excerpt:
+          type: string
+          maxLength: 200
+          description: The description's first 200 characters, with runs of whitespace as one space. Left out when empty.
+        positiveReactionCount: {type: integer}
+        interestedCount: {type: integer, description: People who marked it Interesuje mnie.}
+        goingCount: {type: integer, description: People who marked it Biorę udział.}
+        coordinates: {$ref: '#/components/schemas/GeoPoint'}
+        venueName: {type: string}
+        city: {type: string}
+        kind: {type: string, description: "The kind the pin names: the first of the post's kinds among those asked for in `kinds`, else its first. Left out until derived."}
+        kinds:
+          type: array
+          description: Every kind of event the post has, best first. Left out until derived.
+          items: {type: string}
+        myReaction: {$ref: '#/components/schemas/ReactionType'}
+        myParticipation: {$ref: '#/components/schemas/ParticipationType'}
+        friendStances: {$ref: '#/components/schemas/FriendStances'}
+    FriendStances:
+      type: object
+      additionalProperties: false
+      description: >
+        The viewer's friends (mutual follows) who marked the post Biorę udział (going) or Interesuje mnie (interested)
+        and share their stances. Left out for a guest or when there are none; a stance nobody took is left out too.
+      properties:
+        going: {$ref: '#/components/schemas/FriendGroup'}
+        interested: {$ref: '#/components/schemas/FriendGroup'}
+    FriendGroup:
+      type: object
+      additionalProperties: false
+      required: [count, people]
+      properties:
+        count: {type: integer, minimum: 1, description: All friends with this stance.}
+        people:
+          type: array
+          description: The newest of them, at most 2 (Friends.NAMES_PER_STANCE).
+          minItems: 1
+          maxItems: 2
+          items: {$ref: '#/components/schemas/Friend'}
+    PostFriends:
+      type: object
+      additionalProperties: false
+      required: [going, interested]
+      properties:
+        going: {type: array, items: {$ref: '#/components/schemas/Friend'}}
+        interested: {type: array, items: {$ref: '#/components/schemas/Friend'}}
+    Friend:
+      type: object
+      additionalProperties: false
+      required: [id, username]
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        avatarUrl: {type: string}
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required: [id, username, followersCount, followingCount]
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        avatar: {$ref: '#/components/schemas/MediaResource'}
+        createdAt: {type: string, format: date-time}
+        followersCount: {type: integer}
+        followingCount: {type: integer}
+    EventLocation:
+      type: object
+      additionalProperties: false
+      required: [coordinates]
+      properties:
+        countryCode: {type: string, pattern: '^[A-Z]{2}$', description: 'ISO 3166-1 alpha-2, such as PL.'}
+        venueName: {type: string}
+        buildingNum: {type: string}
+        street: {type: string}
+        postalCode: {type: string}
+        city: {type: string}
+        coordinates: {$ref: '#/components/schemas/GeoPoint'}
+    GeoPoint:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude: {type: number, format: double}
+        longitude: {type: number, format: double}
+    PostLink:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {type: string, description: Starts with http:// or https://.}
+        label: {type: string, maxLength: 40, description: The author's name for it. Left out when none; the app shows the domain.}
+    MediaResource:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: {type: string, format: uuid}
+        purpose: {type: string, enum: [PROFILE_IMAGE, PROFILE_IMAGE_THUMBNAIL, EVENT_MEDIA]}
+        mimeType: {type: string}
+        sizeBytes: {type: integer, format: int64}
+        status: {type: string, enum: [PENDING, UPLOADED, ATTACHED, DELETED]}
+        url: {type: string}
+        createdAt: {type: string, format: date-time}
+        deletedAt: {type: string, format: date-time}
+        width: {type: integer, minimum: 1, description: 'Pixels. Missing for media uploaded before sizes were stored.'}
+        height: {type: integer, minimum: 1, description: 'Pixels. Sent together with width.'}
+    PostType: {type: string, enum: [ONLINE, OFFLINE]}
+    PostStatus: {type: string, enum: [ACTIVE, EDITED, DELETED]}
+    ReactionType: {type: string, enum: [LIKE]}
+    ParticipationType:
+      type: string
+      enum: [INTERESTED, TAKES_PART, NOT_INTERESTED]
+      description: NOT_INTERESTED is "Nie dla mnie", private to the viewer. It hides the post from /feed, pushes similar posts down, and isn't counted in participantCount.
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}

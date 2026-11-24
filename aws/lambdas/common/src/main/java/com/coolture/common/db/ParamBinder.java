@@ -116,33 +116,12 @@ public class ParamBinder {
     }
 
     /**
-     * Binds the same varchar array twice — for the pattern:
-     * (?::varchar[] IS NULL OR column && ?::varchar[])
-     */
-    public ParamBinder bindVarcharArrayFilterPair(String[] values) throws SQLException {
-        bindVarcharArray(values);
-        bindVarcharArray(values);
-        return this;
-    }
-
-    /**
      * Binds the same UUID twice — for the pattern:
      * (?::uuid IS NULL OR column = ?::uuid)
      */
     public ParamBinder bindUUIDFilterPair(UUID value) throws SQLException {
         stmt.setObject(index++, value);
         stmt.setObject(index++, value);
-        return this;
-    }
-
-    /**
-     * Binds the same String value three times — for the text search pattern:
-     * (?::varchar IS NULL OR LOWER(title) LIKE ... OR LOWER(description) LIKE ...)
-     */
-    public ParamBinder bindStringFilterTriple(String value) throws SQLException {
-        stmt.setString(index++, value);
-        stmt.setString(index++, value);
-        stmt.setString(index++, value);
         return this;
     }
 

@@ -10,19 +10,16 @@ import com.coolture.common.dto.enums.MediaStatus;
 import com.coolture.common.dto.enums.ParticipationType;
 import com.coolture.common.dto.enums.PostStatus;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
 import com.coolture.common.dto.enums.ReactionType;
 import com.coolture.common.storage.MediaUrls;
 import com.coolture.common.storage.S3StorageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -69,29 +66,6 @@ class ResultSetMappersTest {
         PostType result = ResultSetMappers.mapEnum(rs, "type", PostType.class);
 
         assertNull(result);
-    }
-
-    @Test
-    void mapTags_whenArrayPresent_returnsList() throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        Array sqlArray = mock(Array.class);
-        String[] tags = new String[]{"music", "festival"};
-        when(sqlArray.getArray()).thenReturn(tags);
-        when(rs.getArray("tags")).thenReturn(sqlArray);
-
-        List<String> result = ResultSetMappers.mapTags(rs);
-
-        assertEquals(List.of("music", "festival"), result);
-    }
-
-    @Test
-    void mapTags_whenArrayNull_returnsEmptyList() throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        when(rs.getArray("tags")).thenReturn(null);
-
-        List<String> result = ResultSetMappers.mapTags(rs);
-
-        assertTrue(result.isEmpty());
     }
 
     @Test
@@ -151,10 +125,8 @@ class ResultSetMappersTest {
     @Test
     void mapEventLocation_whenPresent_mapsFields() throws SQLException {
         ResultSet rs = mock(ResultSet.class);
-        UUID locId = UUID.randomUUID();
-
-        when(rs.getObject("loc_id")).thenReturn(locId);
-        when(rs.getString("country_code")).thenReturn("POL");
+        when(rs.getObject("loc_id")).thenReturn(UUID.randomUUID());
+        when(rs.getString("country_code")).thenReturn("PL");
         when(rs.getString("venue_name")).thenReturn("Tauron Arena");
         when(rs.getString("building_num")).thenReturn("7");
         when(rs.getString("street")).thenReturn("Lema");
@@ -166,8 +138,7 @@ class ResultSetMappersTest {
         EventLocationDto loc = ResultSetMappers.mapEventLocation(rs);
 
         assertNotNull(loc);
-        assertEquals(locId, loc.id());
-        assertEquals("POL", loc.countryCode());
+        assertEquals("PL", loc.countryCode());
         assertEquals("Tauron Arena", loc.venueName());
         assertEquals("Kraków", loc.city());
         assertEquals(50.068, loc.coordinates().latitude());
@@ -184,24 +155,6 @@ class ResultSetMappersTest {
         assertNull(loc);
     }
 
-    @Test
-    void mapCoverMedia_whenPresent_mapsFields() throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        UUID coverId = UUID.randomUUID();
-        when(rs.getObject("cover_id")).thenReturn(coverId);
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
-        when(rs.getString("cover_mime_type")).thenReturn("image/jpeg");
-        when(rs.getObject("cover_size_bytes")).thenReturn(2048L);
-        when(rs.getLong("cover_size_bytes")).thenReturn(2048L);
-        when(rs.getString("cover_status")).thenReturn("UPLOADED");
-
-        MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
-
-        assertNotNull(cover);
-        assertEquals(coverId, cover.id());
-        assertEquals(MediaPurpose.EVENT_COVER, cover.purpose());
-        assertEquals("image/jpeg", cover.mimeType());
-    }
 
     @Test
     void mapPostMedia_mapsCorrectly() throws SQLException {
@@ -211,14 +164,12 @@ class ResultSetMappersTest {
         when(rs.getObject("media_id")).thenReturn(mediaId);
         when(rs.getString("purpose")).thenReturn("EVENT_MEDIA");
         when(rs.getInt("position")).thenReturn(2);
-        when(rs.getBoolean("is_cover")).thenReturn(true);
 
         PostMediaDto pm = ResultSetMappers.mapPostMedia(rs);
 
         assertNotNull(pm);
         assertEquals(mediaId, pm.media().id());
         assertEquals(2, pm.position());
-        assertTrue(pm.isCover());
     }
 
     @Test
@@ -238,21 +189,6 @@ class ResultSetMappersTest {
         assertEquals("https://signed/avatar", user.avatar().url());
     }
 
-    @Test
-    void mapCoverMedia_withObjectKey_presignsUrl() throws SQLException {
-        S3StorageService storage = mock(S3StorageService.class);
-        when(storage.presignGet("posts/1/cover.jpg")).thenReturn("https://signed/cover");
-        MediaUrls.useStorage(storage);
-        ResultSet rs = mock(ResultSet.class);
-        when(rs.getObject("cover_id")).thenReturn(UUID.randomUUID());
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
-        when(rs.getString("cover_status")).thenReturn("UPLOADED");
-        when(rs.getString("cover_object_key")).thenReturn("posts/1/cover.jpg");
-
-        MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
-
-        assertEquals("https://signed/cover", cover.url());
-    }
 
     @Test
     void mapPostMedia_withObjectKey_presignsUrl() throws SQLException {
@@ -270,17 +206,6 @@ class ResultSetMappersTest {
         assertEquals("https://signed/photo", pm.media().url());
     }
 
-    @Test
-    void mapCoverMedia_withoutObjectKey_leavesUrlNull() throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        when(rs.getObject("cover_id")).thenReturn(UUID.randomUUID());
-        when(rs.getString("cover_purpose")).thenReturn("EVENT_COVER");
-        when(rs.getString("cover_status")).thenReturn("UPLOADED");
-
-        MediaResourceDto cover = ResultSetMappers.mapCoverMedia(rs);
-
-        assertNull(cover.url());
-    }
 
     @AfterEach
     void resetMediaUrls() {
@@ -304,16 +229,12 @@ class ResultSetMappersTest {
         when(rs.getString("event_url")).thenReturn("https://example.com");
         when(rs.getTimestamp("starts_at")).thenReturn(Timestamp.from(now));
         when(rs.getTimestamp("ends_at")).thenReturn(Timestamp.from(now.plusSeconds(3600)));
-        when(rs.getArray("tags")).thenReturn(null);
         when(rs.getInt("positive_reaction_count")).thenReturn(42);
-        when(rs.getInt("negative_reaction_count")).thenReturn(1);
         when(rs.getInt("participant_count")).thenReturn(10);
         when(rs.getInt("comments_count")).thenReturn(5);
         when(rs.getString("type")).thenReturn("ONLINE");
         when(rs.getString("status")).thenReturn("ACTIVE");
-        when(rs.getString("visibility")).thenReturn("PUBLIC");
         when(rs.getTimestamp("created_at")).thenReturn(Timestamp.from(now));
-        when(rs.getObject("cover_id")).thenReturn(null);
         when(rs.getString("my_reaction")).thenReturn("LIKE");
         when(rs.getString("my_participation")).thenReturn("TAKES_PART");
 
@@ -325,7 +246,6 @@ class ResultSetMappersTest {
         assertEquals(42, card.positiveReactionCount());
         assertEquals(PostType.ONLINE, card.type());
         assertEquals(PostStatus.ACTIVE, card.status());
-        assertEquals(PostVisibility.PUBLIC, card.visibility());
         assertEquals(ReactionType.LIKE, card.myReaction());
         assertEquals(ParticipationType.TAKES_PART, card.myParticipation());
     }

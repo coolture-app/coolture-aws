@@ -58,6 +58,13 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 7
+  FeedWeights:
+    Type: String
+    Default: default
+    Description: The feed's FEED_WEIGHTS, such as ppr=0 for PageRank's shadow runs (FeedConfig)
+    # FeedConfig.parse's names. It falls back to every default on a bad entry, so a typo would turn PageRank on.
+    AllowedPattern: '^(default|(affinity|proximity|time|popularity|jitter|notForMe|ppr)=[0-9]+(\.[0-9]+)?(,(affinity|proximity|time|popularity|jitter|notForMe|ppr)=[0-9]+(\.[0-9]+)?)*)$'
+    ConstraintDescription: default, or name=number pairs joined by commas, with FeedConfig's weight names
 
 Conditions:
   IsAWS: !Not [!Equals [!Ref Environment, 'local']]
@@ -242,7 +249,11 @@ Resources:
       CorsConfiguration:
         AllowOrigins: !Split [',', !Ref CorsAllowedOrigins]
         AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
-        AllowHeaders: [authorization, content-type]
+        # The local stack also takes the dev identity headers that the frontend's development build sends.
+        AllowHeaders: !If
+          - IsAWS
+          - [authorization, content-type]
+          - [authorization, content-type, x-user-id, x-user-name, x-user-role, x-anonymous]
         AllowCredentials: true
         MaxAge: 600
       DefaultRouteSettings:
@@ -304,7 +315,7 @@ Resources:
 
   EmbeddingRequestsBucket:
     Type: AWS::S3::Bucket
-    DependsOn: PostEmbeddingQueuePolicy
+    DependsOn: [PostEmbeddingQueuePolicy]
     Properties:
       BucketName: !Sub 'coolture-${Environment}-embedding-requests-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
@@ -316,7 +327,6 @@ Resources:
         Rules:
           - Id: ExpireEmbeddingRequests
             Status: Enabled
-            Prefix: posts/
             ExpirationInDays: 1
       NotificationConfiguration:
         QueueConfigurations:
@@ -393,7 +403,12 @@ Resources:
         UpdateUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}', Method: PATCH}}
         SetProfileImage: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/profile-image', Method: PUT}}
         DeleteProfileImage: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/profile-image', Method: DELETE}}
+        SetHome: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/home', Method: PUT}}
+        ClearHome: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/home', Method: DELETE}}
         GetMe: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /auth/me, Method: GET}}
+        GetInterestCatalog: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/interests, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetUserInterests: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/interests', Method: GET}}
+        ReplaceUserInterests: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/interests', Method: PUT}}
         GetFollowers: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/followers', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetFollowing: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/following', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         FollowUser: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/users/{userId}/follow', Method: POST}}
@@ -432,19 +447,10 @@ Resources:
         CreatePost: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts, Method: POST}}
         UpdatePost: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{id}', Method: PATCH}}
         DeletePost: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{id}', Method: DELETE}}
-        CreateEventLocation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /event-locations, Method: POST}}
-        UpdateEventLocation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/event-locations/{id}', Method: PATCH}}
-        DeleteEventLocation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/event-locations/{id}', Method: DELETE}}
-        CreateEventLocationAdmin: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /event-locations/admin, Method: POST}}
-        UpdateEventLocationAdmin: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/event-locations/admin/{id}', Method: PATCH}}
-        DeleteEventLocationAdmin: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/event-locations/admin/{id}', Method: DELETE}}
         UpsertReaction: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/reaction', Method: PUT}}
         DeleteReaction: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/reaction', Method: DELETE}}
         UpsertParticipation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/participation', Method: PUT}}
         DeleteParticipation: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/participation', Method: DELETE}}
-        CreateCountryCode: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/admin/country-codes, Method: POST}}
-        UpdateCountryCode: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/dicts/admin/country-codes/{code}', Method: PUT}}
-        DeleteCountryCode: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/dicts/admin/country-codes/{code}', Method: DELETE}}
 
   PostReadLogGroup:
     Type: AWS::Logs::LogGroup
@@ -464,19 +470,18 @@ Resources:
       Environment:
         Variables:
           DB_USERNAME: !If [IsAWS, !Ref DbReadUsername, !Ref DbUsername]
+          FEED_WEIGHTS: !Ref FeedWeights
       Policies:
         - !If [IsAWS, !Ref DbReadConnectPolicy, !Ref AWS::NoValue]
         - S3ReadPolicy:
             BucketName: !Ref MediaBucket
       Events:
         HealthCheck: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /actuator/health, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
-        GetCountryCodes: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /dicts/country-codes, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
-        GetRecommendations: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts/recommendations, Method: GET}}
+        GetHomeFeed: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /feed, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetMapMarks: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts/map, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetPostById: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{id}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
+        GetPostFriends: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/posts/{postId}/friends', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         GetFeed: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /posts, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
-        GetEventLocations: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /event-locations, Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
-        GetEventLocationsAdmin: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /event-locations/admin, Method: GET}}
 
   CommentReadLogGroup:
     Type: AWS::Logs::LogGroup
@@ -551,6 +556,32 @@ Resources:
         GetMedia: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/media/{mediaId}', Method: GET, Auth: {Authorizer: OptionalAuthorizer}}}
         DeleteMedia: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: '/media/{mediaId}', Method: DELETE}}
 
+  MediaCleanupLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coolture-${Environment}-media-cleanup'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Deletes the photos of posts that were never published, such as after a closed tab.
+  MediaCleanupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'coolture-${Environment}-media-cleanup'
+      LoggingConfig:
+        LogGroup: !Ref MediaCleanupLogGroup
+      CodeUri: lambdas/media/
+      Handler: com.coolture.media.MediaCleanupHandler::handleRequest
+      Timeout: 300
+      Policies:
+        - !If [IsAWS, !Ref DbConnectPolicy, !Ref AWS::NoValue]
+        - S3CrudPolicy:
+            BucketName: !Ref MediaBucket
+      Events:
+        Daily:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+
 Outputs:
   ApiEndpoint:
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
@@ -571,9 +602,6 @@ Outputs:
     Value: !Ref DbConnectPolicy
     Export:
       Name: !Sub '${AWS::StackName}-DbConnectPolicyArn'
-  DbSecretArn:
-    Condition: IsAWS
-    Value: !Ref DbSecret
   LambdaSecurityGroupId:
     Condition: IsAWS
     Value: !Ref LambdaSecurityGroup

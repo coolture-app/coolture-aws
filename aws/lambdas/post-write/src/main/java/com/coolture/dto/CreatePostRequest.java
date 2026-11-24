@@ -1,8 +1,9 @@
 package com.coolture.dto;
 
 import com.coolture.common.dto.EventLocationDto;
+import com.coolture.common.dto.PostLinkDto;
 import com.coolture.common.dto.enums.PostType;
-import com.coolture.common.dto.enums.PostVisibility;
+import com.coolture.common.validation.PostLimits;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.NotBlank;
@@ -22,8 +23,12 @@ public record CreatePostRequest(
     @Size(max = 1024, message = "Description must be shorter than 1024 characters")
     String description,
 
+    /** The page the scraper imported the post from. Unique per author. */
     @Size(max = 2048)
     String eventUrl,
+
+    @Size(max = PostLimits.MAX_LINKS, message = "A post has at most " + PostLimits.MAX_LINKS + " links")
+    List<@NotNull @Valid PostLinkDto> links,
 
     @NotNull(message = "startsAt is required")
     @Future(message = "startsAt must be in the future")
@@ -31,13 +36,11 @@ public record CreatePostRequest(
 
     Instant endsAt,
 
-    @Size(max = 10, message = "Maximum 10 tags allowed")
-    List<@Size(max = 32, message = "Tag length cannot exceed 32 characters") String> tags,
+    /** No end date ("do odwołania"). Can't come with an endsAt. */
+    Boolean openEnded,
 
     @NotNull(message = "type is required")
     PostType type,
-
-    PostVisibility visibility,
 
     @Valid
     EventLocationDto location,

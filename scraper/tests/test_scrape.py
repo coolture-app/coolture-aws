@@ -1,0 +1,381 @@
+import io
+import json
+import logging
+import sys
+from collections import Counter
+from datetime import date, datetime, timedelta, timezone
+
+import pytest
+import requests
+
+from api import MAX_PHOTOS, ApiError, Outcome
+from fakes import NOW, FakeGeocoder, FakeSite, listed, read_page
+from geocoder import Geocoder, GeocoderUnavailable, Place
+from scrape import DryRun, main, run
+from snapshot import Snapshot, is_complete
+
+class FakeApi:
+    def __init__(self, existing=(), failure=None, refuse_images=0):
+        self.existing = set(existing)
+        self.failure = failure
+        self.refuse_images = refuse_images
+        self.created = []
+
+    def existing_event_urls(self):
+        return self.existing
+
+    def create_post(self, post, images=(), category=None):
+        names = [image.file_name for image in images][self.refuse_images:]
+        self.created.append({**post, 'mediaIds': names} if names else post)
+        return Outcome(self.failure) if self.failure else Outcome(photos=len(names))
+
+
+def run_import(site, geocoder, api, limit=None, clock=lambda: NOW):
+    stats = Counter()
+    run(site, geocoder, api, stats, limit, clock)
+    return stats
+
+
+def test_new_event_is_created_with_coordinates():
+    api = FakeApi()
+
+    stats = run_import(FakeSite([listed(1)]), FakeGeocoder(), api)
+
+    assert stats['created'] == 1
+    assert stats['exact_location'] == 1
+    assert api.created[0]['location']['coordinates'] == {'latitude': 54.35, 'longitude': 18.65}
+
+
+def test_imported_event_is_not_opened_or_sent_again():
+    site = FakeSite([listed(1), listed(2)])
+    api = FakeApi(existing={listed(1).url})
+
+    stats = run_import(site, FakeGeocoder(), api)
+
+    assert stats['already_imported'] == 1
+    assert site.opened == [listed(2).url]
+    assert len(api.created) == 1
+
+
+def test_started_event_is_skipped_without_a_geocoder_request():
+    geocoder = FakeGeocoder()
+    site = FakeSite([listed(1)], {listed(1).url: read_page(start_date=date(2026, 11, 1))})
+
+    stats = run_import(site, geocoder, FakeApi())
+
+    assert stats['already_started'] == 1
+    assert geocoder.calls == 0
+
+
+def test_event_with_no_location_is_left_out():
+    api = FakeApi()
+
+    stats = run_import(FakeSite([listed(1)]), FakeGeocoder(place=None), api)
+
+    assert stats['no_location'] == 1
+    assert api.created == []
+
+
+def test_city_level_location_is_counted_apart():
+    stats = run_import(FakeSite([listed(1)]), FakeGeocoder(Place(54.3, 18.6, None, exact=False)), FakeApi())
+
+    assert stats['city_location'] == 1
+
+
+def test_online_event_needs_no_geocoder():
+    geocoder = FakeGeocoder()
+    site = FakeSite([listed(1)], {listed(1).url: read_page(online=True)})
+
+    stats = run_import(site, geocoder, FakeApi())
+
+    assert stats['online'] == 1
+    assert geocoder.calls == 0
+
+
+def test_event_with_no_date_is_left_out():
+    site = FakeSite([listed(1)], {listed(1).url: read_page(start_date=None)})
+
+    assert run_import(site, FakeGeocoder(), FakeApi())['unreadable'] == 1
+
+
+def test_listing_venue_reaches_the_geocoder():
+    geocoder = FakeGeocoder()
+    site = FakeSite([listed(1)], {listed(1).url: read_page(venue=None)})
+
+    run_import(site, geocoder, FakeApi())
+
+    assert geocoder.venues == ['Klub']
+
+
+def test_unreadable_page_is_skipped():
+    class Unreadable(FakeSite):
+        def event(self, listed):
+            return None
+
+    stats = run_import(Unreadable([listed(1)]), FakeGeocoder(), FakeApi())
+
+    assert stats['unreadable'] == 1
+
+
+def test_a_place_with_no_postal_code_is_still_sent():
+    api = FakeApi()
+
+    stats = run_import(FakeSite([listed(1)], {listed(1).url: read_page(postal_code=None)}),
+                       FakeGeocoder(Place(54.3, 18.6, None, exact=False)), api)
+
+    assert 'postalCode' not in api.created[0]['location']
+
+
+def test_postal_code_of_the_page_comes_before_the_hits():
+    api = FakeApi()
+
+    run_import(FakeSite([listed(1)]), FakeGeocoder(Place(54.3, 18.6, '80-002', exact=True)), api)
+
+    assert api.created[0]['location']['postalCode'] == '81-350'
+
+
+def test_postal_code_of_the_hit_fills_a_missing_one():
+    api = FakeApi()
+
+    run_import(FakeSite([listed(1)], {listed(1).url: read_page(postal_code=None)}),
+               FakeGeocoder(Place(54.3, 18.6, '80-002', exact=True)), api)
+
+    assert api.created[0]['location']['postalCode'] == '80-002'
+
+
+def test_an_event_that_starts_during_the_run_is_not_sent():
+    start = datetime(2026, 11, 5, 18, 0, tzinfo=timezone.utc)
+    moments = iter([start - timedelta(minutes=5), start + timedelta(minutes=1)])
+    api = FakeApi()
+
+    stats = run_import(FakeSite([listed(1), listed(2)]), FakeGeocoder(), api, clock=lambda: next(moments))
+
+    assert stats['created'] == 1
+    assert stats['already_started'] == 1
+
+
+def test_rejected_post_is_counted_and_the_run_goes_on():
+    api = FakeApi(failure='400: nope')
+
+    stats = run_import(FakeSite([listed(1), listed(2)]), FakeGeocoder(), api)
+
+    assert stats['rejected'] == 2
+    assert stats['created'] == 0
+
+
+def test_limit_stops_after_that_many_new_posts():
+    api = FakeApi()
+
+    run_import(FakeSite([listed(1), listed(2), listed(3)]), FakeGeocoder(), api, limit=2)
+
+    assert len(api.created) == 2
+
+
+def test_a_deadline_ends_the_run_between_two_events():
+    api, stats = FakeApi(), Counter()
+    moments = iter([NOW, NOW + timedelta(minutes=5), NOW + timedelta(minutes=13), NOW + timedelta(minutes=14)])
+
+    run(FakeSite([listed(1), listed(2), listed(3)]), FakeGeocoder(), api, stats, None, lambda: next(moments),
+        stop_at=NOW + timedelta(minutes=12))
+
+    assert len(api.created) == 1
+    assert stats['stopped_for_time'] == 1
+
+
+def test_limit_ends_the_run_even_when_the_rest_of_the_listing_is_imported():
+    site = FakeSite([listed(1), listed(2), listed(3), listed(4)])
+    api = FakeApi(existing={listed(2).url, listed(3).url, listed(4).url})
+
+    stats = run_import(site, FakeGeocoder(), api, limit=1)
+
+    assert (stats['created'], stats['listed']) == (1, 2)
+
+
+def test_a_deadline_ends_the_run_even_when_the_rest_of_the_listing_is_imported():
+    api, stats = FakeApi(existing={listed(2).url, listed(3).url}), Counter()
+    moments = iter([NOW, NOW + timedelta(minutes=5), NOW + timedelta(minutes=13)])
+
+    run(FakeSite([listed(1), listed(2), listed(3)]), FakeGeocoder(), api, stats, None, lambda: next(moments),
+        stop_at=NOW + timedelta(minutes=12))
+
+    assert (len(api.created), stats['listed'], stats['stopped_for_time']) == (1, 2, 1)
+
+
+def test_dry_run_prints_posts_and_needs_no_api(capsys):
+    stats = run_import(FakeSite([listed(1)]), FakeGeocoder(), DryRun())
+
+    assert stats['created'] == 1
+    assert json.loads(capsys.readouterr().out)['title'] == 'Wydarzenie 1'
+
+
+def test_dry_run_prints_an_emoji_through_a_code_page_pipe(monkeypatch):
+    pipe = io.TextIOWrapper(io.BytesIO(), encoding='cp1250')
+    monkeypatch.setattr(sys, 'stdout', pipe)
+
+    DryRun().create_post({'title': 'Koncert 😀'}, [])
+
+    pipe.flush()
+    assert json.loads(pipe.buffer.getvalue().decode('utf-8'))['title'] == 'Koncert 😀'
+
+
+def test_a_geocoder_failure_keeps_the_totals_and_creates_nothing_more():
+    class Throttled:
+        def get(self, url, params, timeout):
+            response = requests.Response()
+            response.status_code = 429
+            return response
+
+    stats, api = Counter(), FakeApi()
+    geocoder = Geocoder(Throttled(), 'http://photon.test')
+
+    with pytest.raises(GeocoderUnavailable):
+        run(FakeSite([listed(1), listed(2)]), geocoder, api, stats, None, lambda: NOW)
+
+    assert stats['listed'] == 1
+    assert stats['no_location'] == 0
+    assert api.created == []
+
+
+@pytest.fixture
+def scraper_args(monkeypatch, caplog):
+    monkeypatch.setattr(sys, 'argv', ['scrape.py'])
+    monkeypatch.setenv('SCRAPER_USER_ID', 'bot')
+    monkeypatch.delenv('SCRAPER_API_TOKEN', raising=False)
+    caplog.set_level(logging.INFO)
+
+
+@pytest.mark.parametrize('error', [
+    ApiError('GET /posts returned 500'),
+    GeocoderUnavailable('Photon request failed'),
+    requests.ConnectionError('refused'),
+    requests.Timeout('slow'),
+    requests.exceptions.JSONDecodeError('Expecting value', '<html>', 0),
+])
+def test_a_failed_run_logs_one_error_and_the_totals_and_exits_1(monkeypatch, caplog, scraper_args, error):
+    def fail(site, geocoder, api, stats, limit):
+        stats['listed'] = 3
+        raise error
+
+    monkeypatch.setattr('scrape.run', fail)
+
+    assert main() == 1
+    assert "Done: {'listed': 3}" in caplog.text
+    assert [record.levelname for record in caplog.records].count('ERROR') == 1
+
+
+def test_a_snapshot_run_is_complete_only_when_it_ends(monkeypatch, scraper_args, tmp_path):
+    monkeypatch.setattr(sys, 'argv', ['scrape.py', '--snapshot', str(tmp_path)])
+    monkeypatch.setattr('scrape.run', lambda site, geocoder, sink, stats, limit: stats.update(listed=1))
+
+    assert main() == 0
+    assert is_complete(tmp_path)
+
+    def fail(*_):
+        raise GeocoderUnavailable('Photon request failed')
+
+    monkeypatch.setattr('scrape.run', fail)
+    Snapshot(tmp_path)
+
+    assert main() == 1
+    assert not is_complete(tmp_path)
+
+
+def test_a_network_error_names_the_request_in_one_line(monkeypatch, caplog, scraper_args):
+    request = requests.Request('GET', 'http://localhost:3000/auth/me').prepare()
+
+    def fail(*_):
+        raise requests.ConnectionError('HTTPConnectionPool(...): Max retries exceeded', request=request)
+
+    monkeypatch.setattr('scrape.run', fail)
+
+    assert main() == 1
+    assert 'Run stopped: GET http://localhost:3000/auth/me failed: ConnectionError' in caplog.text
+    assert 'HTTPConnectionPool' not in caplog.text
+
+
+def test_a_failed_status_is_named_too(monkeypatch, caplog, scraper_args):
+    request = requests.Request('GET', 'https://site.test/imprezy').prepare()
+    response = requests.Response()
+    response.status_code = 503
+
+    def fail(*_):
+        raise requests.HTTPError('503 Server Error', request=request, response=response)
+
+    monkeypatch.setattr('scrape.run', fail)
+
+    assert main() == 1
+    assert 'Run stopped: GET https://site.test/imprezy failed: 503' in caplog.text
+
+
+def test_a_missing_identity_is_one_clear_error(monkeypatch, caplog, scraper_args):
+    monkeypatch.delenv('SCRAPER_USER_ID')
+
+    assert main() == 1
+    assert 'SCRAPER_USER_ID' in caplog.text
+
+
+def test_every_photo_of_the_event_is_sent_in_order():
+    api = FakeApi()
+    urls = ('https://img.test/cover.webp', 'https://img.test/1.webp', 'https://img.test/2.webp')
+
+    stats = run_import(FakeSite([listed(1)], {listed(1).url: read_page(image_urls=urls)}), FakeGeocoder(), api)
+
+    assert api.created[0]['mediaIds'] == ['cover.webp', '1.webp', '2.webp']
+    assert (stats['with_image'], stats['photos']) == (1, 3)
+
+
+def test_a_photo_that_cannot_be_downloaded_is_left_out():
+    api = FakeApi()
+    urls = ('https://img.test/broken.webp', 'https://img.test/1.webp')
+
+    run_import(FakeSite([listed(1)], {listed(1).url: read_page(image_urls=urls)}), FakeGeocoder(), api)
+
+    assert api.created[0]['mediaIds'] == ['1.webp']
+
+
+def test_event_with_no_image_is_posted_without_one():
+    api = FakeApi()
+
+    stats = run_import(FakeSite([listed(1)]), FakeGeocoder(), api)
+
+    assert 'mediaIds' not in api.created[0]
+    assert stats['with_image'] == 0
+
+
+def test_a_post_whose_images_were_all_refused_does_not_count_as_with_image():
+    api = FakeApi(refuse_images=1)
+
+    stats = run_import(FakeSite([listed(1)], {listed(1).url: read_page(image_urls=('https://img.test/1.webp',))}),
+                       FakeGeocoder(), api)
+
+    assert (stats['created'], stats['with_image']) == (1, 0)
+
+
+def test_a_rejected_post_does_not_count_as_with_image():
+    api = FakeApi(failure='400: nope')
+
+    stats = run_import(FakeSite([listed(1)], {listed(1).url: read_page(image_urls=('https://img.test/1.webp',))}),
+                       FakeGeocoder(), api)
+
+    assert (stats['rejected'], stats['with_image'], stats['photos']) == (1, 0, 0)
+
+
+def test_dry_run_prints_what_it_would_upload(capsys):
+    site = FakeSite([listed(1)], {listed(1).url: read_page(image_urls=('https://img.test/1.webp',))})
+
+    stats = run_import(site, FakeGeocoder(), DryRun())
+
+    assert json.loads(capsys.readouterr().out)['images'] == [
+        {'fileName': '1.webp', 'mimeType': 'image/webp', 'sizeBytes': len(b'https://img.test/1.webp'),
+         'width': 4, 'height': 3}]
+    assert stats['with_image'] == 1
+
+
+def test_dry_run_stops_downloading_at_the_api_limit(capsys):
+    urls = tuple(f'https://img.test/{number}.webp' for number in range(MAX_PHOTOS + 2))
+    site = FakeSite([listed(1)], {listed(1).url: read_page(image_urls=urls)})
+
+    run_import(site, FakeGeocoder(), DryRun())
+
+    assert len(json.loads(capsys.readouterr().out)['images']) == MAX_PHOTOS
+    assert len(site.downloaded) == MAX_PHOTOS

@@ -1,0 +1,371 @@
+import json
+import re
+from datetime import datetime, timezone
+
+import pytest
+import requests
+
+import seed
+from api import Outcome
+from images import Image
+from seed import (AVATAR_SIZES, AVATARS, BOT, DEMO_USERS, FRIEND_CASES, HISTORY_DAYS, SeedError, friend_stances,
+                  history, moved, picks, seed_events, seed_friends, seed_reactions, shift_days, shifted, user_ids,
+                  wait_for_api)
+from snapshot import Snapshot
+
+UTC = timezone.utc
+
+
+def test_dates_move_by_whole_days_on_the_warsaw_clock_across_summer_time():
+    # 19:00 in Warsaw in summer (UTC+2) is still 19:00 in winter (UTC+1).
+    summer = datetime(2026, 10, 20, 17, 0, tzinfo=UTC)
+
+    assert moved(summer, 10) == datetime(2026, 10, 30, 18, 0, tzinfo=UTC)
+
+
+def test_shift_is_the_fewest_days_that_put_every_start_ahead():
+    starts = [datetime(2026, 11, 5, 18, 0, tzinfo=UTC), datetime(2026, 11, 20, 18, 0, tzinfo=UTC)]
+
+    assert shift_days(starts, now=datetime(2026, 11, 9, 12, 0, tzinfo=UTC)) == 4
+    # Later the same day the earliest would start too soon, so it goes one day further.
+    assert shift_days(starts, now=datetime(2026, 11, 9, 17, 0, tzinfo=UTC)) == 5
+
+
+def test_a_snapshot_still_ahead_is_not_moved():
+    assert shift_days([datetime(2026, 12, 1, 18, 0, tzinfo=UTC)], now=datetime(2026, 11, 9, tzinfo=UTC)) == 0
+
+
+def test_shifted_moves_start_and_end_and_keeps_the_rest():
+    post = {'title': 'T', 'startsAt': '2026-11-05T18:00:00Z', 'endsAt': '2026-11-05T20:00:00Z'}
+
+    assert shifted(post, 3) == {'title': 'T', 'startsAt': '2026-11-08T18:00:00Z', 'endsAt': '2026-11-08T20:00:00Z'}
+    assert shifted({'startsAt': '2026-11-05T18:00:00Z'}, 1) == {'startsAt': '2026-11-06T18:00:00Z'}
+
+
+class FakeApi:
+    def __init__(self, existing=(), failure=None):
+        self.existing = set(existing)
+        self.failure = failure
+        self.created = []
+
+    def existing_event_urls(self):
+        return self.existing
+
+    def create_post(self, post, images=()):
+        self.created.append((post, [image.content for image in images]))
+        return Outcome(self.failure) if self.failure else Outcome(photos=len(self.created[-1][1]))
+
+
+def saved_snapshot(directory, count=3):
+    snapshot = Snapshot(directory)
+    for number in range(count):
+        snapshot.create_post({'eventUrl': f'https://site.test/{number}', 'startsAt': '2026-11-05T18:00:00Z'},
+                             [Image(b'photo%d' % number, 'image/webp', f'{number}.webp', 4, 3)])
+    snapshot.mark_complete()
+
+
+def test_events_are_loaded_once_with_photos_and_moved_dates(tmp_path):
+    saved_snapshot(tmp_path)
+    api = FakeApi(existing={'https://site.test/0'})
+
+    stats = seed_events(tmp_path, 'http://api.test', workers=2, clock=lambda: datetime(2026, 11, 9, 12, tzinfo=UTC),
+                        api_factory=lambda: api)
+
+    assert stats['created'] == 2 and stats['already_loaded'] == 1 and stats['photos'] == 2
+    assert sorted(post['eventUrl'] for post, _ in api.created) == ['https://site.test/1', 'https://site.test/2']
+    assert {post['startsAt'] for post, _ in api.created} == {'2026-11-09T18:00:00Z'}
+    assert sorted(photos[0] for _, photos in api.created) == [b'photo1', b'photo2']
+
+
+def test_a_sized_load_takes_a_sample_and_moves_dates_by_the_whole_snapshot(tmp_path):
+    snapshot = Snapshot(tmp_path)
+    events = [('film', '2026-11-20T18:00:00Z'), ('film', '2026-11-21T18:00:00Z'), ('film', '2026-11-22T18:00:00Z'),
+              ('sport', '2026-11-03T18:00:00Z')]
+    for number, (category, starts_at) in enumerate(events):
+        snapshot.create_post({'eventUrl': f'https://site.test/{number}', 'startsAt': starts_at}, category=category)
+    snapshot.mark_complete()
+    api = FakeApi()
+
+    stats = seed_events(tmp_path, 'http://api.test', clock=lambda: datetime(2026, 11, 9, 12, tzinfo=UTC),
+                        api_factory=lambda: api, size=1)
+
+    # One film is loaded; the sport event isn't, but its start on 3 November still sets the shift, 6 days.
+    assert stats['created'] == 1
+    assert [post['startsAt'] for post, _ in api.created] == ['2026-11-26T18:00:00Z']
+
+
+def test_a_refused_event_is_counted(tmp_path):
+    saved_snapshot(tmp_path, count=1)
+
+    stats = seed_events(tmp_path, 'http://api.test', clock=lambda: datetime(2026, 11, 9, tzinfo=UTC),
+                        api_factory=lambda: FakeApi(failure='400: bad'))
+
+    assert stats['rejected'] == 1
+
+
+def test_no_snapshot_is_one_clear_error(tmp_path):
+    with pytest.raises(SeedError, match='make scrape-snapshot'):
+        seed_events(tmp_path, 'http://api.test', api_factory=FakeApi)
+
+
+def test_an_account_the_database_lacks_is_named_with_what_makes_it():
+    with pytest.raises(SeedError, match=r'No account for jan_demo.*make up'):
+        user_ids(lambda sql: ['anna_demo,id-anna_demo'], ['anna_demo', 'jan_demo'])
+
+
+def test_picks_leave_the_closest_posts_for_the_feed_and_mark_the_farthest_not_for_me():
+    ranking = [f'p{rank}' for rank in range(30)]
+
+    assert picks(ranking) == [('p3', 'reaction', 'LIKE'), ('p6', 'reaction', 'LIKE'), ('p9', 'reaction', 'LIKE'),
+                              ('p12', 'reaction', 'LIKE'), ('p15', 'reaction', 'LIKE'),
+                              ('p4', 'participation', 'INTERESTED'), ('p10', 'participation', 'INTERESTED'),
+                              ('p28', 'participation', 'NOT_INTERESTED'), ('p29', 'participation', 'NOT_INTERESTED')]
+
+
+def test_picks_from_a_short_ranking_never_react_twice_to_one_post():
+    chosen = picks(['p0', 'p1', 'p2', 'p3', 'p4'])
+
+    assert len({post_id for post_id, _, _ in chosen}) == len(chosen)
+
+
+class FakeSession:
+    def __init__(self, status=200):
+        self.headers = {}
+        self.status = status
+        self.sent = []
+
+    def put(self, url, json, timeout):
+        self.sent.append((self.headers['X-User-Name'], url, json['type']))
+        return self._response()
+
+    def delete(self, url, timeout):
+        self.sent.append((self.headers['X-User-Name'], url, 'DELETE'))
+        return self._response()
+
+    def _response(self):
+        response = requests.Response()
+        response.status_code = self.status
+        return response
+
+
+def id_of(username):
+    return f'id-{username}'
+
+
+def with_ids(query):
+    """Answers the lookup of accounts as the database does, with an id made from each username."""
+    def answer(sql):
+        if 'FROM users WHERE username' in sql:
+            return [f'{name},{id_of(name)}' for name in re.search(r"'\{(.*)\}'", sql).group(1).split(',')]
+        return query(sql)
+    return answer
+
+
+def fake_query(reacted=(), updates=None, held=()):
+    def query(sql):
+        if sql.lstrip().startswith(('UPDATE', 'DELETE')):
+            if updates is not None:
+                updates.append(sql)
+            return []
+        if 'UNION ALL' in sql:
+            return list(held)
+        if 'count(*)' in sql:
+            return ['1' if any(user_id in sql for user_id in reacted) else '0']
+        assert id_of(BOT) in sql
+        return [f'p{rank}' for rank in range(30)]
+    return with_ids(query)
+
+
+def test_each_demo_user_reacts_as_themself():
+    session = FakeSession()
+
+    stats = seed_reactions('http://api.test', query=fake_query(), session_factory=lambda: session)
+
+    assert stats['users'] == 3 and stats['like'] == 15 and stats['interested'] == 6 and stats['not_interested'] == 6
+    assert ('anna_demo', 'http://api.test/posts/p3/reaction', 'LIKE') in session.sent
+    assert ('ola_demo', 'http://api.test/posts/p4/participation', 'INTERESTED') in session.sent
+
+
+def test_reactions_are_dated_weeks_back_so_new_likes_lead():
+    updates = []
+
+    seed_reactions('http://api.test', query=fake_query(updates=updates), session_factory=FakeSession)
+
+    assert len(updates) == 3
+    assert updates[0].count('UPDATE') == 9
+    assert "post_reactions SET created_at = now() - make_interval(days => 14)" in updates[0]
+    assert "post_participations SET" in updates[0]
+    assert f"days => {HISTORY_DAYS[1]})" in updates[0]
+
+
+def test_history_spreads_evenly_over_the_weeks():
+    assert history(3) == [14, 28, 42]
+    assert history(1) == [14]
+
+
+def test_a_user_who_already_reacted_is_left_alone():
+    session = FakeSession()
+
+    stats = seed_reactions('http://api.test', query=fake_query(reacted=[id_of('anna_demo')]),
+                           session_factory=lambda: session)
+
+    assert stats['users_skipped'] == 1
+    assert not [sent for sent in session.sent if sent[0] == 'anna_demo']
+
+
+def test_a_reset_takes_back_what_they_hold_and_seeds_them_again():
+    session = FakeSession()
+
+    held = ['reaction,old', 'participation,gone']
+    updates = []
+
+    stats = seed_reactions('http://api.test', query=fake_query(reacted=[id_of(name) for name in DEMO_USERS], updates=updates, held=held),
+                           session_factory=lambda: session, reset=True)
+
+    assert stats['taken_back'] == 6 and stats['users'] == 3 and not stats['users_skipped']
+    assert len([sql for sql in updates if 'deleted_at IS NOT NULL' in sql]) == 3
+    assert ('anna_demo', 'http://api.test/posts/old/reaction', 'DELETE') in session.sent
+    assert ('anna_demo', 'http://api.test/posts/gone/participation', 'DELETE') in session.sent
+    assert session.sent.index(('anna_demo', 'http://api.test/posts/old/reaction', 'DELETE')) < session.sent.index(
+        ('anna_demo', 'http://api.test/posts/p3/reaction', 'LIKE'))
+
+
+def test_reactions_before_embeddings_say_what_to_run():
+    with pytest.raises(SeedError, match='embed-posts'):
+        seed_reactions('http://api.test', query=with_ids(lambda sql: ['0'] if 'count(*)' in sql else []),
+                       session_factory=FakeSession)
+
+
+def test_a_refused_reaction_stops_with_the_answer():
+    with pytest.raises(SeedError, match='returned 403'):
+        seed_reactions('http://api.test', query=fake_query(), session_factory=lambda: FakeSession(status=403))
+
+
+def test_waiting_for_the_api_ends_when_it_answers(monkeypatch):
+    answers = iter([requests.ConnectionError('refused'), 200])
+
+    def get(url, params, timeout):
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        response = requests.Response()
+        response.status_code = answer
+        return response
+
+    monkeypatch.setattr(seed.requests, 'get', get)
+    slept = []
+
+    wait_for_api('http://api.test', sleep=slept.append)
+
+    assert slept == [seed.API_POLL_S]
+
+
+def test_waiting_for_the_api_gives_up_with_a_hint(monkeypatch):
+    def refuse(url, params, timeout):
+        raise requests.ConnectionError('refused')
+
+    monkeypatch.setattr(seed.requests, 'get', refuse)
+    clock = iter([0, 10, 20])
+
+    with pytest.raises(SeedError, match='make local'):
+        wait_for_api('http://api.test', timeout_s=15, sleep=lambda s: None, monotonic=lambda: next(clock))
+
+
+def test_no_one_takes_two_stances_on_one_post():
+    planned = friend_stances([f'p{number}' for number in range(len(FRIEND_CASES))])
+
+    assert len({(post_id, name) for post_id, name, _ in planned}) == len(planned)
+
+
+class FakeFriendSession:
+    def __init__(self, log, avatars=()):
+        self.headers = {}
+        self.log = log
+        self.avatars = avatars
+
+    def _response(self, body=None):
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(body or {}).encode()
+        return response
+
+    def put(self, url, json, timeout):
+        self.log.append(('PUT', self.headers['X-User-Name'], url, json['type']))
+        return self._response()
+
+    def delete(self, url, timeout):
+        self.log.append(('DELETE', self.headers['X-User-Name'], url, None))
+        return self._response()
+
+    def get(self, url, timeout):
+        if '/users/' in url:
+            return self._response({'avatar': {'id': 'm'}} if self.headers['X-User-Name'] in self.avatars else {})
+        return self._response({'title': 'Koncert'})
+
+
+class FakeAvatarApi:
+    def __init__(self):
+        self.set = []
+
+    def set_profile_image(self, user_id, full, thumbnail):
+        self.set.append((user_id, full.width, thumbnail.width))
+
+
+def friends_query(post_count=len(FRIEND_CASES), stances=(), updates=None):
+    def query(sql):
+        if sql.lstrip().startswith('UPDATE'):
+            if updates is not None:
+                updates.append(sql)
+            return []
+        if 'ORDER BY p.starts_at' in sql:
+            assert id_of(BOT) in sql and id_of('iza_demo') in sql
+            return [f'p{number}' for number in range(post_count)]
+        return list(stances)
+    return with_ids(query)
+
+
+def test_friends_take_their_stances_as_themselves_and_get_photos():
+    sent = []
+    api = FakeAvatarApi()
+
+    stats = seed_friends('http://api.test', query=friends_query(), session_factory=lambda: FakeFriendSession(sent),
+                         api_factory=lambda user_id: api)
+
+    assert ('PUT', 'kasia_demo', 'http://api.test/posts/p0/participation', 'TAKES_PART') in sent
+    assert ('PUT', 'iza_demo', 'http://api.test/posts/p6/participation', 'INTERESTED') in sent
+    assert stats['takes_part'] + stats['interested'] == len(friend_stances(['p'] * len(FRIEND_CASES)))
+    assert [user_id for user_id, _, _ in api.set] == [id_of(name) for name in AVATARS]
+    assert api.set[0][1:] == AVATAR_SIZES
+
+
+def test_a_second_run_takes_back_stray_stances_and_keeps_photos():
+    sent = []
+    api = FakeAvatarApi()
+    stray = f"old,{id_of('kasia_demo')}"
+    kept = f"p0,{id_of('kasia_demo')}"
+
+    stats = seed_friends('http://api.test', query=friends_query(stances=[stray, kept]),
+                         session_factory=lambda: FakeFriendSession(sent, avatars=set(AVATARS)),
+                         api_factory=lambda user_id: api)
+
+    assert [entry for entry in sent if entry[0] == 'DELETE'] == [
+        ('DELETE', 'kasia_demo', 'http://api.test/posts/old/participation', None)]
+    assert stats['taken_back'] == 1
+    assert not api.set
+
+
+def test_friends_stances_are_dated_back_so_their_own_picks_lead():
+    updates = []
+
+    seed_friends('http://api.test', query=friends_query(updates=updates),
+                 session_factory=lambda: FakeFriendSession([]), api_factory=lambda user_id: FakeAvatarApi())
+
+    planned = friend_stances([f'p{number}' for number in range(len(FRIEND_CASES))])
+    assert len(updates) == 1 and updates[0].count('UPDATE post_participations') == len(planned)
+    assert f"make_interval(days => {HISTORY_DAYS[1]})" in updates[0]
+    assert f"user_id = '{id_of('kasia_demo')}' AND post_id = 'p0'" in updates[0]
+
+
+def test_friends_without_enough_posts_say_what_to_run():
+    with pytest.raises(SeedError, match='make seed-events'):
+        seed_friends('http://api.test', query=friends_query(post_count=2), session_factory=lambda: FakeFriendSession([]))

@@ -58,9 +58,15 @@ public class CommentWriteRepository {
         return Optional.empty();
     }
 
-    public void ensurePostVisible(UUID postId, UUID callerId) throws SQLException {
+    public void ensurePostVisible(UUID postId, UUID viewer) throws SQLException {
         try (Connection conn = DatabaseConfig.getConnection()) {
-            PostQueries.ensurePostVisible(conn, postId, callerId);
+            PostQueries.ensurePostVisible(conn, postId, viewer);
+        }
+    }
+
+    public boolean isCommentVisible(UUID commentId, UUID viewer) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return CommentQueries.isVisible(conn, commentId, viewer);
         }
     }
 

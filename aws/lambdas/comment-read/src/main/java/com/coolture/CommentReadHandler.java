@@ -77,7 +77,7 @@ public class CommentReadHandler implements RequestHandler<APIGatewayV2HTTPEvent,
         try {
             return Integer.parseInt(raw);
         } catch (NumberFormatException e) {
-            return 20;
+            throw new IllegalArgumentException("Invalid limit");
         }
     }
 }

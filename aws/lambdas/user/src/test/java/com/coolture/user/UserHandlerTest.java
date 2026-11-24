@@ -9,13 +9,19 @@ import com.coolture.common.dto.UserSummaryDto;
 import com.coolture.common.pagination.CursorPage;
 import com.coolture.common.pagination.PaginationMeta;
 import com.coolture.common.security.SecurityContext;
+import com.coolture.user.dto.MeDto;
 import com.coolture.user.dto.ProfileImageResponse;
 import com.coolture.user.dto.SetProfileImageRequest;
 import com.coolture.user.dto.UserProfileUpdateRequest;
-import com.coolture.user.repository.UserRepository.UserEntity;
+import com.coolture.user.dto.UserInterestsDto;
+import com.coolture.user.dto.UserListItemDto;
+import com.coolture.user.service.InterestService;
 import com.coolture.user.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
 import java.time.Instant;
@@ -34,7 +40,8 @@ class UserHandlerTest {
 
     private final UserService service = mock(UserService.class);
     private final Context lambdaContext = mock(Context.class);
-    private final UserHandler handler = new UserHandler(service);
+    private final InterestService interestService = mock(InterestService.class);
+    private final UserHandler handler = new UserHandler(service, interestService);
 
     private static final UUID USER_ID = UUID.randomUUID();
     private static final UUID CALLER_ID = UUID.randomUUID();
@@ -46,6 +53,89 @@ class UserHandlerTest {
     @BeforeEach
     void setUp() {
         lenient().when(lambdaContext.getLogger()).thenReturn(mock(LambdaLogger.class));
+    }
+
+
+    @Test
+    void interestCatalog_isRoutedBehindStagePrefix() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/dev/dicts/interests", null, null);
+
+        APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+        assertEquals(200, response.getStatusCode());
+        verify(interestService).getCatalog();
+    }
+
+    @Test
+    void getInterests_ofSomeoneElse_passesTheTarget() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "GET", "/users/" + USER_ID + "/interests", null, Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            verify(interestService).getSelection(USER_ID, CALLER_ID);
+        }
+    }
+
+    @Test
+    void getInterests_asAGuest_returns401() {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "GET", "/users/" + USER_ID + "/interests", null, Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event))
+                    .thenThrow(new SecurityException("User not authenticated: missing 'sub' claim"));
+
+            assertEquals(401, handler.handleRequest(event, lambdaContext).getStatusCode());
+            verifyNoInteractions(interestService);
+        }
+    }
+
+    @Test
+    void replaceInterests_passesTheSelection() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "PUT", "/users/" + USER_ID + "/interests",
+                "{\"kinds\":[\"concerts\"],\"interests\":[\"jazz\",\"opera\"]}", Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            verify(interestService).replaceSelection(USER_ID, USER_ID, new UserInterestsDto(List.of("concerts"), List.of("jazz", "opera")));
+        }
+    }
+
+    @Test
+    void replaceInterests_returns400_whenBodyIsMissing() {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "PUT", "/users/" + USER_ID + "/interests", null, Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
+
+            assertEquals(400, handler.handleRequest(event, lambdaContext).getStatusCode());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"interests", "home", "follow", "block", "blocking", "followers", "following"})
+    void aUsernameThatIsAnotherRoutesLastWord_isStillAProfile(String username) throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(
+                "GET", "/users/by-username/" + username, null, Map.of("username", username));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
+            when(service.getByUsernameForCaller(username, null)).thenReturn(profile(USER_ID, username));
+
+            assertEquals(200, handler.handleRequest(event, lambdaContext).getStatusCode());
+            verifyNoInteractions(interestService);
+        }
     }
 
     // --- Search Tests ---
@@ -68,7 +158,7 @@ class UserHandlerTest {
     void search_returns200WithPage_whenPathHasStagePrefix() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/dev/users", null, null);
 
-        var page = new CursorPage<UserSummaryDto>(List.of(), new PaginationMeta(20, false, null));
+        var page = new CursorPage<UserListItemDto>(List.of(), new PaginationMeta(20, false, null));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
@@ -85,7 +175,7 @@ class UserHandlerTest {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users", null, null);
 
         var summary = new UserSummaryDto(USER_ID, FAKE_USERNAME, "Kunegunda", "Kowalska", null, Instant.now(), 0, 0);
-        var page = new CursorPage<>(List.of(summary), new PaginationMeta(20, false, null));
+        var page = new CursorPage<>(List.of(new UserListItemDto(summary, true, true)), new PaginationMeta(20, false, null));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
@@ -94,7 +184,9 @@ class UserHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            assertTrue(response.getBody().contains(FAKE_USERNAME));
+            assertTrue(response.getBody().contains("\"username\":\"" + FAKE_USERNAME + "\""));
+            assertTrue(response.getBody().contains("\"isFollowing\":true"));
+            assertTrue(response.getBody().contains("\"followsYou\":true"));
         }
     }
 
@@ -102,7 +194,7 @@ class UserHandlerTest {
     void search_passesQueryParam() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users", null, null, Map.of("q", "someone"));
 
-        var page = new CursorPage<UserSummaryDto>(List.of(), new PaginationMeta(20, false, null));
+        var page = new CursorPage<UserListItemDto>(List.of(), new PaginationMeta(20, false, null));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
@@ -112,21 +204,6 @@ class UserHandlerTest {
 
             assertEquals(200, response.getStatusCode());
             verify(service).search(eq(CALLER_ID), eq("someone"), any(), eq(20));
-        }
-    }
-
-    @Test
-    void search_returns400_whenLimitExceedsMax() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users", null, null, Map.of("limit", "999"));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-            when(service.search(any(), any(), any(), eq(999)))
-                    .thenThrow(new IllegalArgumentException("Limit must be between 1 and 100"));
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(400, response.getStatusCode());
         }
     }
 
@@ -143,6 +220,7 @@ class UserHandlerTest {
 
         assertEquals(200, response.getStatusCode());
         assertTrue(response.getBody().contains(FAKE_USERNAME));
+        assertTrue(response.getBody().contains("\"interests\":[\"theatre\",\"cinema\"]"));
     }
 
     @Test
@@ -213,6 +291,35 @@ class UserHandlerTest {
 
             assertEquals(200, response.getStatusCode());
             assertTrue(response.getBody().contains("new_name"));
+        }
+    }
+
+    @Test
+    void update_clearsTheBio_whenItIsSentAsNull() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("PATCH", "/users/" + USER_ID, "{\"bio\":null}", Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
+            when(service.update(eq(USER_ID), eq(USER_ID), any(UserProfileUpdateRequest.class))).thenReturn(profile(USER_ID, "jan"));
+
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            verify(service).update(eq(USER_ID), eq(USER_ID), argThat(request -> "".equals(request.bio())));
+        }
+    }
+
+    @Test
+    void update_leavesTheBioAlone_whenItIsLeftOut() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("PATCH", "/users/" + USER_ID, "{\"firstName\":\"Jan\"}", Map.of("userId", USER_ID.toString()));
+
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserId(event)).thenReturn(USER_ID);
+            when(service.update(eq(USER_ID), eq(USER_ID), any(UserProfileUpdateRequest.class))).thenReturn(profile(USER_ID, "jan"));
+
+            handler.handleRequest(event, lambdaContext);
+
+            verify(service).update(eq(USER_ID), eq(USER_ID), argThat(request -> request.bio() == null));
         }
     }
 
@@ -384,12 +491,14 @@ class UserHandlerTest {
             security.when(() -> SecurityContext.getClaim(event, "family_name")).thenReturn(java.util.Optional.of("Kowalski"));
 
             when(service.getMe(eq(CALLER_ID), eq(FAKE_USERNAME), eq("Jan"), eq("Kowalski")))
-                    .thenReturn(profile(CALLER_ID, FAKE_USERNAME));
+                    .thenReturn(new MeDto(profile(CALLER_ID, FAKE_USERNAME), true, false, null));
 
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(200, response.getStatusCode());
-            assertTrue(response.getBody().contains(FAKE_USERNAME));
+            assertTrue(response.getBody().contains("\"username\":\"" + FAKE_USERNAME + "\""));
+            assertTrue(response.getBody().contains("\"interests\":[\"theatre\",\"cinema\"]"));
+            assertTrue(response.getBody().contains("\"onboarded\":true"));
         }
     }
 
@@ -408,33 +517,42 @@ class UserHandlerTest {
     }
 
     @Test
-    void getFollowers_returns200() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users/" + USER_ID + "/followers", null, Map.of("userId", USER_ID.toString()));
-        var page = new CursorPage<UserSummaryDto>(List.of(), new PaginationMeta(20, false, null));
-        when(service.getFollowers(eq(USER_ID), any(), eq(20))).thenReturn(page);
+    void getFollowers_returns200_withTheCallerAndTheSearch() throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users/" + USER_ID + "/followers", null,
+            Map.of("userId", USER_ID.toString()), Map.of("q", "jan"));
+        var page = new CursorPage<UserListItemDto>(List.of(), new PaginationMeta(20, false, null));
 
-        APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.of(CALLER_ID));
+            when(service.getFollowers(eq(USER_ID), eq(CALLER_ID), eq("jan"), any(), eq(20))).thenReturn(page);
 
-        assertEquals(200, response.getStatusCode());
-        verify(service).getFollowers(eq(USER_ID), any(), eq(20));
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            verify(service).getFollowers(eq(USER_ID), eq(CALLER_ID), eq("jan"), any(), eq(20));
+        }
     }
 
     @Test
-    void getFollowing_returns200() throws Exception {
+    void getFollowing_returns200_forAGuest() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users/" + USER_ID + "/following", null, Map.of("userId", USER_ID.toString()));
-        var page = new CursorPage<UserSummaryDto>(List.of(), new PaginationMeta(20, false, null));
-        when(service.getFollowing(eq(USER_ID), any(), eq(20))).thenReturn(page);
+        var page = new CursorPage<UserListItemDto>(List.of(), new PaginationMeta(20, false, null));
 
-        APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
+            security.when(() -> SecurityContext.getUserIdOptional(event)).thenReturn(Optional.empty());
+            when(service.getFollowing(eq(USER_ID), eq(null), any(), any(), eq(20))).thenReturn(page);
 
-        assertEquals(200, response.getStatusCode());
-        verify(service).getFollowing(eq(USER_ID), any(), eq(20));
+            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
+
+            assertEquals(200, response.getStatusCode());
+            verify(service).getFollowing(eq(USER_ID), eq(null), any(), any(), eq(20));
+        }
     }
 
     @Test
     void getBlocking_returns200_whenCallerIsSelf() throws Exception {
         APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("GET", "/users/" + CALLER_ID + "/blocking", null, Map.of("userId", CALLER_ID.toString()));
-        var page = new CursorPage<UserSummaryDto>(List.of(), new PaginationMeta(20, false, null));
+        var page = new CursorPage<UserListItemDto>(List.of(), new PaginationMeta(20, false, null));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
@@ -461,9 +579,10 @@ class UserHandlerTest {
         }
     }
 
-    @Test
-    void follow_returns204_whenSuccessful() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/users/" + USER_ID + "/follow", null, Map.of("userId", USER_ID.toString()));
+    @ParameterizedTest
+    @CsvSource({"POST, follow", "DELETE, follow", "POST, block", "DELETE, block"})
+    void followAndBlock_return204_whenSuccessful(String method, String route) throws Exception {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request(method, "/users/" + USER_ID + "/" + route, null, Map.of("userId", USER_ID.toString()));
 
         try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
             security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
@@ -471,7 +590,12 @@ class UserHandlerTest {
             APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
 
             assertEquals(204, response.getStatusCode());
-            verify(service).follow(CALLER_ID, USER_ID);
+            switch (method + " " + route) {
+                case "POST follow" -> verify(service).follow(CALLER_ID, USER_ID);
+                case "DELETE follow" -> verify(service).unfollow(CALLER_ID, USER_ID);
+                case "POST block" -> verify(service).block(CALLER_ID, USER_ID);
+                default -> verify(service).unblock(CALLER_ID, USER_ID);
+            }
         }
     }
 
@@ -489,48 +613,6 @@ class UserHandlerTest {
         }
     }
 
-    @Test
-    void unfollow_returns204_whenSuccessful() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("DELETE", "/users/" + USER_ID + "/follow", null, Map.of("userId", USER_ID.toString()));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).unfollow(CALLER_ID, USER_ID);
-        }
-    }
-
-    @Test
-    void block_returns204_whenSuccessful() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("POST", "/users/" + USER_ID + "/block", null, Map.of("userId", USER_ID.toString()));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).block(CALLER_ID, USER_ID);
-        }
-    }
-
-    @Test
-    void unblock_returns204_whenSuccessful() throws Exception {
-        APIGatewayV2HTTPEvent event = ApiGatewayEvents.request("DELETE", "/users/" + USER_ID + "/block", null, Map.of("userId", USER_ID.toString()));
-
-        try (MockedStatic<SecurityContext> security = mockStatic(SecurityContext.class)) {
-            security.when(() -> SecurityContext.getUserId(event)).thenReturn(CALLER_ID);
-
-            APIGatewayV2HTTPResponse response = handler.handleRequest(event, lambdaContext);
-
-            assertEquals(204, response.getStatusCode());
-            verify(service).unblock(CALLER_ID, USER_ID);
-        }
-    }
-
     private static String validSetBody() {
         return """
                 {
@@ -543,6 +625,6 @@ class UserHandlerTest {
     private static UserProfileDto profile(UUID id, String username) {
         return new UserProfileDto(
                 id, username, "Kunegunda", "Kowalska", null,
-                0, 0, "Bio", Instant.now(), false, false);
+                0, 0, "Bio", Instant.now(), false, false, false, List.of("theatre", "cinema"), List.of("stage"), null);
     }
 }

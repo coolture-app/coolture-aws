@@ -1,8 +1,16 @@
 package com.coolture.user.repository;
 
+import com.coolture.common.db.Blocks;
 import com.coolture.common.db.DatabaseConfig;
+import com.coolture.common.db.EventTime;
+import com.coolture.common.db.Friends;
+import com.coolture.common.db.ParamBinder;
+import com.coolture.common.db.TextSearch;
+import com.coolture.common.dto.GeoPointDto;
+import com.coolture.common.dto.ProfileEventsDto;
 import com.coolture.common.dto.enums.MediaPurpose;
 import com.coolture.common.dto.enums.MediaStatus;
+import com.coolture.user.dto.HomeDto;
 
 import java.sql.Array;
 import java.sql.Connection;
@@ -70,10 +78,9 @@ public class UserRepository {
                     if (user.isPresent()) {
                         return user.get();
                     }
-                    String fallbackUsername = "user_" + id.toString().replace("-", "").substring(0, 12);
                     try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                         stmt.setObject(1, id);
-                        stmt.setString(2, fallbackUsername);
+                        stmt.setString(2, fallbackUsername(id));
                         stmt.setString(3, firstName);
                         stmt.setString(4, lastName);
                         stmt.executeUpdate();
@@ -85,6 +92,11 @@ public class UserRepository {
         }
         // Always return the current row (whether just inserted or already existed)
         return findById(id).orElseThrow(() -> new SQLException("Failed to create or find user " + id));
+    }
+
+    /** The username an account gets when the one its sign-in gives is taken or has nothing usable. */
+    public static String fallbackUsername(UUID id) {
+        return "user_" + id.toString().replace("-", "").substring(0, 12);
     }
 
     public Optional<UserEntity> findById(UUID id) throws SQLException {
@@ -104,6 +116,69 @@ public class UserRepository {
         return Optional.empty();
     }
 
+    /** False for a user who doesn't exist yet. */
+    public boolean sharesStances(UUID userId) throws SQLException {
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement("SELECT share_stances FROM users WHERE id = ?")) {
+            stmt.setObject(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() && rs.getBoolean("share_stances");
+            }
+        }
+    }
+
+    public Optional<HomeDto> findHome(UUID userId) throws SQLException {
+        String sql = """
+            SELECT home_name, ST_Y(home_location::geometry) AS latitude, ST_X(home_location::geometry) AS longitude
+            FROM users
+            WHERE id = ? AND home_name IS NOT NULL
+        """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setObject(1, userId);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(new HomeDto(rs.getString("home_name"),
+                        new GeoPointDto(rs.getDouble("latitude"), rs.getDouble("longitude"))));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Returns false when the user doesn't exist. */
+    public boolean setHome(UUID userId, HomeDto home) throws SQLException {
+        String sql = """
+            UPDATE users
+            SET home_name = ?, home_location = ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography
+            WHERE id = ?
+        """;
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, home.name());
+            stmt.setDouble(2, home.coordinates().longitude());
+            stmt.setDouble(3, home.coordinates().latitude());
+            stmt.setObject(4, userId);
+            return stmt.executeUpdate() > 0;
+        }
+    }
+
+    public void clearHome(UUID userId) throws SQLException {
+        String sql = "UPDATE users SET home_name = NULL, home_location = NULL WHERE id = ?";
+
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setObject(1, userId);
+            stmt.executeUpdate();
+        }
+    }
+
     public Optional<UserEntity> findByUsername(String username) throws SQLException {
         String sql = "SELECT id, username, first_name, last_name, bio, created_at FROM users WHERE username = ?";
 
@@ -121,7 +196,8 @@ public class UserRepository {
         return Optional.empty();
     }
 
-    public UserEntity updateUser(UUID id, String username, String firstName, String lastName, String bio) throws SQLException {
+    public UserEntity updateUser(UUID id, String username, String firstName, String lastName, String bio,
+                                 Boolean shareStances) throws SQLException {
         List<String> setClauses = new ArrayList<>();
         List<Object> params = new ArrayList<>();
 
@@ -138,8 +214,12 @@ public class UserRepository {
             params.add(lastName);
         }
         if (bio != null) {
-            setClauses.add("bio = ?");
+            setClauses.add("bio = NULLIF(?, '')");
             params.add(bio);
+        }
+        if (shareStances != null) {
+            setClauses.add("share_stances = ?");
+            params.add(shareStances);
         }
 
         if (setClauses.isEmpty()) {
@@ -167,41 +247,88 @@ public class UserRepository {
         throw new IllegalArgumentException("User " + id + " not found");
     }
 
-    public List<UserEntity> search(String q, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    /**
+     * Whether the caller follows user u, and whether u follows the caller. It goes in the SELECT list, so the
+     * caller's id is bound twice, first. A guest's null matches no row, nobody follows themselves, and a block
+     * deletes the follow.
+     */
+    private static final String FOLLOW_FLAGS = """
+        EXISTS (SELECT 1 FROM user_relations f
+                WHERE f.source_user_id = ?::uuid AND f.target_user_id = u.id AND f.type = 'FOLLOW') AS is_following,
+        EXISTS (SELECT 1 FROM user_relations f
+                WHERE f.source_user_id = u.id AND f.target_user_id = ?::uuid AND f.type = 'FOLLOW') AS follows_you""";
+
+    private static ParamBinder bindFollowFlags(ParamBinder b, UUID callerId) throws SQLException {
+        return b.bindNullableUUID(callerId).bindNullableUUID(callerId);
+    }
+
+    public record ListedUser(UserEntity user, boolean isFollowing, boolean followsYou) {}
+
+    public List<ListedUser> search(UUID callerId, String q, Instant cursorCreatedAt, UUID cursorId, int limit)
+            throws SQLException {
         String sql = """
-            SELECT id, username, first_name, last_name, bio, created_at
-            FROM users
-            WHERE (? IS NULL OR username ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?)
+            SELECT id, username, first_name, last_name, bio, created_at,
+                   %s
+            FROM users u
+            WHERE %s
+              AND %s
               AND (?::timestamptz IS NULL OR (created_at < ?::timestamptz OR (created_at = ?::timestamptz AND id < ?::uuid)))
             ORDER BY created_at DESC, id DESC
             LIMIT ?
-        """;
+        """.formatted(FOLLOW_FLAGS, TextSearch.matchesAll("u.username", "u.first_name", "u.last_name"),
+            Blocks.notWithViewer("u.id"));
 
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            String pattern = (q != null && !q.isBlank()) ? "%" + q + "%" : null;
-            Timestamp cursorTs = cursorCreatedAt != null ? Timestamp.from(cursorCreatedAt) : null;
+            ParamBinder b = bindFollowFlags(new ParamBinder(stmt, conn), callerId);
+            TextSearch.bind(b, q);
+            Blocks.bindViewer(b, callerId)
+                .bindCursorParams(cursorCreatedAt, cursorId)
+                .bindInt(limit);
 
-            stmt.setString(1, pattern);
-            stmt.setString(2, pattern);
-            stmt.setString(3, pattern);
-            stmt.setString(4, pattern);
-
-            stmt.setTimestamp(5, cursorTs);
-            stmt.setTimestamp(6, cursorTs);
-            stmt.setTimestamp(7, cursorTs);
-            stmt.setObject(8, cursorId);
-
-            stmt.setInt(9, limit);
-
-            List<UserEntity> users = new ArrayList<>();
+            List<ListedUser> users = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    users.add(mapUser(rs));
+                    users.add(new ListedUser(mapUser(rs), rs.getBoolean("is_following"), rs.getBoolean("follows_you")));
                 }
             }
             return users;
+        }
+    }
+
+    /**
+     * Counts for a profile's tabs: the user's posts and those not ended, and their Biorę udział and Interesuje mnie
+     * not ended. The stance counts are null unless the viewer is the user or a friend they share stances with. Posts in
+     * a block with the viewer aren't counted.
+     */
+    public ProfileEventsDto countEvents(UUID userId, UUID viewer) throws SQLException {
+        String sql = "SELECT own.posts, own.upcoming,"
+            + " CASE WHEN sees.stances THEN stances.takes_part::int END AS takes_part,"
+            + " CASE WHEN sees.stances THEN stances.interested::int END AS interested"
+            + " FROM users u"
+            + " CROSS JOIN LATERAL (SELECT u.id = ?::uuid OR " + Friends.sharingFriend("u.id") + " AS stances) sees"
+            + " CROSS JOIN LATERAL (SELECT COUNT(*) AS posts,"
+            + "   COUNT(*) FILTER (WHERE " + EventTime.NOT_ENDED + ") AS upcoming"
+            + "   FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL) own"
+            + " CROSS JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE pp.type = 'TAKES_PART') AS takes_part,"
+            + "   COUNT(*) FILTER (WHERE pp.type = 'INTERESTED') AS interested"
+            + "   FROM post_participations pp JOIN posts p ON p.id = pp.post_id"
+            + "   WHERE pp.user_id = u.id AND p.deleted_at IS NULL AND " + EventTime.NOT_ENDED
+            + "   AND " + Blocks.notWithViewer("p.author_id") + ") stances"
+            + " WHERE u.id = ?::uuid";
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            ParamBinder b = new ParamBinder(stmt, conn)
+                .bindNullableUUID(viewer)
+                .bindNullableUUID(viewer)
+                .bindNullableUUID(viewer);
+            Blocks.bindViewer(b, viewer).bindUUID(userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                rs.next();
+                return new ProfileEventsDto(rs.getInt("posts"), rs.getInt("upcoming"),
+                    rs.getObject("takes_part", Integer.class), rs.getObject("interested", Integer.class));
+            }
         }
     }
 
@@ -267,39 +394,76 @@ public class UserRepository {
         }
     }
 
-    public record UserRelationRow(UserEntity user, Instant relationCreatedAt) {}
+    public record UserRelationRow(
+            UserEntity user, Instant relationCreatedAt, boolean isFollowing, boolean followsYou) {}
 
-    public List<UserRelationRow> findFollowers(UUID userId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
-        String sql = """
-            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at
-            FROM user_relations ur
-            JOIN users u ON u.id = ur.source_user_id
-            WHERE ur.target_user_id = ?
-              AND ur.type = 'FOLLOW'
-              AND (?::timestamptz IS NULL OR (ur.created_at < ?::timestamptz OR (ur.created_at = ?::timestamptz AND ur.source_user_id < ?::uuid)))
-            ORDER BY ur.created_at DESC, ur.source_user_id DESC
-            LIMIT ?
-        """;
-        return queryUserRelations(sql, userId, cursorCreatedAt, cursorId, limit);
+    /**
+     * The name a follow list sorts by, the one its rows show: first and last name, or the username when there's no
+     * first name, folded as {@link TextSearch} folds it. "C" so a local database and AWS's sort alike.
+     */
+    private static final String SORT_NAME = "unaccent(lower(coalesce("
+        + "nullif(u.first_name, '') || coalesce(' ' || nullif(u.last_name, ''), ''),"
+        + " u.username))) COLLATE \"C\"";
+
+    public record FollowRow(UserEntity user, boolean isFollowing, boolean followsYou, String sortName) {}
+
+    /** Where a follow list's next page starts: after this sort name and id. */
+    public record NameCursor(String name, UUID id) {}
+
+    public List<FollowRow> findFollowers(UUID userId, UUID callerId, String q, NameCursor after, int limit)
+            throws SQLException {
+        return findFollows("source_user_id", "target_user_id", userId, callerId, q, after, limit);
     }
 
-    public List<UserRelationRow> findFollowing(UUID userId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
-        String sql = """
-            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at
-            FROM user_relations ur
-            JOIN users u ON u.id = ur.target_user_id
-            WHERE ur.source_user_id = ?
-              AND ur.type = 'FOLLOW'
-              AND (?::timestamptz IS NULL OR (ur.created_at < ?::timestamptz OR (ur.created_at = ?::timestamptz AND ur.target_user_id < ?::uuid)))
-            ORDER BY ur.created_at DESC, ur.target_user_id DESC
-            LIMIT ?
-        """;
-        return queryUserRelations(sql, userId, cursorCreatedAt, cursorId, limit);
+    public List<FollowRow> findFollowing(UUID userId, UUID callerId, String q, NameCursor after, int limit)
+            throws SQLException {
+        return findFollows("target_user_id", "source_user_id", userId, callerId, q, after, limit);
     }
 
-    public List<UserRelationRow> findBlocking(UUID userId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+    /** The {@code listed} side of the user's follows on the {@code owner} side, by name from A to Z. */
+    private List<FollowRow> findFollows(String listed, String owner, UUID userId, UUID callerId, String q,
+                                        NameCursor after, int limit) throws SQLException {
         String sql = """
-            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at, ur.created_at AS relation_created_at
+            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at,
+                   %s, %s AS sort_name
+            FROM user_relations ur
+            JOIN users u ON u.id = ur.%s
+            WHERE ur.%s = ?
+              AND ur.type = 'FOLLOW'
+              AND %s
+              AND %s
+              AND (?::varchar IS NULL OR (%s, u.id) > (?::varchar, ?::uuid))
+            ORDER BY sort_name, u.id
+            LIMIT ?
+        """.formatted(FOLLOW_FLAGS, SORT_NAME, listed, owner, Blocks.notWithViewer("u.id"),
+            TextSearch.matchesAll("u.username", "u.first_name", "u.last_name"), SORT_NAME);
+        try (Connection conn = DatabaseConfig.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            ParamBinder b = bindFollowFlags(new ParamBinder(stmt, conn), callerId)
+                .bindUUID(userId);
+            Blocks.bindViewer(b, callerId);
+            TextSearch.bind(b, q)
+                .bindStringFilterPair(after == null ? null : after.name())
+                .bindNullableUUID(after == null ? null : after.id())
+                .bindInt(limit);
+
+            List<FollowRow> list = new ArrayList<>();
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    list.add(new FollowRow(mapUser(rs), rs.getBoolean("is_following"), rs.getBoolean("follows_you"),
+                        rs.getString("sort_name")));
+                }
+            }
+            return list;
+        }
+    }
+
+    public List<UserRelationRow> findBlocking(UUID userId, UUID callerId, Instant cursorCreatedAt, UUID cursorId,
+                                              int limit) throws SQLException {
+        String sql = """
+            SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.created_at,
+                   ur.created_at AS relation_created_at,
+                   %s
             FROM user_relations ur
             JOIN users u ON u.id = ur.target_user_id
             WHERE ur.source_user_id = ?
@@ -307,27 +471,22 @@ public class UserRepository {
               AND (?::timestamptz IS NULL OR (ur.created_at < ?::timestamptz OR (ur.created_at = ?::timestamptz AND ur.target_user_id < ?::uuid)))
             ORDER BY ur.created_at DESC, ur.target_user_id DESC
             LIMIT ?
-        """;
-        return queryUserRelations(sql, userId, cursorCreatedAt, cursorId, limit);
-    }
-
-    private List<UserRelationRow> queryUserRelations(String sql, UUID userId, Instant cursorCreatedAt, UUID cursorId, int limit) throws SQLException {
+        """.formatted(FOLLOW_FLAGS);
         try (Connection conn = DatabaseConfig.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
-            Timestamp cursorTs = cursorCreatedAt != null ? Timestamp.from(cursorCreatedAt) : null;
-            stmt.setObject(1, userId);
-            stmt.setTimestamp(2, cursorTs);
-            stmt.setTimestamp(3, cursorTs);
-            stmt.setTimestamp(4, cursorTs);
-            stmt.setObject(5, cursorId);
-            stmt.setInt(6, limit);
+            bindFollowFlags(new ParamBinder(stmt, conn), callerId)
+                .bindUUID(userId)
+                .bindTimestamp(cursorCreatedAt)
+                .bindTimestamp(cursorCreatedAt)
+                .bindTimestamp(cursorCreatedAt)
+                .bindNullableUUID(cursorId)
+                .bindInt(limit);
 
             List<UserRelationRow> list = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    UserEntity user = mapUser(rs);
-                    Instant relCreatedAt = mapInstant(rs, "relation_created_at");
-                    list.add(new UserRelationRow(user, relCreatedAt));
+                    list.add(new UserRelationRow(mapUser(rs), mapInstant(rs, "relation_created_at"),
+                        rs.getBoolean("is_following"), rs.getBoolean("follows_you")));
                 }
             }
             return list;
@@ -513,25 +672,9 @@ public class UserRepository {
         }
     }
 
-    /**
-     * Checks if either user has blocked the other (in either direction).
-     */
     public boolean isBlockedEitherDirection(UUID userId1, UUID userId2) throws SQLException {
-        if (userId1 == null || userId2 == null) return false;
-        String sql = """
-            SELECT 1 FROM user_relations
-            WHERE type = 'BLOCK'
-              AND ((source_user_id = ? AND target_user_id = ?) OR (source_user_id = ? AND target_user_id = ?))
-        """;
-        try (Connection conn = DatabaseConfig.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setObject(1, userId1);
-            stmt.setObject(2, userId2);
-            stmt.setObject(3, userId2);
-            stmt.setObject(4, userId1);
-            try (ResultSet rs = stmt.executeQuery()) {
-                return rs.next();
-            }
+        try (Connection conn = DatabaseConfig.getConnection()) {
+            return Blocks.between(conn, userId1, userId2);
         }
     }
 

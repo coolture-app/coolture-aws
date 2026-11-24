@@ -1,0 +1,222 @@
+package com.coolture;
+
+import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.LambdaLogger;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
+import com.atlassian.oai.validator.OpenApiInteractionValidator;
+import com.atlassian.oai.validator.model.Request;
+import com.atlassian.oai.validator.model.SimpleResponse;
+import com.atlassian.oai.validator.report.ValidationReport;
+import com.coolture.common.dto.EventLocationDto;
+import com.coolture.common.dto.FriendStancesDto;
+import com.coolture.common.dto.GeoPointDto;
+import com.coolture.common.dto.MediaResourceDto;
+import com.coolture.common.dto.PostCardDto;
+import com.coolture.common.dto.PostDetailDto;
+import com.coolture.common.dto.PostLinkDto;
+import com.coolture.common.dto.PostMediaDto;
+import com.coolture.common.dto.PostFriendsDto;
+import com.coolture.common.dto.PostMarkDto;
+import com.coolture.common.dto.UserSummaryDto;
+import com.coolture.common.dto.enums.MediaPurpose;
+import com.coolture.common.dto.enums.MediaStatus;
+import com.coolture.common.dto.enums.ParticipationType;
+import com.coolture.common.dto.enums.PostStatus;
+import com.coolture.common.dto.enums.PostType;
+import com.coolture.common.dto.enums.ReactionType;
+import com.coolture.common.response.ApiResponse;
+import com.coolture.common.pagination.CursorPage;
+import com.coolture.common.pagination.PaginationMeta;
+import com.coolture.feed.FeedMode;
+import com.coolture.feed.FeedPage;
+import com.coolture.feed.FeedService;
+import com.coolture.services.PostReadService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/** Sends handler responses through contracts/feed-api.yaml, which also fails on undocumented fields. */
+class ContractTest {
+
+    private static final OpenApiInteractionValidator VALIDATOR = OpenApiInteractionValidator
+        .createForSpecificationUrl(Path.of("contracts", "feed-api.yaml").toUri().toString())
+        // Merges PostDetail's allOf, so PostCard's additionalProperties: false allows media and kinds.
+        .withResolveCombinators(true)
+        .build();
+
+    private final PostReadService posts = mock(PostReadService.class);
+    private final FeedService feed = mock(FeedService.class);
+    private final Context context = mock(Context.class);
+    private final PostReadHandler handler = new PostReadHandler(posts, feed);
+
+    @BeforeEach
+    void stubLambdaLogger() {
+        lenient().when(context.getLogger()).thenReturn(mock(LambdaLogger.class));
+    }
+
+    private static PostCardDto minimalCard() {
+        return new PostCardDto(
+            UUID.randomUUID(),
+            new UserSummaryDto(UUID.randomUUID(), "anna", null, null, null, Instant.now(), 0, 0),
+            null, "Koncert", null, null, null, Instant.now(), null, false,
+            0, 0, 0, 0, 0, PostType.ONLINE, PostStatus.ACTIVE,
+            Instant.now(), null, null, null, null, null, null, null
+        );
+    }
+
+    private static PostCardDto fullCard() {
+        Instant now = Instant.now();
+        MediaResourceDto avatar = new MediaResourceDto(UUID.randomUUID(), MediaPurpose.PROFILE_IMAGE_THUMBNAIL, "image/png", 10L,
+            MediaStatus.ATTACHED, "http://localhost/a.png", now, null);
+        MediaResourceDto cover = new MediaResourceDto(UUID.randomUUID(), MediaPurpose.EVENT_MEDIA, "image/png", 10L,
+            MediaStatus.ATTACHED, "http://localhost/c.png", now, null, 1080, 1350);
+        EventLocationDto location = new EventLocationDto("PL", "Hala", "1", "Długa", "80-001", "Gdańsk",
+            new GeoPointDto(54.35, 18.65));
+        return new PostCardDto(
+            UUID.randomUUID(),
+            new UserSummaryDto(UUID.randomUUID(), "anna", "Anna", "Nowak", avatar, now, 1, 2),
+            location, "Koncert", "Opis", "https://example.com",
+            List.of(new PostLinkDto("https://bilety.example", "Bilety"), new PostLinkDto("https://example.org", null)), now, now.plusSeconds(60), false,
+            1, 3, 2, 1, 4, PostType.OFFLINE, PostStatus.EDITED,
+            now, now, null, cover, ReactionType.LIKE, ParticipationType.TAKES_PART, List.of(cover), friendStances()
+        );
+    }
+
+    private static FriendStancesDto friendStances() {
+        FriendStancesDto.Friend jan = new FriendStancesDto.Friend(UUID.randomUUID(), "jan", "Jan", "Kowalski", "http://localhost/j.png");
+        FriendStancesDto.Friend ola = new FriendStancesDto.Friend(UUID.randomUUID(), "ola", null, null, null);
+        return new FriendStancesDto(new FriendStancesDto.Group(3, List.of(jan, ola)), null);
+    }
+
+    private ValidationReport responseReport(String path, APIGatewayV2HTTPEvent event) {
+        APIGatewayV2HTTPResponse response = handler.handleRequest(event, context);
+        return VALIDATOR.validateResponse(path, Request.Method.GET, SimpleResponse.Builder
+            .status(response.getStatusCode())
+            .withContentType("application/json")
+            .withBody(response.getBody())
+            .build());
+    }
+
+    private static void assertMatches(ValidationReport report) {
+        assertFalse(report.hasErrors(), report.toString());
+    }
+
+    @Test
+    void feed_firstPageWithMore_matches() throws Exception {
+        when(feed.getFeed(any(), any()))
+            .thenReturn(new FeedPage(FeedMode.RANKED, List.of(minimalCard(), fullCard()), new PaginationMeta(2, true, "abc")));
+
+        assertMatches(responseReport("/feed", ApiGatewayEvents.get("/feed", Map.of("limit", "2", "latitude", "54.35", "longitude", "18.65"))));
+    }
+
+    @Test
+    void feed_laterPageInUpcomingMode_matches() throws Exception {
+        when(feed.getFeed(any(), any()))
+            .thenReturn(new FeedPage(FeedMode.UPCOMING, List.of(), new PaginationMeta(20, false, null)));
+
+        assertMatches(responseReport("/feed", ApiGatewayEvents.get("/feed", Map.of("cursor", "abc"))));
+    }
+
+    @Test
+    void posts_firstPageWithMore_matches() throws Exception {
+        when(posts.getFeed(any(), any()))
+            .thenReturn(new CursorPage<>(List.of(minimalCard(), fullCard()), new PaginationMeta(2, true, "abc")));
+
+        assertMatches(responseReport("/posts", ApiGatewayEvents.get("/posts", Map.of("limit", "2"))));
+    }
+
+    @Test
+    void posts_lastPageWithCursor_matches() throws Exception {
+        when(posts.getFeed(any(), any()))
+            .thenReturn(new CursorPage<>(List.of(minimalCard()), new PaginationMeta(20, false, null)));
+
+        assertMatches(responseReport("/posts", ApiGatewayEvents.get("/posts", Map.of("cursor", "abc", "sortBy", "POPULAR"))));
+    }
+
+    @Test
+    void postMap_matches() throws Exception {
+        when(posts.getMapMarks(any(), any(), any(), anyBoolean())).thenReturn(List.of(
+            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"),
+                Instant.parse("2026-12-01T21:00:00Z"), false, "http://localhost/c.png", "Koncert w hali.", 3, 7, 5, new GeoPointDto(54.35, 18.65),
+                "Hala", "Gdańsk", "concerts", List.of("concerts", "stage"), ReactionType.LIKE, ParticipationType.INTERESTED, friendStances()),
+            new PostMarkDto(UUID.randomUUID(), "Koncert", Instant.parse("2026-12-01T18:00:00Z"), null, false, null, null, 0, 0, 0, new GeoPointDto(54.35, 18.65), null, null, null, null, null, null, null)));
+
+        assertMatches(responseReport("/posts/map", ApiGatewayEvents.get("/posts/map", Map.of(
+            "leftUpper.latitude", "54.5", "leftUpper.longitude", "18.0",
+            "rightBottom.latitude", "54.0", "rightBottom.longitude", "19.0"))));
+    }
+
+    @Test
+    void postFriends_matches() throws Exception {
+        UUID postId = UUID.randomUUID();
+        String path = "/posts/" + postId + "/friends";
+        FriendStancesDto stances = friendStances();
+        when(posts.getFriends(any(), any()))
+            .thenReturn(new PostFriendsDto(stances.going().people(), List.of()))
+            .thenThrow(new IllegalArgumentException("Post not found: " + postId));
+
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(path, null, Map.of("postId", postId.toString()));
+
+        assertMatches(responseReport(path, event));
+        assertEquals(404, handler.handleRequest(event, context).getStatusCode());
+        assertMatches(responseReport(path, event));
+        assertTrue(bodyReport(path, "{\"going\":[]}").hasErrors());
+    }
+
+    @Test
+    void postDetail_matches() throws Exception {
+        UUID postId = UUID.randomUUID();
+        String path = "/posts/" + postId;
+        PostCardDto card = fullCard();
+        PostDetailDto minimal = detail(minimalCard(), List.of(), null);
+        when(posts.getById(any(), any()))
+            .thenReturn(detail(card, List.of(new PostMediaDto(card.coverMedia(), 0)), List.of("concert")))
+            .thenReturn(minimal)
+            .thenThrow(new IllegalArgumentException("Post not found: " + postId));
+
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get(path, null, Map.of("id", postId.toString()));
+
+        assertMatches(responseReport(path, event));
+        assertMatches(responseReport(path, event));
+        assertEquals(404, handler.handleRequest(event, context).getStatusCode());
+        String body = ApiResponse.ok(minimal).getBody();
+        assertTrue(bodyReport(path, "{\"surprise\":1," + body.substring(1)).hasErrors());
+    }
+
+    private static PostDetailDto detail(PostCardDto card, List<PostMediaDto> media, List<String> kinds) {
+        return new PostDetailDto(card.id(), card.author(), card.location(), card.title(), card.description(),
+            card.eventUrl(), card.links(), card.startsAt(), card.endsAt(), card.openEnded(), card.positiveReactionCount(),
+            card.participantCount(), card.interestedCount(), card.goingCount(), card.commentsCount(), card.type(),
+            card.status(), kinds, card.createdAt(), card.lastModifiedAt(), card.deletedAt(), card.coverMedia(), media,
+            card.myReaction(), card.myParticipation(), card.friendStances());
+    }
+
+    @Test
+    void errorResponse_matches() {
+        APIGatewayV2HTTPEvent event = ApiGatewayEvents.get("/posts", Map.of("limit", "abc"));
+
+        assertEquals(400, handler.handleRequest(event, context).getStatusCode());
+        assertMatches(responseReport("/posts", event));
+    }
+
+    private static ValidationReport bodyReport(String path, String body) {
+        return VALIDATOR.validateResponse(path, Request.Method.GET,
+            SimpleResponse.Builder.ok().withContentType("application/json").withBody(body).build());
+    }
+}

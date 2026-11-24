@@ -1,22 +1,25 @@
 package com.coolture;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
-import com.coolture.common.dto.CountryCodeDto;
 import com.coolture.common.dto.PostDetailDto;
 import com.coolture.common.json.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.coolture.common.response.ApiResponse;
 import com.coolture.common.security.SecurityContext;
-import com.coolture.dto.CountryCodeRequest;
 import com.coolture.dto.CreatePostRequest;
 import com.coolture.dto.ParticipationRequest;
 import com.coolture.dto.ReactionRequest;
 import com.coolture.dto.UpdatePostRequest;
+import com.coolture.repository.DuplicateEventException;
 import com.coolture.services.PostWriteService;
 
 public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
@@ -37,28 +40,6 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
             String method = event.getRequestContext().getHttp().getMethod();
             String path = event.getRawPath() != null ? event.getRawPath() : "";
             UUID userId = SecurityContext.getUserId(event);
-
-            if (path.contains("/admin")) {
-                SecurityContext.requireAdmin(event);
-            }
-
-            if (path.contains("/event-locations")) {
-                return switch (method) {
-                    case "POST" -> createLocation(event);
-                    case "PATCH" -> updateLocation(event);
-                    case "DELETE" -> deleteLocation(event);
-                    default -> ApiResponse.badRequest("Unsupported HTTP method: " + method);
-                };
-            }
-
-            if (path.contains("/dicts/admin/country-codes")) {
-                return switch (method) {
-                    case "POST" -> createCountryCode(event);
-                    case "PUT" -> updateCountryCode(event);
-                    case "DELETE" -> deleteCountryCode(event);
-                    default -> ApiResponse.badRequest("Unsupported HTTP method: " + method);
-                };
-            }
 
             if (path.contains("/reaction")) {
                 return switch (method) {
@@ -83,6 +64,8 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
                 default -> ApiResponse.badRequest("Unsupported HTTP method: " + method);
             };
 
+        } catch (DuplicateEventException e) {
+            return ApiResponse.conflict(e.getMessage());
         } catch (SecurityException e) {
             String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
             if (msg.contains("authenticat")) {
@@ -109,32 +92,13 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
     private APIGatewayV2HTTPResponse updatePost(APIGatewayV2HTTPEvent event, UUID userId) throws Exception {
         UUID postId = extractPostId(event);
         UpdatePostRequest request = JsonUtils.fromJsonAndValidate(event.getBody(), UpdatePostRequest.class);
-        PostDetailDto updated = service.updatePost(postId, userId, request);
+        PostDetailDto updated = service.updatePost(postId, userId, request, sentAsNull(event.getBody()));
         return ApiResponse.ok(updated);
     }
 
     private APIGatewayV2HTTPResponse deletePost(APIGatewayV2HTTPEvent event, UUID userId) throws Exception {
         UUID postId = extractPostId(event);
         service.deletePost(postId, userId);
-        return ApiResponse.noContent();
-    }
-
-    private APIGatewayV2HTTPResponse createLocation(APIGatewayV2HTTPEvent event) throws Exception {
-        var req = JsonUtils.fromJsonAndValidate(event.getBody(), com.coolture.common.dto.EventLocationDto.class);
-        var created = service.createLocation(req);
-        return ApiResponse.created(created);
-    }
-
-    private APIGatewayV2HTTPResponse updateLocation(APIGatewayV2HTTPEvent event) throws Exception {
-        UUID locationId = extractPostId(event);
-        var req = JsonUtils.fromJsonAndValidate(event.getBody(), com.coolture.common.dto.EventLocationDto.class);
-        var updated = service.updateLocation(locationId, req);
-        return ApiResponse.ok(updated);
-    }
-
-    private APIGatewayV2HTTPResponse deleteLocation(APIGatewayV2HTTPEvent event) throws Exception {
-        UUID locationId = extractPostId(event);
-        service.deleteLocation(locationId);
         return ApiResponse.noContent();
     }
 
@@ -164,38 +128,15 @@ public class PostWriteHandler implements RequestHandler<APIGatewayV2HTTPEvent, A
         return ApiResponse.noContent();
     }
 
-    private APIGatewayV2HTTPResponse createCountryCode(APIGatewayV2HTTPEvent event) throws Exception {
-        CountryCodeRequest request = JsonUtils.fromJsonAndValidate(event.getBody(), CountryCodeRequest.class);
-        CountryCodeDto created = service.createCountryCode(request);
-        return ApiResponse.created(created);
-    }
-
-    private APIGatewayV2HTTPResponse updateCountryCode(APIGatewayV2HTTPEvent event) throws Exception {
-        String code = extractCountryCode(event);
-        CountryCodeRequest request = JsonUtils.fromJsonAndValidate(event.getBody(), CountryCodeRequest.class);
-        CountryCodeDto updated = service.updateCountryCode(code, request);
-        return ApiResponse.ok(updated);
-    }
-
-    private APIGatewayV2HTTPResponse deleteCountryCode(APIGatewayV2HTTPEvent event) throws Exception {
-        String code = extractCountryCode(event);
-        service.deleteCountryCode(code);
-        return ApiResponse.noContent();
-    }
-
-    private String extractCountryCode(APIGatewayV2HTTPEvent event) {
-        Map<String, String> pathParams = event.getPathParameters();
-        if (pathParams != null && pathParams.containsKey("code")) {
-            return pathParams.get("code");
+    /** The removable fields the body sets to null, which a record can't tell from fields left out. */
+    private static Set<String> sentAsNull(String body) {
+        JsonNode tree = body == null || body.isBlank() ? null : JsonUtils.readTree(body);
+        if (tree == null || !tree.isObject()) {
+            return Set.of();
         }
-        String rawPath = event.getRawPath();
-        if (rawPath != null) {
-            int idx = rawPath.lastIndexOf('/');
-            if (idx != -1 && idx < rawPath.length() - 1) {
-                return rawPath.substring(idx + 1);
-            }
-        }
-        throw new IllegalArgumentException("Missing country code path parameter");
+        return Stream.of("endsAt", "eventUrl", "links")
+            .filter(field -> tree.has(field) && tree.get(field).isNull())
+            .collect(Collectors.toUnmodifiableSet());
     }
 
     private UUID extractPostId(APIGatewayV2HTTPEvent event) {
