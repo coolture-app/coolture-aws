@@ -81,9 +81,11 @@ stream in `/coolture/<env>/scraper` too, so anyone can read it with `aws logs ta
 
 ```bash
 make deploy-scraper
-aws cognito-idp admin-create-user --user-pool-id <pool> --username <bot email> --message-action SUPPRESS     --user-attributes Name=email,Value=<bot email> Name=email_verified,Value=true
+aws cognito-idp admin-create-user --user-pool-id <pool> --username <bot email> --message-action SUPPRESS \
+    --user-attributes Name=email,Value=<bot email> Name=email_verified,Value=true
 aws cognito-idp admin-set-user-password --user-pool-id <pool> --username <bot email> --password '<password>' --permanent
-aws secretsmanager put-secret-value --secret-id coolture-dev-scraper-bot     --secret-string '{"username": "<bot email>", "password": "<password>"}'
+aws secretsmanager put-secret-value --secret-id coolture-dev-scraper-bot \
+    --secret-string '{"username": "<bot email>", "password": "<password>"}'
 aws iam create-access-key --user-name <user>     # for the computer; pass it on through a password manager
 ```
 
@@ -91,7 +93,8 @@ aws iam create-access-key --user-name <user>     # for the computer; pass it on 
 print `HTTP/2 200` and no `cf-mitigated`:
 
 ```bash
-curl -s -o /dev/null -D - -A 'coolture-scraper/1.0 (+https://github.com/coolture-app/coolture-aws)'     "https://www.trojmiasto.pl/imprezy/dzien,$(date -d tomorrow +%F)?strona=0" | grep -iE '^HTTP|cf-mitigated'
+curl -s -o /dev/null -D - -A 'coolture-scraper/1.0 (+https://github.com/coolture-app/coolture-aws)' \
+    "https://www.trojmiasto.pl/imprezy/dzien,$(date -d tomorrow +%F)?strona=0" | grep -iE '^HTTP|cf-mitigated'
 ```
 
 SigV4 refuses a clock more than 5 minutes off, so `timedatectl` must say it's synchronised. A laptop needs
@@ -124,8 +127,7 @@ region = eu-north-1
 
 The service checks out `SCRAPER_BRANCH` from `/etc/coolture-scraper.env` before each run, and installs the
 requirements again when they change, so the computer needs no updates by hand, except the units: copy them again after
-they change here. Only `scraper/` is checked out, and the
-service sees no other folder of the computer. `systemctl list-timers coolture-scraper` shows the next run;
+they change here. Only `scraper/` is checked out, and the service sees no other folder of the computer. `systemctl list-timers coolture-scraper` shows the next run;
 `sudo systemctl disable --now coolture-scraper.timer` stops it, and deactivating the access key stops it from anywhere.
 
 **From any computer, once:** `make scrape-aws`, with `AWS_PROFILE` set to a profile that assumes the runner role. The
