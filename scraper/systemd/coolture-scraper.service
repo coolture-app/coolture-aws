@@ -1,0 +1,31 @@
+[Unit]
+Description=Coolture scraper: imports new trojmiasto.pl events into AWS
+Documentation=https://github.com/coolture-app/coolture-aws/blob/main/scraper/README.md
+Wants=network-online.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+User=coolture
+Group=coolture
+EnvironmentFile=/etc/coolture-scraper.env
+WorkingDirectory=/var/lib/coolture-scraper/coolture-aws
+# Each run takes the branch's latest commit, so the scraper matches the API that branch deploys.
+ExecStartPre=/usr/bin/git fetch --quiet --depth 1 origin ${SCRAPER_BRANCH}
+ExecStartPre=/usr/bin/git checkout --quiet --force --detach FETCH_HEAD
+ExecStart=/bin/sh scraper/systemd/run.sh
+# remote.py stops itself after 50 minutes; this ends a run that hangs.
+TimeoutStartSec=58min
+
+# Code from a public repository, so it sees nothing of the computer but its own folder.
+StateDirectory=coolture-scraper
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

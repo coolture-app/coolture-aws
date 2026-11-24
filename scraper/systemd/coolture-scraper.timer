@@ -1,0 +1,13 @@
+[Unit]
+Description=Start the Coolture scraper at a random moment in every 6 hours
+
+[Timer]
+OnCalendar=00/6:00
+# Never at the same times, so the site doesn't see a timer. A run still going when the next one is due makes that one
+# skip, so two never overlap.
+RandomizedDelaySec=5h30min
+# A run missed while the computer was off happens once, after it starts.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
