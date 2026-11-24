@@ -1,7 +1,7 @@
 import io
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 import requests
@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 
 import remote
 from api import ApiError
-from remote import RUN_LIMIT, CloudWatchLog, S3Ledger, SignedForLambdaUrl, bot_id_token, stack_outputs, stream_name
+from remote import RUN_LIMIT, CloudWatchLog, S3Ledger, SignedForLambdaUrl, bot_id_token, stack_outputs
 
 
 class FakeS3:
@@ -123,25 +123,25 @@ class FakeLogs:
         self.batches.append([event['message'] for event in logEvents])
 
 
+class FakeSecrets:
+    SECRETS = {'bot-secret': json.dumps({'username': 'coolture_bot', 'password': 'pw'}), 'origin-secret': 'origin'}
+
+    def get_secret_value(self, SecretId):
+        return {'SecretString': self.SECRETS[SecretId]}
+
+
 class FakeSession:
     region_name = 'eu-north-1'
     last = None
 
-    def __init__(self, region_name=None):
-        self.s3 = FakeS3()
-        self.cloudformation = FakeCloudFormation()
-        self.logs = FakeLogs()
+    def __init__(self):
+        self.clients = {'cloudformation': FakeCloudFormation(), 'logs': FakeLogs(), 's3': FakeS3(),
+                        'secretsmanager': FakeSecrets(),
+                        'cognito-idp': FakeCognito({'AuthenticationResult': {'IdToken': 'id-token'}})}
         FakeSession.last = self
 
     def client(self, name):
-        if name == 'secretsmanager':
-            return type('Secrets', (), {'get_secret_value': staticmethod(lambda SecretId: {'SecretString': {
-                'bot-secret': json.dumps({'username': 'coolture_bot', 'password': 'pw'}),
-                'origin-secret': 'origin',
-            }[SecretId]})})()
-        if name == 'cognito-idp':
-            return FakeCognito({'AuthenticationResult': {'IdToken': 'id-token'}})
-        return {'cloudformation': self.cloudformation, 'logs': self.logs}.get(name, self.s3)
+        return self.clients[name]
 
     def get_credentials(self):
         return Credentials('AKID', 'SECRET')
@@ -151,40 +151,40 @@ def test_settings_are_the_stacks_outputs():
     assert stack_outputs(FakeCloudFormation(), 'coolture-scraper-dev') == OUTPUTS
 
 
+STARTED = datetime(2026, 11, 25, 3, 14, 7, tzinfo=timezone.utc)
+
+
 @pytest.fixture
 def aws(monkeypatch):
     monkeypatch.setattr(remote.boto3.session, 'Session', FakeSession)
+    monkeypatch.setattr(remote, 'utc_now', lambda: STARTED)
     monkeypatch.delenv('SCRAPER_ENV', raising=False)
 
 
 def test_a_run_goes_through_the_api_as_the_bot_and_stops_in_time(monkeypatch, aws):
     calls = []
     monkeypatch.setattr(remote, 'run', lambda *args, stop_at: (calls.append((args, stop_at)), args[3].update(listed=1)))
-    before = remote.utc_now()
 
     assert remote.main() == 0
 
-    after = remote.utc_now()
     (site, geocoder, api, stats, limit), stop_at = calls[0]
-    assert FakeSession.last.cloudformation.asked == ['coolture-scraper-dev']
+    assert FakeSession.last.clients['cloudformation'].asked == ['coolture-scraper-dev']
     assert api._session.headers['Authorization'] == 'Bearer id-token'
     assert api._session.headers['X-Origin-Verify'] == 'origin'
     assert isinstance(geocoder._session.auth, SignedForLambdaUrl)
     assert limit is None
     pauses = [site._pause() for _ in range(20)]
     assert all(1.0 <= pause <= 3.0 for pause in pauses) and len(set(pauses)) > 1
-    assert before + RUN_LIMIT <= stop_at <= after + RUN_LIMIT
+    assert stop_at == STARTED + RUN_LIMIT
 
 
-def test_the_runs_log_goes_to_its_own_stream(monkeypatch, aws):
+def test_the_runs_log_goes_to_its_own_stream_named_by_its_start(monkeypatch, aws):
     monkeypatch.setattr(remote, 'run', lambda *args, stop_at: args[3].update(listed=2))
 
     remote.main()
 
-    logs = FakeSession.last.logs
-    [(group, stream)] = logs.streams
-    assert group == '/coolture/dev/scraper'
-    assert stream.startswith(remote.utc_now().strftime('%Y-%m-%d'))
+    logs = FakeSession.last.clients['logs']
+    assert logs.streams == [('/coolture/dev/scraper', '2026-11-25T03-14-07Z')]
     assert logs.batches[-1][-1] == "INFO Done: {'listed': 2}"
     assert not any(isinstance(handler, CloudWatchLog) for handler in logging.getLogger().handlers)
 
@@ -205,45 +205,33 @@ def test_a_stopped_run_says_why_in_one_line_and_fails(monkeypatch, aws, caplog):
 
     assert remote.main() == 1
     assert 'Run stopped: POST /posts returned 500' in caplog.text
-    assert "INFO Done: {'listed': 3}" in FakeSession.last.logs.batches[-1]
-
-
-def test_the_stream_is_named_by_the_runs_start():
-    assert stream_name(datetime(2026, 11, 25, 3, 14, 7, tzinfo=timezone.utc)) == '2026-11-25T03-14-07Z'
+    assert "INFO Done: {'listed': 3}" in FakeSession.last.clients['logs'].batches[-1]
 
 
 def record(message):
     return logging.LogRecord('scraper', logging.INFO, __file__, 1, message, None, None)
 
 
-def test_the_log_is_sent_in_batches_and_at_the_end():
+def test_the_log_is_sent_once_when_the_run_ends():
     logs = FakeLogs()
     handler = CloudWatchLog(logs, 'group', 'stream')
 
-    for number in range(CloudWatchLog.BATCH + 1):
-        handler.emit(record(f'line {number}'))
-    handler.close()
-
-    assert [len(batch) for batch in logs.batches] == [CloudWatchLog.BATCH, 1]
-
-
-def test_the_log_is_sent_every_30_seconds_on_a_slow_run():
-    now = [datetime(2026, 11, 25, tzinfo=timezone.utc)]
-    logs = FakeLogs()
-    handler = CloudWatchLog(logs, 'group', 'stream', clock=lambda: now[0])
-
     handler.emit(record('first'))
-    now[0] += timedelta(seconds=CloudWatchLog.EVERY_S)
     handler.emit(record('second'))
+    assert logs.streams == [('group', 'stream')] and logs.batches == []
+
+    handler.close()
 
     assert logs.batches == [['INFO first', 'INFO second']]
 
 
 @pytest.mark.parametrize('failing', ['create_log_stream', 'put_log_events'])
 def test_a_log_that_cannot_be_sent_never_stops_the_run(capsys, failing):
-    handler = CloudWatchLog(FakeLogs(fail=failing), 'group', 'stream')
+    logs = FakeLogs(fail=failing)
+    handler = CloudWatchLog(logs, 'group', 'stream')
 
     handler.emit(record('line'))
     handler.close()
 
     assert 'The log could not go to CloudWatch' in capsys.readouterr().err
+    assert logs.batches == []
