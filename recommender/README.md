@@ -38,7 +38,14 @@ post-write (create or edit)
 - `{"action":"embed-posts"}` embeds every post that isn't deleted and has no vector of the current model or one older than its
   last edit, newest first, and derives its kinds. It stops in time to answer before the function's timeout, with
   `{"posts": <embedded>, "left": <still without one>}`. `scripts/deploy.sh` sends `embed-interests`, `derive-kinds`
-  and `embed-posts` after deploying this stack, and `embed-posts` again while posts are left.
+  and `embed-posts` after deploying this stack, and `embed-posts` again while posts are left. If one fails, the deploy
+  goes on and exits non-zero at the end.
+- `{"action":"reconcile"}` does the three in one, and on AWS a schedule sends it every 6 hours. It repairs what a deploy
+  didn't do: the deploy couldn't invoke the worker, or only a migration changed the interests or kinds (that deploys
+  only the backend). It derives every post's kinds again only when a kind's vector changed, and otherwise only those of
+  posts with a current vector and no kinds, so a change to `kinds.py` alone still needs `derive-kinds`. It answers
+  `{"interests": n, "kinds": n, "derived": n, "posts": n, "left": n}`. With nothing to do it takes under a second and
+  doesn't load the model.
 - **Kinds of event.** After storing a post's vector the worker writes its kinds to `rec_post_kinds`, best first: the
   closest kind, plus the second within a margin, with Dla dzieci kept or added only when close enough to the best other
   kind (`post-embedding/src/kinds.py`, with its constants). Until every kind has a vector, posts get none.
@@ -80,8 +87,9 @@ way: locally, clear `interest_embeddings` and `event_kind_embeddings` and run `m
 `make embed-posts ALL=1`. There's no equivalent on AWS yet.
 
 Locally: `make build-embeddings embed-interests embed-posts`. On AWS, `make deploy-embeddings` deploys the stack and sends
-the actions. When the deploy can't invoke the worker, it warns, and someone allowed to invoke it sends the actions by hand, `embed-posts`
-again while `left` is above 0 (replace `dev` for another environment):
+the actions. When the deploy can't invoke the worker, the run fails at the end. The next `reconcile` repairs it within
+6 hours, or someone allowed to invoke the worker sends the actions by hand, `embed-posts` again while `left` is above 0
+(replace `dev` for another environment):
 
 ```bash
 for action in embed-interests derive-kinds embed-posts; do

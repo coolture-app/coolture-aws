@@ -4,6 +4,8 @@ set -euo pipefail
 ALL_STACKS=(auth backend embeddings geocoder scraper waf frontend)
 WAF_REGION=us-east-1
 WORKER_MAX_ATTEMPTS=3
+# The worker actions that failed. The deploy goes on and fails at the end, so a green run means they ran.
+WORKER_FAILURES=()
 
 usage() {
     cat <<EOF
@@ -262,7 +264,7 @@ invoke_worker() {
         [[ "$function_error" == None ]] && return 0
     done
     WORKER_REPLY=""
-    # A warning, not a stop: the actions can be sent again, and waf and frontend still need deploying.
+    WORKER_FAILURES+=("$action")
     echo "Warning: the worker's $action failed: $consequence. Send {\"action\":\"$action\"} to coolture-$ENVIRONMENT-post-embedding again by hand." >&2
 }
 
@@ -276,6 +278,7 @@ embed_posts() {
         [[ "${left:-0}" -gt 0 ]] || return 0
         if [[ "${embedded:-0}" -eq 0 ]]; then
             echo "Warning: embed-posts embedded nothing and $left post(s) are left. Check the worker's log, then send {\"action\":\"embed-posts\"} again by hand." >&2
+            WORKER_FAILURES+=(embed-posts)
             return 0
         fi
     done
@@ -321,4 +324,8 @@ echo
 echo "Deployed [${requested[*]}] to '$ENVIRONMENT'."
 if wants frontend; then
     echo "Frontend: $(frontend_url)"
+fi
+if [[ ${#WORKER_FAILURES[@]} -gt 0 ]]; then
+    echo "Error: the embedding worker's ${WORKER_FAILURES[*]} failed (warnings above). The worker's reconcile schedule repeats them within 6 hours, except re-deriving the kinds of posts that already have some, which only derive-kinds does." >&2
+    exit 1
 fi
