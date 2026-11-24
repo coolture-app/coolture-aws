@@ -3,7 +3,7 @@
 Imports the events of the next 30 days on [trojmiasto.pl](https://www.trojmiasto.pl/imprezy/dni,30dni.html) as posts of a bot
 account. It reads one listing per day (`/imprezy/dzien,2026-11-28`), because the 30-day listing stops at 400 events, and
 an event on several days comes once. It writes only through the public API, as `POST /posts`, like any other client, because Aurora isn't
-reachable from outside the VPC. It runs from a developer's machine, or on AWS as a scheduled Lambda (see below).
+reachable from outside the VPC. It runs from a developer's machine, or on a timer on an always-on computer that imports into AWS (see below).
 
 Each post has a real title and description, the event's photos, its address, and coordinates, which the feed's proximity signal needs. An event held
 in a place is sent as `OFFLINE`. If it can't be located it's left out, because an `ONLINE` post would get no proximity signal.
@@ -64,31 +64,75 @@ the next run goes on from there. A post that timed out counts as `rejected`, bec
 The post's `eventUrl` is the event's page, and the API refuses a second post with the same one from the same author
 with a `409`, so a retried post or two runs at once can't import an event twice. The app never shows `eventUrl`.
 
-## On a schedule
+## On an always-on computer
 
-On AWS the scraper runs by itself, as the Lambda `coolture-<env>-scraper` (`aws/scraper.yaml`, entry point
-`lambda_handler.py`). EventBridge Scheduler starts it at a random moment in every 6 hours, so it never asks the site at
-the same times, and the site's pages are a random 1 to 3 seconds apart. Each run imports what the app doesn't have yet,
-by event URL, and stops in time for the Lambda's 15 minutes. The next run goes on from there, so the first runs catch up
-on the whole listing over a few hours.
+trojmiasto.pl's Cloudflare answers every request from AWS's addresses with a challenge (`403`, `cf-mitigated:
+challenge`), so the scraper can't run on AWS. A computer outside it runs `remote.py` on a systemd timer instead, at a
+random moment in every 6 hours, with the site's pages a random 1 to 3 seconds apart. Each run imports what the app
+doesn't have yet, by event URL, and stops after 50 minutes, as the bot's token lasts an hour. The
+next run goes on from there, so the first ones catch up on the whole listing.
 
-It runs outside the VPC, because it needs the site. So it calls API Gateway directly with the `X-Origin-Verify` secret
-instead of going through CloudFront, signs in as the bot with Cognito's admin flow, asks the geocoder through a small
-proxy Lambda inside the VPC, and keeps its ledger in S3 instead of a local file.
+It calls API Gateway directly with the `X-Origin-Verify` secret, signs in as the bot with Cognito's admin flow, asks
+the geocoder through a small proxy Lambda inside the VPC, and keeps its ledger in S3. It takes all of that from the
+outputs of the scraper stack (`aws/scraper.yaml`), through the stack's runner role. Each run's log goes to its own
+stream in `/coolture/<env>/scraper` too, so anyone can read it with `aws logs tail /coolture/dev/scraper`.
 
-To turn it on, once `make deploy-scraper` has run (`<pool>` is the auth stack's `UserPoolId` output):
+**On AWS, once** (`<pool>` is the auth stack's `UserPoolId` output, `<user>` the scraper stack's `RunnerUserName`):
 
 ```bash
+make deploy-scraper
 aws cognito-idp admin-create-user --user-pool-id <pool> --username <bot email> --message-action SUPPRESS \
     --user-attributes Name=email,Value=<bot email> Name=email_verified,Value=true
 aws cognito-idp admin-set-user-password --user-pool-id <pool> --username <bot email> --password '<password>' --permanent
 aws secretsmanager put-secret-value --secret-id coolture-dev-scraper-bot \
     --secret-string '{"username": "<bot email>", "password": "<password>"}'
-SCRAPER_SCHEDULE=true SCRAPER_END_DATE=2027-06-30T00:00:00Z make deploy-scraper   # the end date is optional
-make scrape-aws                                                                   # one run now, to check it
+aws iam create-access-key --user-name <user>     # for the computer; pass it on through a password manager
 ```
 
-`SCRAPER_SCHEDULE=false make deploy-scraper` turns it off. The schedule stops by itself at `SCRAPER_END_DATE`.
+**On the computer** (Ubuntu with systemd, git and curl). First check that the site lets its address in. This must
+print `HTTP/2 200` and no `cf-mitigated`:
+
+```bash
+curl -s -o /dev/null -D - -A 'coolture-scraper/1.0 (+https://github.com/coolture-app/coolture-aws)' \
+    "https://www.trojmiasto.pl/imprezy/dzien,$(date -d tomorrow +%F)?strona=0" | grep -iE '^HTTP|cf-mitigated'
+```
+
+SigV4 refuses a clock more than 5 minutes off, so `timedatectl` must say it's synchronised. A laptop needs
+`HandleLidSwitch=ignore` in `/etc/systemd/logind.conf`, or it sleeps when closed. Then, as an admin:
+
+```bash
+sudo useradd --system --create-home --home-dir /var/lib/coolture-scraper --shell /usr/sbin/nologin coolture
+sudo -u coolture -H sh -c 'curl -fsS https://mise.run | sh &&
+    git clone --quiet --depth 1 --filter=blob:none --sparse https://github.com/coolture-app/coolture-aws.git ~/coolture-aws &&
+    cd ~/coolture-aws && git sparse-checkout set scraper &&
+    ~/.local/bin/mise trust && ~/.local/bin/mise install python &&
+    "$(~/.local/bin/mise where python)/bin/python3" -m venv ~/venv && mkdir -m 700 ~/.aws'
+sudoedit -u coolture /var/lib/coolture-scraper/.aws/credentials   # the access key, as [coolture-scraper-user]
+sudoedit -u coolture /var/lib/coolture-scraper/.aws/config        # the profile below
+sudo chmod 600 /var/lib/coolture-scraper/.aws/credentials
+cd /var/lib/coolture-scraper/coolture-aws/scraper/systemd
+sudo cp coolture-scraper.service coolture-scraper.timer /etc/systemd/system/
+sudo cp coolture-scraper.env /etc/coolture-scraper.env   # set the branch there
+sudo systemctl daemon-reload
+sudo systemctl start coolture-scraper            # one run now; journalctl -u coolture-scraper -f
+sudo systemctl enable --now coolture-scraper.timer
+```
+
+```ini
+[profile coolture-scraper]
+role_arn = <the scraper stack's RunnerRoleArn>
+source_profile = coolture-scraper-user
+region = eu-north-1
+```
+
+The service checks out `SCRAPER_BRANCH` from `/etc/coolture-scraper.env` before each run, and installs the
+requirements again when they change, so the computer needs no updates by hand, except the units: copy them again after
+they change here. Only `scraper/` is checked out, and the service sees no other folder of the computer. `systemctl list-timers coolture-scraper` shows the next run;
+`sudo systemctl disable --now coolture-scraper.timer` stops it, and deactivating the access key stops it from anywhere.
+
+**From any computer, once:** `make scrape-aws`, with `AWS_PROFILE` set to a profile that assumes the runner role. The
+team's developer role may assume it, so the profile's `source_profile` can be your own. The site must let your address
+in, as above.
 
 ## Configuration
 
@@ -143,7 +187,7 @@ The page's text becomes plain paragraphs, separated by a blank line:
 - **Imported posts aren't updated.** A later change on the site isn't picked up, and posts imported before photos have none.
 - **An event with no hour starts at 12:00.**
 - **A deleted post stays out only where the ledger saw it.** `GET /posts` never returns a deleted post, so the scraper keeps the URLs it has seen: on a
-  machine in `scraper/.imported-<api host>.txt`, which git ignores, on AWS in the Lambda's S3 bucket. That covers one ledger per environment: a post deleted
+  machine in `scraper/.imported-<api host>.txt`, which git ignores, for AWS in the scraper stack's S3 bucket. That covers one ledger per environment: a post deleted
   before it was seen can't be known. A database with none of the bot's posts counts as a new one, so the file starts over after `make reset-db`.
 - **Tests use invented text, and imports stay in the team's own environments.** The site's terms don't settle whether its text can be reused, so don't commit scraped text, or
   import it anywhere people outside the team can see it, until we have the site's permission.

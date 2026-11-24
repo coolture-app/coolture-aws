@@ -124,7 +124,7 @@ changed.
 ```
 aws/
 ├── auth.yaml, backend.yaml,    # Stacks: Cognito; API Gateway, Lambdas, Aurora, media bucket, embedding queues;
-│   geocoder.yaml,              #   the Photon instance and its proxy; the scheduled scraper;
+│   geocoder.yaml,              #   the Photon instance and its proxy; what the scraper uses from outside AWS;
 │   scraper.yaml,               #   SSR Lambda, static files, CloudFront; the IP allow-list in front of CloudFront
 │   frontend.yaml, waf.yaml
 └── lambdas/
@@ -133,7 +133,7 @@ aws/
     ├── user/                   # Accounts, profiles, the home area, interests, follows, blocks. Holds its contract
     ├── comment-read/, comment-write/, media/
     ├── authorizer/             # Python: lets a route take a Cognito token optionally
-    ├── geo-proxy/              # Python: lets the scheduled scraper, outside the VPC, ask Photon inside it
+    ├── geo-proxy/              # Python: lets the scraper, outside AWS, ask Photon inside the VPC
     ├── migrations/             # Python: applies migrations/ on AWS, and locally in make up
     └── ssr/                    # Server rendering of the frontend
 api/                            # Request flows (Hurl) and the seed users' ids
@@ -215,10 +215,11 @@ To refresh the data, run `make geo-index` and `make geo-publish` again, every fe
 loads a new index on reboot and keeps its ARN, which the VPC origin points at. To remove the geocoder, remove what
 imports it first: `make delete-scraper` and `NO_GEOCODER=1 make deploy-frontend`, then `make delete-geocoder`.
 
-A proxy Lambda inside the VPC, behind an IAM-signed function URL, lets the scheduled scraper ask Photon too.
+A proxy Lambda inside the VPC, behind an IAM-signed function URL, lets the scraper ask Photon too.
 
-### The scheduled scraper
+### The scraper on AWS
 
-`make deploy-scraper` adds a Lambda outside the VPC that imports new trojmiasto.pl events as the bot at a random moment
-in every 6 hours, with its schedule off until the bot has a password. Turning it on is in
-[scraper/README.md](scraper/README.md#on-a-schedule).
+trojmiasto.pl refuses AWS's addresses, so the scraper imports into AWS from an always-on computer outside it, on a
+timer. `make deploy-scraper` adds what it uses there: a runner role and the user the computer signs in as, the bot's
+secret, the ledger and a log group. Setting up the computer is in
+[scraper/README.md](scraper/README.md#on-an-always-on-computer).

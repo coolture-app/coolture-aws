@@ -252,7 +252,7 @@ deploy-embeddings: ## Deploy the embedding worker and PageRank to AWS (dev, arm6
 deploy-geocoder: ## Deploy the geocoder instance and its CloudFront VPC origin (dev) - ~$7/month, needs an internet gateway in the VPC
 	@scripts/deploy.sh $(STACK_ENV) geocoder
 
-deploy-scraper: ## Deploy the scheduled scraper (dev; SCRAPER_SCHEDULE=true to run it, SCRAPER_END_DATE to stop it) - needs auth, backend, geocoder
+deploy-scraper: ## Deploy what the scraper uses from outside AWS: runner role and user, bot secret, ledger, log (dev) - needs auth, backend, geocoder
 	@scripts/deploy.sh $(STACK_ENV) scraper
 
 deploy-waf: ## Deploy CloudFront WAF web ACL + allowed-IP sets to us-east-1 (dev) - ~$8/month + $0.60 per 1M requests
@@ -264,9 +264,8 @@ deploy-frontend: ## Build ../coolture-frontend and deploy SSR + static assets to
 geo-publish: ## Upload the geocoder and its index to AWS and restart the instance (ENV=dev), after make geo-index and deploy-geocoder
 	@scripts/geo-publish.sh $(STACK_ENV)
 
-scrape-aws: ## Start one run of the scheduled scraper on AWS now, without waiting for the schedule (ENV=dev)
-	@aws lambda invoke --function-name coolture-$(STACK_ENV)-scraper --invocation-type Event --cli-binary-format raw-in-base64-out \
-		--payload '{}' /dev/null > /dev/null && echo "Started. Its log: aws logs tail /aws/lambda/coolture-$(STACK_ENV)-scraper --follow"
+scrape-aws: $(VENV_PY) ## Import new events into AWS from this computer, as the bot (ENV=dev; AWS_PROFILE assumes the runner role)
+	@SCRAPER_ENV=$(STACK_ENV) $(VENV_PY) scraper/remote.py
 
 # The WAF's stack is in us-east-1, the others in the default region.
 status: ## Show every stack's status on AWS (ENV=dev)
@@ -288,7 +287,7 @@ delete-embeddings: ## Delete the embedding worker and PageRank stack
 delete-backend: ## Delete backend stack (delete embeddings first: it imports backend outputs)
 	@sam delete --stack-name coolture-backend-$(STACK_ENV) --no-prompts
 
-delete-scraper: ## Delete the scheduled scraper's stack (its ledger bucket must be emptied first)
+delete-scraper: ## Delete the scraper's stack (its ledger bucket must be emptied first)
 	@sam delete --stack-name coolture-scraper-$(STACK_ENV) --no-prompts
 
 delete-geocoder: ## Delete geocoder stack (first delete-scraper, and NO_GEOCODER=1 make deploy-frontend: both import it)

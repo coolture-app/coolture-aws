@@ -1,4 +1,4 @@
-"""Lets the scheduled scraper, which runs outside the VPC to reach trojmiasto.pl, ask the geocoder in the VPC.
+"""Lets the scraper, which runs outside AWS, ask the geocoder in the VPC.
 
 Its function URL takes only IAM-signed requests, and only Photon's read paths go through.
 """

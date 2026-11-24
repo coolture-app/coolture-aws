@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from collections import Counter
 from collections.abc import Callable, Iterable
@@ -129,8 +130,35 @@ def import_item(item: ListingItem, site: Site, geocoder: Geocoder, sink: Cooltur
 
 def _failed_request(error: requests.RequestException) -> str:
     where = f'{error.request.method} {error.request.url}' if error.request else 'a request'
-    outcome = error.response.status_code if error.response is not None else type(error).__name__
-    return f'{where} failed: {outcome}'
+    response = error.response
+    if response is None:
+        return f'{where} failed: {type(error).__name__}'
+    details = ''
+    # Cloudflare's challenge or block, which trojmiasto.pl sends to some addresses, shows in these.
+    if 400 <= response.status_code < 500:
+        title = re.search(r'<title>([^<]*)', response.text or '')
+        found = {'server': response.headers.get('server'), 'cf-mitigated': response.headers.get('cf-mitigated'),
+                 'title': title.group(1).strip() if title else None}
+        details = ''.join(f' {name}={value!r}' for name, value in found.items() if value)
+    return f'{where} failed: {response.status_code}{details}'
+
+
+def run_and_report(stats: Counter, work: Callable[[], None]) -> int:
+    """Everything imported before an error stays, and the next run goes on from there."""
+    try:
+        work()
+    except (ApiError, GeocoderUnavailable) as error:
+        log.error('Run stopped: %s', error)
+        return 1
+    except requests.RequestException as error:
+        log.error('Run stopped: %s', _failed_request(error))
+        return 1
+    except Exception:
+        log.exception('Run stopped')
+        return 1
+    finally:
+        log.info('Done: %s', dict(stats))
+    return exit_code(stats)
 
 
 def main() -> int:
@@ -144,32 +172,24 @@ def main() -> int:
     if args.snapshot and args.limit:
         parser.error('--limit would leave a snapshot unfinished; it takes the whole listing')
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', stream=sys.stderr)
-    # A retry that fails ends in the one error below, so its warnings would only repeat it.
+    # A retry that fails ends in one "Run stopped" line, so its warnings would only repeat it.
     logging.getLogger('urllib3').setLevel(logging.ERROR)
 
     stats: Counter = Counter()
-    try:
+
+    def work() -> None:
         geocoder = Geocoder(http_session(retry_timeouts=True), os.getenv('SCRAPER_GEOCODER_URL', DEFAULT_URL))
         if args.snapshot:
             snapshot = Snapshot(args.snapshot)
             run(Site(http_session(retry_timeouts=True)), geocoder, snapshot, stats, None)
             snapshot.mark_complete()
-            return exit_code(stats)
+            return
         sink = DryRun() if args.dry_run else CooltureApi(
             http_session(), http_session(), os.getenv('SCRAPER_API_URL', DEFAULT_API_URL),
             token=os.getenv('SCRAPER_API_TOKEN'), user_id=os.getenv('SCRAPER_USER_ID'))
         run(Site(http_session(retry_timeouts=True)), geocoder, sink, stats, args.limit)
-    # Everything imported so far stays after an error, and the next run goes on from there.
-    except (ApiError, GeocoderUnavailable) as error:
-        log.error('Run stopped: %s', error)
-        return 1
-    except requests.RequestException as error:
-        log.error('Run stopped: %s', _failed_request(error))
-        return 1
-    finally:
-        log.info('Done: %s', dict(stats))
 
-    return exit_code(stats)
+    return run_and_report(stats, work)
 
 
 def exit_code(stats: Counter) -> int:
